@@ -18,6 +18,10 @@ default: &default
   # For details on connection pooling, see Rails configuration guide
   # https://guides.rubyonrails.org/configuring.html#database-pooling
   max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  username: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_USERNAME") { "postgres" } %>
+  password: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_PASSWORD") { "password" } %>
+  host: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_HOST") { "localhost" } %>
+  port: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_PORT") { 5432 } %>
 
 
 development:
