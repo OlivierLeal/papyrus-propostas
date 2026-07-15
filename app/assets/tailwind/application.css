@@ -1,1 +1,75 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@300;400;500;600&display=swap");
 @import "tailwindcss";
+@plugin "daisyui";
+
+/*
+  Tema "papyrus" — extraído de https://somospapyrus.com.br/
+  (wp-content/themes/somos-papyrus/style.css)
+
+  primary   #00445F  azul petróleo escuro — header, footer, texto de corpo do site
+  secondary #FFB92C  dourado/âmbar — ponta clara do gradiente dos botões de CTA
+  accent    #007EFF  azul vivo — links/ícones de destaque
+  success   #05C988  verde — usado em detalhes pontuais (tom "ambiental")
+  warning   #F49C00  laranja — ponta escura do gradiente dos botões de CTA
+  error     #990000  vermelho — usado 1x no site (estado de erro)
+  base-200  #DFEEE9  verde-menta claro — fundo de seções claras do site
+  base-300  #D9D9D9  cinza claro — bordas/divisores
+  neutral   #676969  cinza médio — bordas de inputs, texto secundário
+*/
+@plugin "daisyui/theme" {
+  name: "papyrus";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #dfeee9;
+  --color-base-300: #d9d9d9;
+  --color-base-content: #00445f;
+
+  --color-primary: #00445f;
+  --color-primary-content: #ffffff;
+
+  --color-secondary: #ffb92c;
+  --color-secondary-content: #00445f;
+
+  --color-accent: #007eff;
+  --color-accent-content: #ffffff;
+
+  --color-neutral: #676969;
+  --color-neutral-content: #ffffff;
+
+  --color-info: #007eff;
+  --color-info-content: #ffffff;
+
+  --color-success: #05c988;
+  --color-success-content: #00341f;
+
+  --color-warning: #f49c00;
+  --color-warning-content: #331f00;
+
+  --color-error: #990000;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/*
+  Tipografia do site: 'Geometos' (títulos) + 'Metropolis' (corpo, pesos 300/500/600).
+  São fontes proprietárias hospedadas no domínio da Papyrus — não devem ser
+  linkadas diretamente nem redistribuídas sem confirmar a licença com eles.
+  Pedir os arquivos .woff2 originais e trocar os @font-face abaixo quando
+  tiver os arquivos; até lá, usamos substitutas gratuitas com "personalidade"
+  parecida (Poppins = geométrica como a Geometos; Inter = limpa como a Metropolis).
+*/
+@theme {
+  --font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="papyrus">
   <head>
     <title><%= content_for(:title) || "Papyrus Propostas" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -23,7 +23,7 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
+  <body class="bg-base-100 text-base-content font-sans">
     <main class="container mx-auto mt-28 px-5 flex">
       <%= yield %>
     </main>
