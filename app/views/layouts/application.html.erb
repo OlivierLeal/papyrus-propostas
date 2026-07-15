@@ -23,9 +23,15 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body class="bg-base-100 text-base-content font-sans">
-    <main class="container mx-auto mt-28 px-5 flex">
-      <%= yield %>
+  <body class="font-sans">
+    <main>
+      <% if current_user %>
+        <%= render layout: 'shared/layout' do %>
+          <%= yield %>
+        <% end %>
+      <% else %>
+        <%= yield %>
+      <% end %>
     </main>
   </body>
 </html>

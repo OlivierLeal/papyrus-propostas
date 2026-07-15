@@ -1,0 +1,8 @@
+<div class="dock md:hidden">
+  <%= link_to users_path, class: current_page?(users_path) ? "dock-active" : nil do %>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
+      <path d="<%= ApplicationHelper::ICON_USUARIOS %>" />
+    </svg>
+    <span class="dock-label">Usuários</span>
+  <% end %>
+</div>

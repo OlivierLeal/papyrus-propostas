@@ -1,0 +1,11 @@
+<div class="flex h-screen">
+  <%= render 'shared/nav' %>
+
+  <%= render 'shared/menu' %>
+
+  <div class="flex-1 overflow-auto pt-[8vh] ml-0 md:ml-[13vw] bg-base-200/40 pb-16 md:pb-0">
+    <%= yield %>
+  </div>
+
+  <%= render 'shared/mobile_dock' %>
+</div>
