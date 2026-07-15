@@ -1,0 +1,19 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  name: MyString
+  role: MyString
+  rate_office: 9.99
+  rate_field: 9.99
+  registration: MyString
+  specialties: MyString
+  active: false
+
+two:
+  name: MyString
+  role: MyString
+  rate_office: 9.99
+  rate_field: 9.99
+  registration: MyString
+  specialties: MyString
+  active: false
