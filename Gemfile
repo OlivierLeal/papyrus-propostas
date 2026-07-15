@@ -42,6 +42,15 @@ gem "thruster", require: false
 # Use Active Storage variants [https://guides.rubyonrails.org/active_storage_overview.html#transforming-images]
 gem "image_processing", "~> 1.2"
 
+# The activerecord-postgis-adapter provides access to features of the PostGIS geospatial database from ActiveRecord.  [https://github.com/rgeo/activerecord-postgis-adapter]
+gem "activerecord-postgis-adapter"
+
+# RGeo is a geospatial data library for Ruby. [https://github.com/rgeo/rgeo]
+gem "rgeo", ">= 3.1"
+
+# Proj4 extension for rgeo. [https://github.com/rgeo/rgeo-proj4]
+gem "rgeo-proj4", ">= 5.0"
+
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
