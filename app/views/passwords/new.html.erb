@@ -1,17 +1,20 @@
-<div class="mx-auto md:w-2/3 w-full">
-  <% if alert = flash[:alert] %>
-    <p class="py-2 px-3 bg-red-50 mb-5 text-red-500 font-medium rounded-lg inline-block" id="alert"><%= alert %></p>
-  <% end %>
+<h1 class="font-display text-2xl font-bold text-base-content mb-2">Esqueceu sua senha?</h1>
+<p class="text-sm text-base-content/60 mb-6">Informe seu e-mail e enviaremos instruções para redefinir sua senha.</p>
 
-  <h1 class="font-bold text-4xl">Forgot your password?</h1>
+<% if alert = flash[:alert] %>
+  <div class="alert alert-error alert-soft mb-4"><%= alert %></div>
+<% end %>
 
-  <%= form_with url: passwords_path, class: "contents" do |form| %>
-    <div class="my-5">
-      <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "username", placeholder: "Enter your email address", value: params[:email_address], class: "block shadow-sm rounded-md border border-gray-400 focus:outline-solid focus:outline-blue-600 px-3 py-2 mt-2 w-full" %>
-    </div>
+<%= form_with url: passwords_path, class: "flex flex-col gap-4" do |form| %>
+  <label class="form-control">
+    <div class="label"><span class="label-text">E-mail</span></div>
+    <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "username",
+          placeholder: "seuemail@papyrus.com", value: params[:email_address], class: "input input-bordered w-full" %>
+  </label>
 
-    <div class="inline">
-      <%= form.submit "Email reset instructions", class: "w-full sm:w-auto text-center rounded-lg px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white inline-block font-medium cursor-pointer" %>
-    </div>
-  <% end %>
-</div>
+  <%= form.submit "Enviar instruções", class: "btn btn-primary w-full mt-2" %>
+
+  <div class="text-center text-sm">
+    <%= link_to "Voltar para o login", new_session_path, class: "link link-primary" %>
+  </div>
+<% end %>

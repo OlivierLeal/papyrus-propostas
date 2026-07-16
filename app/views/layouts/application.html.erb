@@ -30,7 +30,9 @@
           <%= yield %>
         <% end %>
       <% else %>
-        <%= yield %>
+        <%= render layout: "shared/auth_layout" do %>
+          <%= yield %>
+        <% end %>
       <% end %>
     </main>
   </body>
