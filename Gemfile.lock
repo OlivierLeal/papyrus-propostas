@@ -470,6 +470,7 @@ DEPENDENCIES
   rgeo-proj4 (>= 5.0)
   rubocop-rails-omakase
   ruby_llm
+  rubyzip
   selenium-webdriver
   solid_cable
   solid_cache

@@ -1,0 +1,56 @@
+<div class="p-8">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Propostas</h1>
+      <p class="text-sm text-base-content/60"><%= pluralize(@conversations.size, "proposta", plural: "propostas") %></p>
+    </div>
+
+    <%= link_to new_conversation_path, class: "btn btn-primary btn-sm gap-1.5" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+      </svg>
+      Nova Proposta
+    <% end %>
+  </div>
+
+  <% if notice %>
+    <div class="alert alert-success alert-soft mb-4"><%= notice %></div>
+  <% end %>
+
+  <% if @conversations.empty? %>
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-8 text-center text-base-content/60">
+      Nenhuma proposta ainda. <%= link_to "Crie a primeira", new_conversation_path, class: "link link-primary" %>.
+    </div>
+  <% else %>
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm overflow-hidden">
+      <table class="table">
+        <thead>
+          <tr class="bg-base-200/60 text-xs uppercase tracking-wide text-base-content/50">
+            <th class="font-semibold">Cliente</th>
+            <th class="font-semibold">Tipo de Estudo</th>
+            <th class="font-semibold">Status</th>
+            <th class="font-semibold">Criada em</th>
+            <th class="w-1"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-base-300">
+          <% @conversations.each do |conversation| %>
+            <tr class="hover:bg-base-200/40 transition-colors cursor-pointer" onclick="window.location='<%= conversation_path(conversation) %>'">
+              <td class="font-medium text-base-content"><%= conversation.client_name %></td>
+              <td class="text-base-content/70"><%= conversation.study_type.name %></td>
+              <td>
+                <span class="badge badge-soft <%= conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
+                  <%= conversation.status_label %>
+                </span>
+              </td>
+              <td class="text-base-content/70"><%= conversation.created_at.strftime("%d/%m/%Y") %></td>
+              <td>
+                <%= link_to "Abrir", conversation_path(conversation), class: "btn btn-ghost btn-sm" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</div>

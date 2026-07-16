@@ -3,6 +3,15 @@ Rails.application.routes.draw do
   resources :passwords, param: :token
   resources :users, except: :show
 
+  resources :conversations, only: %i[index new create show] do
+    member do
+      post :confirm
+      delete "attachments/:attachment_id", action: :remove_attachment, as: :remove_attachment
+    end
+
+    resources :messages, only: :create
+  end
+
   namespace :settings, path: "configuracoes" do
     root to: "dashboard#index"
     resources :study_types, except: :show
@@ -21,5 +30,5 @@ Rails.application.routes.draw do
   # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
 
   # Defines the root path route ("/")
-  root "home#index"
+  root "conversations#index"
 end

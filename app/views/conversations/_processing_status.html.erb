@@ -1,0 +1,42 @@
+<div id="processing_status" class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+  <% if conversation.status == "processing" %>
+    <h2 class="font-semibold text-base-content mb-4">Processando...</h2>
+
+    <ul class="flex flex-col gap-3">
+      <% (Conversation::PROCESSING_STEPS + [ "summary" ]).each do |step| %>
+        <% step_status = conversation.processing_step_status(step) %>
+        <li class="flex items-center gap-3">
+          <% case step_status
+             when "done" %>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5 text-success shrink-0">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+            </svg>
+          <% when "failed" %>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5 text-error shrink-0">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" />
+            </svg>
+          <% when "skipped" %>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5 text-base-content/30 shrink-0">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM7 9.25a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5H7Z" clip-rule="evenodd" />
+            </svg>
+          <% when "running", "queued" %>
+            <span class="loading loading-spinner loading-sm text-primary shrink-0"></span>
+          <% else %>
+            <span class="size-4 rounded-full border-2 border-base-300 shrink-0"></span>
+          <% end %>
+
+          <span class="text-sm <%= step_status == "skipped" ? "text-base-content/40" : "text-base-content" %>">
+            <%= conversation.processing_step_label(step) %>
+            <% if step_status == "skipped" %>
+              <span class="text-xs">(não aplicável)</span>
+            <% elsif step_status == "failed" %>
+              <span class="text-xs text-error">(falhou)</span>
+            <% end %>
+          </span>
+        </li>
+      <% end %>
+    </ul>
+  <% else %>
+    <div class="alert alert-success alert-soft">Processamento concluído.</div>
+  <% end %>
+</div>

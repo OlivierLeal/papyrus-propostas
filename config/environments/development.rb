@@ -64,6 +64,10 @@ Rails.application.configure do
   # Highlight code that enqueued background job in logs.
   config.active_job.verbose_enqueue_logs = true
 
+  # Usar Solid Queue também em desenvolvimento (sem isso, cai no adapter :async
+  # em thread, que causa corrida em updates concorrentes como o processing_steps).
+  config.active_job.queue_adapter = :solid_queue
+
   # Highlight code that triggered redirect in logs.
   config.action_dispatch.verbose_redirect_logs = true
 

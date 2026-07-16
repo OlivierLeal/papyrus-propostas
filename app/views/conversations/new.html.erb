@@ -1,0 +1,68 @@
+<div class="p-8 max-w-2xl mx-auto">
+  <div class="flex items-center gap-3 mb-6">
+    <%= link_to conversations_path, class: "btn btn-ghost btn-sm btn-square", title: "Voltar" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+      </svg>
+    <% end %>
+    <h1 class="font-display text-2xl font-bold text-base-content">Nova Proposta</h1>
+  </div>
+
+  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+    <%= form_with model: @conversation, url: conversations_path, class: "flex flex-col gap-4", multipart: true do |form| %>
+      <% if @conversation.errors.any? %>
+        <div class="alert alert-error alert-soft">
+          <ul class="list-disc list-inside">
+            <% @conversation.errors.full_messages.each do |message| %>
+              <li><%= message %></li>
+            <% end %>
+          </ul>
+        </div>
+      <% end %>
+
+      <label class="form-control">
+        <div class="label"><span class="label-text">Nome do cliente</span></div>
+        <%= form.text_field :client_name, class: "input input-bordered w-full", required: true %>
+      </label>
+
+      <label class="form-control">
+        <div class="label"><span class="label-text">Tipo de estudo</span></div>
+        <%= form.collection_select :study_type_id, @study_types, :id, :name,
+              { prompt: "Selecione..." }, class: "select select-bordered w-full", required: true %>
+      </label>
+
+      <div class="divider my-0"></div>
+
+      <label class="form-control">
+        <div class="label">
+          <span class="label-text">Termo de Referência (TR)</span>
+          <span class="label-text-alt">PDF ou DOCX · opcional</span>
+        </div>
+        <input type="file" name="tr" accept=".pdf,.doc,.docx" class="file-input file-input-bordered w-full">
+      </label>
+
+      <label class="form-control">
+        <div class="label">
+          <span class="label-text">Área de estudo (KMZ)</span>
+          <span class="label-text-alt">.kmz ou .kml · opcional</span>
+        </div>
+        <input type="file" name="kmz" accept=".kmz,.kml" class="file-input file-input-bordered w-full">
+      </label>
+
+      <label class="form-control">
+        <div class="label">
+          <span class="label-text">Documentos complementares</span>
+          <span class="label-text-alt">opcional</span>
+        </div>
+        <input type="file" name="complementary_documents[]" multiple
+               accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+               class="file-input file-input-bordered w-full">
+      </label>
+
+      <div class="flex items-center gap-2 mt-2">
+        <%= form.submit "Enviar arquivos", class: "btn btn-primary" %>
+        <%= link_to "Cancelar", conversations_path, class: "btn btn-ghost" %>
+      </div>
+    <% end %>
+  </div>
+</div>

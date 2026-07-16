@@ -51,6 +51,9 @@ gem "rgeo", ">= 3.1"
 # Proj4 extension for rgeo. [https://github.com/rgeo/rgeo-proj4]
 gem "rgeo-proj4", ">= 5.0"
 
+# Reads/writes zip files — usado para descompactar KMZ (KML zipado). [https://github.com/rubyzip/rubyzip]
+gem "rubyzip", require: "zip"
+
 # Unified interface to LLM providers (Claude, OpenAI, Gemini...) with Rails ActiveRecord integration. [https://github.com/crmne/ruby_llm]
 gem "ruby_llm"
 

@@ -1,0 +1,28 @@
+<% is_user = message.role == "user" %>
+<% parsed_content = message.content.present? ? (JSON.parse(message.content) rescue nil) : nil %>
+<div class="flex flex-col gap-1 <%= is_user ? "items-end" : "items-start" %>">
+  <span class="text-xs text-base-content/40 px-1"><%= is_user ? "Você" : "IA" %></span>
+
+  <div class="max-w-[85%] rounded-box px-4 py-3 text-sm <%= is_user ? "bg-primary text-primary-content" : "bg-base-200 text-base-content" %>">
+    <% if parsed_content.is_a?(Hash) %>
+      <dl class="flex flex-col gap-2">
+        <% parsed_content.each do |key, value| %>
+          <div>
+            <dt class="font-semibold text-xs uppercase tracking-wide opacity-70"><%= key.to_s.tr("_", " ") %></dt>
+            <dd>
+              <% if value.is_a?(Array) %>
+                <%= value.any? ? value.join(", ") : "—" %>
+              <% else %>
+                <%= value.presence || "—" %>
+              <% end %>
+            </dd>
+          </div>
+        <% end %>
+      </dl>
+    <% elsif message.content.present? %>
+      <%= simple_format(message.content) %>
+    <% else %>
+      <span class="italic opacity-60">(sem conteúdo)</span>
+    <% end %>
+  </div>
+</div>

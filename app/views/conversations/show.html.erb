@@ -1,0 +1,77 @@
+<div class="p-8 mx-auto">
+  <div class="flex items-center gap-3 mb-6">
+    <%= link_to conversations_path, class: "btn btn-ghost btn-sm btn-square", title: "Voltar" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+      </svg>
+    <% end %>
+    <div>
+      <h1 class="font-display text-2xl font-bold text-base-content leading-tight"><%= @conversation.client_name %></h1>
+      <p class="text-sm text-base-content/60"><%= @conversation.study_type.name %></p>
+    </div>
+    <span class="badge badge-soft ml-auto <%= @conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
+      <%= @conversation.status_label %>
+    </span>
+  </div>
+
+  <% if notice %>
+    <div class="alert alert-success alert-soft mb-4"><%= notice %></div>
+  <% end %>
+
+  <% if alert %>
+    <div class="alert alert-error alert-soft mb-4"><%= alert %></div>
+  <% end %>
+
+  <% if @conversation.status == "setup" %>
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+      <h2 class="font-semibold text-base-content mb-4">Arquivos enviados</h2>
+
+      <ul class="flex flex-col gap-2 mb-6">
+        <% @setup_message.attachments.each do |attachment| %>
+          <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
+                <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+              </svg>
+              <span class="truncate text-sm text-base-content"><%= attachment.filename %></span>
+              <span class="text-xs text-base-content/50 shrink-0">(<%= number_to_human_size(attachment.byte_size) %>)</span>
+            </div>
+
+            <%= button_to remove_attachment_conversation_path(@conversation, attachment_id: attachment.id), method: :delete,
+                  class: "btn btn-ghost btn-xs btn-square text-error shrink-0",
+                  title: "Remover",
+                  form: { data: { turbo_confirm: "Remover #{attachment.filename}?" } } do %>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+
+      <%= button_to "Gerar Proposta", confirm_conversation_path(@conversation), class: "btn btn-primary w-full" %>
+    </div>
+  <% else %>
+    <%= turbo_stream_from @conversation %>
+
+    <%= render "processing_status", conversation: @conversation %>
+
+    <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
+      <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
+        <h2 class="font-semibold text-base-content mb-4">Conversa</h2>
+
+        <div class="flex flex-col gap-4 mb-6">
+          <% @conversation.messages.where(internal: false).order(:created_at).each do |message| %>
+            <%= render "message", message: message %>
+          <% end %>
+        </div>
+
+        <%= form_with url: conversation_messages_path(@conversation), class: "flex items-center gap-2" do |form| %>
+          <input type="text" name="content" placeholder="Peça um ajuste, faça uma pergunta..."
+                 class="input input-bordered flex-1" required>
+          <%= form.submit "Enviar", class: "btn btn-primary" %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+</div>

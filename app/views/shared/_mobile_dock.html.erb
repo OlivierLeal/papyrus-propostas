@@ -1,4 +1,11 @@
 <div class="dock md:hidden">
+  <%= link_to conversations_path, class: request.path.start_with?("/conversations") ? "dock-active" : nil do %>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
+      <path d="<%= ApplicationHelper::ICON_PROPOSTAS %>" />
+    </svg>
+    <span class="dock-label">Propostas</span>
+  <% end %>
+
   <%= link_to settings_root_path, class: request.path.start_with?("/configuracoes") ? "dock-active" : nil do %>
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
       <path d="<%= ApplicationHelper::ICON_CONFIGURACOES %>" />
