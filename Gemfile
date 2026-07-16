@@ -51,7 +51,13 @@ gem "rgeo", ">= 3.1"
 # Proj4 extension for rgeo. [https://github.com/rgeo/rgeo-proj4]
 gem "rgeo-proj4", ">= 5.0"
 
+# Unified interface to LLM providers (Claude, OpenAI, Gemini...) with Rails ActiveRecord integration. [https://github.com/crmne/ruby_llm]
+gem "ruby_llm"
+
 group :development, :test do
+  # Loads environment variables from .env into ENV [https://github.com/bkeepers/dotenv]
+  gem "dotenv-rails"
+
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
 

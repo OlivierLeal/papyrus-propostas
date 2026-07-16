@@ -53,7 +53,7 @@ Documentos complementares podem ser enviados a qualquer momento da conversa, nã
 | WebSockets | Action Cable via Solid Cable |
 | Banco de dados | PostgreSQL + extensão PostGIS |
 | Armazenamento | Active Storage (local na VPS ou bucket externo), arquivos criptografados |
-| IA / LLM | Claude API (Anthropic) — lê PDF/DOCX nativamente |
+| IA / LLM | Claude API (Anthropic) via gem `ruby_llm` — lê PDF/DOCX nativamente |
 | Geoespacial | RGeo + GDAL para parsing de KMZ/KML e cálculos; PostGIS para queries de sobreposição |
 | Mapas | Mapbox Static API — gera imagem estática do polígono para inserir no PDF |
 | Geração de PDF | Grover (Chrome headless) renderizando templates HTML/CSS no padrão Papyrus |
@@ -76,11 +76,11 @@ RS→FEPAM, RJ→INEA, SC→IMA, BA→INEMA, SP→CETESB, MG→SEMAD/SUPRAM, out
 
 ## 4. Modelo de dados (visão geral)
 
-**Núcleo da conversa:**
+**Núcleo da conversa** (via gem `ruby_llm` — `acts_as_chat`/`acts_as_message`, ver seção 12):
 - `users` — id, email, name, role, password_digest
-- `conversations` — user_id, client_name, status, study_type_id, setup_completed_at
-- `messages` — conversation_id, role, content
-- `attachments` — conversation_id, message_id, filename, file_type, storage_key
+- `conversations` — `acts_as_chat`; colunas de domínio: user_id, client_name, status, study_type_id, setup_completed_at (colunas nativas da gem: model_id)
+- `messages` — `acts_as_message`; colunas nativas da gem: conversation_id, role, content, content_raw, tokens de entrada/saída/cache. Anexos (TR, KMZ, complementares) via Active Storage nativo (`has_many_attached :attachments`), **não** uma tabela `attachments` própria — o upload na Tela de Setup é a primeira mensagem do usuário na conversa, já com os arquivos anexados
+- `tool_calls` / `models` — tabelas nativas da gem (function-calling e registro de modelos LLM com pricing/capabilities); não fazem parte do domínio, mas ficam disponíveis para uso futuro (ex.: extração estruturada de dados do TR)
 
 **Proposta e precificação:**
 - `proposals` — conversation_id, content_json, pdf_url, version, status
@@ -200,3 +200,5 @@ O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA ger
 - PostGIS: adicionar `activerecord-postgis-adapter`, habilitar extensão `postgis` via migration, ajustar `config/database.yml` para adapter `postgis`.
 - Preço é sempre calculado em Ruby, nunca pela IA — a IA só alimenta parâmetros de escopo (tipo de estudo, distância, sobreposições) que entram no motor de cálculo.
 - Layout do PDF é código (templates HTML/CSS + Grover), não gerado pela IA.
+- IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
+- Anexos de conversa (TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
