@@ -1,0 +1,6 @@
+<div role="tablist" class="tabs tabs-lift mb-6">
+  <%= link_to "Painel", settings_root_path, role: "tab", class: "tab #{"tab-active font-semibold" if current_page?(settings_root_path)}" %>
+  <%= link_to "Tipos de Estudo", settings_study_types_path, role: "tab", class: "tab #{"tab-active font-semibold" if request.path.start_with?(settings_study_types_path)}" %>
+  <%= link_to "Profissionais", settings_professionals_path, role: "tab", class: "tab #{"tab-active font-semibold" if request.path.start_with?(settings_professionals_path)}" %>
+  <%= link_to "Templates de Estudo", settings_study_templates_path, role: "tab", class: "tab #{"tab-active font-semibold" if request.path.start_with?(settings_study_templates_path)}" %>
+</div>

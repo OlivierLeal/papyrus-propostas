@@ -1,0 +1,31 @@
+<%= form_with model: [ :settings, study_type ], class: "flex flex-col gap-4" do |form| %>
+  <% if study_type.errors.any? %>
+    <div class="alert alert-error alert-soft">
+      <ul class="list-disc list-inside">
+        <% study_type.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Nome</span></div>
+    <%= form.text_field :name, class: "input input-bordered w-full", required: true %>
+  </label>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Código</span></div>
+    <%= form.text_field :code, class: "input input-bordered w-full", required: true %>
+  </label>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Descrição</span></div>
+    <%= form.text_area :description, class: "textarea textarea-bordered w-full", rows: 3 %>
+  </label>
+
+  <div class="flex items-center gap-2 mt-2">
+    <%= form.submit "Salvar", class: "btn btn-primary" %>
+    <%= link_to "Cancelar", settings_study_types_path, class: "btn btn-ghost" %>
+  </div>
+<% end %>

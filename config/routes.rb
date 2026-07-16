@@ -2,6 +2,13 @@ Rails.application.routes.draw do
   resource :session
   resources :passwords, param: :token
   resources :users, except: :show
+
+  namespace :settings, path: "configuracoes" do
+    root to: "dashboard#index"
+    resources :study_types, except: :show
+    resources :professionals, except: :show
+    resources :study_templates, except: :show
+  end
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

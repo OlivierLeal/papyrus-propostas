@@ -1,0 +1,32 @@
+<div class="p-8">
+  <h1 class="font-display text-2xl font-bold text-base-content mb-1">Configurações</h1>
+  <p class="text-sm text-base-content/60 mb-6">Parâmetros usados pelo motor de precificação e pela IA.</p>
+
+  <%= render "settings/nav" %>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <%= link_to settings_study_types_path, class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+      <div class="card-body">
+        <span class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Tipos de Estudo</span>
+        <span class="text-3xl font-bold text-primary"><%= @study_types_count %></span>
+        <span class="text-sm text-base-content/60">EIA-RIMA, RAP, PEA...</span>
+      </div>
+    <% end %>
+
+    <%= link_to settings_professionals_path, class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+      <div class="card-body">
+        <span class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Profissionais</span>
+        <span class="text-3xl font-bold text-primary"><%= @professionals_count %></span>
+        <span class="text-sm text-base-content/60">Taxas escritório e campo</span>
+      </div>
+    <% end %>
+
+    <%= link_to settings_study_templates_path, class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+      <div class="card-body">
+        <span class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Templates de Estudo</span>
+        <span class="text-3xl font-bold text-primary"><%= @study_templates_count %></span>
+        <span class="text-sm text-base-content/60">Horas padrão por profissional</span>
+      </div>
+    <% end %>
+  </div>
+</div>

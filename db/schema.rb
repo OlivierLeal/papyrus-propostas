@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_15_195639) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_104336) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -37,6 +37,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_15_195639) do
     t.index ["user_id"], name: "index_sessions_on_user_id"
   end
 
+  create_table "study_templates", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "deliverable_name", null: false
+    t.decimal "hours_field_default", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "hours_office_default", precision: 8, scale: 2, default: "0.0", null: false
+    t.bigint "professional_id", null: false
+    t.bigint "study_type_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["professional_id"], name: "index_study_templates_on_professional_id"
+    t.index ["study_type_id", "professional_id", "deliverable_name"], name: "index_study_templates_on_type_professional_deliverable", unique: true
+    t.index ["study_type_id"], name: "index_study_templates_on_study_type_id"
+  end
+
   create_table "study_types", force: :cascade do |t|
     t.string "code", null: false
     t.datetime "created_at", null: false
@@ -56,4 +69,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_15_195639) do
   end
 
   add_foreign_key "sessions", "users"
+  add_foreign_key "study_templates", "professionals"
+  add_foreign_key "study_templates", "study_types"
 end

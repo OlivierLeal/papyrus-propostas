@@ -1,0 +1,45 @@
+<%= form_with model: [ :settings, study_template ], class: "flex flex-col gap-4" do |form| %>
+  <% if study_template.errors.any? %>
+    <div class="alert alert-error alert-soft">
+      <ul class="list-disc list-inside">
+        <% study_template.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Tipo de Estudo</span></div>
+    <%= form.collection_select :study_type_id, StudyType.order(:name), :id, :name,
+          { prompt: "Selecione..." }, class: "select select-bordered w-full", required: true %>
+  </label>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Profissional</span></div>
+    <%= form.collection_select :professional_id, Professional.active.order(:name), :id, :name,
+          { prompt: "Selecione..." }, class: "select select-bordered w-full", required: true %>
+  </label>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Entregável</span></div>
+    <%= form.text_field :deliverable_name, class: "input input-bordered w-full", placeholder: "Ex.: EIA, RIMA, Fauna", required: true %>
+  </label>
+
+  <div class="grid grid-cols-2 gap-4">
+    <label class="form-control">
+      <div class="label"><span class="label-text">Horas escritório (padrão)</span></div>
+      <%= form.number_field :hours_office_default, class: "input input-bordered w-full", step: "0.5", min: 0, required: true %>
+    </label>
+
+    <label class="form-control">
+      <div class="label"><span class="label-text">Horas campo (padrão)</span></div>
+      <%= form.number_field :hours_field_default, class: "input input-bordered w-full", step: "0.5", min: 0, required: true %>
+    </label>
+  </div>
+
+  <div class="flex items-center gap-2 mt-2">
+    <%= form.submit "Salvar", class: "btn btn-primary" %>
+    <%= link_to "Cancelar", settings_study_templates_path, class: "btn btn-ghost" %>
+  </div>
+<% end %>

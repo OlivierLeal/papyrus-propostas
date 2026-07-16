@@ -1,0 +1,53 @@
+<%= form_with model: [ :settings, professional ], class: "flex flex-col gap-4" do |form| %>
+  <% if professional.errors.any? %>
+    <div class="alert alert-error alert-soft">
+      <ul class="list-disc list-inside">
+        <% professional.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Nome</span></div>
+    <%= form.text_field :name, class: "input input-bordered w-full", required: true %>
+  </label>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Cargo / formação</span></div>
+    <%= form.text_field :role, class: "input input-bordered w-full", required: true %>
+  </label>
+
+  <div class="grid grid-cols-2 gap-4">
+    <label class="form-control">
+      <div class="label"><span class="label-text">Taxa escritório/dia (R$)</span></div>
+      <%= form.number_field :rate_office, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
+    </label>
+
+    <label class="form-control">
+      <div class="label"><span class="label-text">Taxa campo/dia (R$)</span></div>
+      <%= form.number_field :rate_field, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
+    </label>
+  </div>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Registro profissional</span></div>
+    <%= form.text_field :registration, class: "input input-bordered w-full" %>
+  </label>
+
+  <label class="form-control">
+    <div class="label"><span class="label-text">Especialidades</span></div>
+    <%= form.text_field :specialties, class: "input input-bordered w-full", placeholder: "Ex.: fauna, flora, hidrologia" %>
+  </label>
+
+  <label class="label cursor-pointer justify-start gap-2">
+    <%= form.check_box :active, class: "checkbox checkbox-sm" %>
+    <span class="label-text">Ativo</span>
+  </label>
+
+  <div class="flex items-center gap-2 mt-2">
+    <%= form.submit "Salvar", class: "btn btn-primary" %>
+    <%= link_to "Cancelar", settings_professionals_path, class: "btn btn-ghost" %>
+  </div>
+<% end %>

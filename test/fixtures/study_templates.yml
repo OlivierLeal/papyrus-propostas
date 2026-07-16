@@ -1,0 +1,15 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  study_type: one
+  professional: one
+  deliverable_name: MyString
+  hours_office_default: 9.99
+  hours_field_default: 9.99
+
+two:
+  study_type: two
+  professional: two
+  deliverable_name: MyString
+  hours_office_default: 9.99
+  hours_field_default: 9.99

@@ -59,7 +59,7 @@ group :development, :test do
   gem "bundler-audit", require: false
 
   # The Bullet gem is designed to help you increase your application's performance by reducing the number of queries it makes. [https://github.com/flyerhzm/bullet]
-  gem "bullet", require: false
+  gem "bullet"
 
   # Static analysis for security vulnerabilities [https://brakemanscanner.org/]
   gem "brakeman", require: false
