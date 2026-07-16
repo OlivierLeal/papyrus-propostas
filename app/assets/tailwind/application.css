@@ -73,3 +73,29 @@
   --font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
+
+/* Notificações de flash (estilo Ant Design) — ver app/views/shared/_flash.html.erb */
+@keyframes flash-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes flash-progress {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.flash-leave {
+  opacity: 0;
+  transform: translateX(1.5rem);
+}

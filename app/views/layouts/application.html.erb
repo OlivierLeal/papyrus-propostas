@@ -24,6 +24,8 @@
   </head>
 
   <body class="font-sans">
+    <%= render "shared/flash" %>
+
     <main>
       <% if current_user %>
         <%= render layout: 'shared/layout' do %>

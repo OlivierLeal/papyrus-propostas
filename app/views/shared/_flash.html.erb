@@ -1,0 +1,31 @@
+<% if flash.any? %>
+  <div class="fixed z-[100] flex flex-col gap-3 top-[calc(8vh+1.75rem)] right-6 items-end">
+    <% flash.each do |type, message| %>
+      <% config = flash_config(type) %>
+      <div class="relative flex w-96 max-w-[90vw] items-start gap-3 overflow-hidden rounded-box border border-base-300
+                  bg-base-100 p-4 pr-9 shadow-lg transition-all duration-300 ease-in animate-[flash-slide-in_0.3s_ease-out]"
+           data-controller="flash-item"
+           data-action="mouseenter->flash-item#pause mouseleave->flash-item#resume">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+             class="size-5 shrink-0 text-<%= config[:color] %>">
+          <path fill-rule="evenodd" d="<%= ApplicationHelper::FLASH_ICON_PATHS[config[:icon]] %>" clip-rule="evenodd" />
+        </svg>
+
+        <div class="min-w-0 flex-1">
+          <p class="font-display text-sm font-semibold text-base-content"><%= config[:title] %></p>
+          <p class="mt-0.5 text-sm text-base-content/70"><%= message %></p>
+        </div>
+
+        <button type="button" class="btn btn-ghost btn-xs btn-square absolute right-1.5 top-1.5"
+                data-action="flash-item#dismiss" title="Fechar" aria-label="Fechar">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5 text-base-content/40">
+            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+          </svg>
+        </button>
+
+        <div class="absolute bottom-0 left-0 h-0.5 bg-<%= config[:color] %> animate-[flash-progress_1.5s_linear_forwards]"
+             data-flash-item-target="progress"></div>
+      </div>
+    <% end %>
+  </div>
+<% end %>

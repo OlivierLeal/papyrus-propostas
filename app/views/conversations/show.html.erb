@@ -14,14 +14,6 @@
     </span>
   </div>
 
-  <% if notice %>
-    <div class="alert alert-success alert-soft mb-4"><%= notice %></div>
-  <% end %>
-
-  <% if alert %>
-    <div class="alert alert-error alert-soft mb-4"><%= alert %></div>
-  <% end %>
-
   <% if @conversation.status == "setup" %>
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
       <h2 class="font-semibold text-base-content mb-4">Arquivos enviados</h2>

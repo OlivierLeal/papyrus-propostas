@@ -17,14 +17,6 @@
     <% end %>
   </div>
 
-  <% if notice %>
-    <div class="alert alert-success alert-soft mb-4"><%= notice %></div>
-  <% end %>
-
-  <% if alert %>
-    <div class="alert alert-error alert-soft mb-4"><%= alert %></div>
-  <% end %>
-
   <% if @study_templates.empty? %>
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-8 text-center text-base-content/60">
       Nenhum template cadastrado ainda.

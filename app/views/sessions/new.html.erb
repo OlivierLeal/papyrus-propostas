@@ -1,13 +1,5 @@
 <h1 class="font-display text-2xl font-bold text-base-content mb-6">Entrar</h1>
 
-<% if alert = flash[:alert] %>
-  <div class="alert alert-error alert-soft mb-4"><%= alert %></div>
-<% end %>
-
-<% if notice = flash[:notice] %>
-  <div class="alert alert-success alert-soft mb-4"><%= notice %></div>
-<% end %>
-
 <%= form_with url: session_url, class: "flex flex-col gap-4" do |form| %>
   <label class="form-control">
     <div class="label"><span class="label-text">E-mail</span></div>

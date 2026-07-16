@@ -1,10 +1,6 @@
 <h1 class="font-display text-2xl font-bold text-base-content mb-2">Esqueceu sua senha?</h1>
 <p class="text-sm text-base-content/60 mb-6">Informe seu e-mail e enviaremos instruções para redefinir sua senha.</p>
 
-<% if alert = flash[:alert] %>
-  <div class="alert alert-error alert-soft mb-4"><%= alert %></div>
-<% end %>
-
 <%= form_with url: passwords_path, class: "flex flex-col gap-4" do |form| %>
   <label class="form-control">
     <div class="label"><span class="label-text">E-mail</span></div>
