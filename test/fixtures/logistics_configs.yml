@@ -1,0 +1,17 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  name: MyString
+  rental_per_day: 9.99
+  fuel_price_per_liter: 9.99
+  lodging_per_day: 9.99
+  meal_per_day: 9.99
+  active: false
+
+two:
+  name: MyString
+  rental_per_day: 9.99
+  fuel_price_per_liter: 9.99
+  lodging_per_day: 9.99
+  meal_per_day: 9.99
+  active: false
