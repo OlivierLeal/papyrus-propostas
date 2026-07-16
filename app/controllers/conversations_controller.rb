@@ -109,15 +109,6 @@ class ConversationsController < ApplicationController
       file.original_filename.match?(/\.(kmz|kml)\z/i)
     end
 
-    def attach_with_kind(message, file, kind)
-      message.attachments.attach(
-        io: file,
-        filename: file.original_filename,
-        content_type: file.content_type,
-        metadata: { kind: kind }
-      )
-    end
-
     def setup_message_content(tr, kmz, complementary_documents)
       parts = []
       parts << "TR: #{tr.original_filename}" if tr.present?
