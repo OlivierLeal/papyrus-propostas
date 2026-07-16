@@ -22,35 +22,26 @@
       Nenhuma proposta ainda. <%= link_to "Crie a primeira", new_conversation_path, class: "link link-primary" %>.
     </div>
   <% else %>
-    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm overflow-hidden">
-      <table class="table">
-        <thead>
-          <tr class="bg-base-200/60 text-xs uppercase tracking-wide text-base-content/50">
-            <th class="font-semibold">Cliente</th>
-            <th class="font-semibold">Tipo de Estudo</th>
-            <th class="font-semibold">Status</th>
-            <th class="font-semibold">Criada em</th>
-            <th class="w-1"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-base-300">
-          <% @conversations.each do |conversation| %>
-            <tr class="hover:bg-base-200/40 transition-colors cursor-pointer" onclick="window.location='<%= conversation_path(conversation) %>'">
-              <td class="font-medium text-base-content"><%= conversation.client_name %></td>
-              <td class="text-base-content/70"><%= conversation.study_type.name %></td>
-              <td>
-                <span class="badge badge-soft <%= conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
-                  <%= conversation.status_label %>
-                </span>
-              </td>
-              <td class="text-base-content/70"><%= conversation.created_at.strftime("%d/%m/%Y") %></td>
-              <td>
-                <%= link_to "Abrir", conversation_path(conversation), class: "btn btn-ghost btn-sm" %>
-              </td>
-            </tr>
-          <% end %>
-        </tbody>
-      </table>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <% @conversations.each do |conversation| %>
+        <%= link_to conversation_path(conversation),
+              class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+          <div class="card-body gap-3">
+            <div class="flex items-start justify-between gap-2">
+              <h3 class="font-semibold text-base-content leading-tight"><%= conversation.client_name %></h3>
+              <span class="badge badge-soft shrink-0 <%= conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
+                <%= conversation.status_label %>
+              </span>
+            </div>
+
+            <span class="badge badge-ghost w-fit"><%= conversation.study_type.name %></span>
+
+            <div class="text-xs text-base-content/40">
+              Criada em <%= conversation.created_at.strftime("%d/%m/%Y") %>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
     </div>
   <% end %>
 </div>
