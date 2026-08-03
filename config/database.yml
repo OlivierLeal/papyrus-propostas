@@ -22,6 +22,7 @@ default: &default
   password: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_PASSWORD") { "password" } %>
   host: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_HOST") { "localhost" } %>
   port: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_PORT") { 5432 } %>
+  url: <%= ENV.fetch("PAPYRUS_PROPOSTAS_DATABASE_URL") { "postgres://#{username}:#{password}@#{host}:#{port}/#{database}" } %>
 
 
 development:
