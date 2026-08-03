@@ -12,7 +12,7 @@ Rails.application.routes.draw do
     resources :messages, only: :create
   end
 
-  namespace :settings, path: "configuracoes" do
+  namespace :settings do
     root to: "dashboard#index"
     resources :study_types, except: :show
     resources :professionals, except: :show

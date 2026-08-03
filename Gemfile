@@ -57,6 +57,9 @@ gem "rubyzip", require: "zip"
 # Unified interface to LLM providers (Claude, OpenAI, Gemini...) with Rails ActiveRecord integration. [https://github.com/crmne/ruby_llm]
 gem "ruby_llm"
 
+# Centralization of locale data collection for Ruby on Rails. [https://github.com/svenfuchs/rails-i18n]
+gem "rails-i18n"
+
 group :development, :test do
   # Loads environment variables from .env into ENV [https://github.com/bkeepers/dotenv]
   gem "dotenv-rails"

@@ -3,8 +3,8 @@
 
   <div class="mt-auto border-t border-base-300 pt-2 flex flex-col gap-1">
     <div class="flex items-center justify-between gap-1 px-2">
-      <span class="text-sm font-semibold text-base-content truncate" title="<%=  current_user.name || current_user.email_address %>">
-        <%=  current_user.name || current_user.email_address %>
+      <span class="text-sm font-semibold text-base-content truncate" title="<%= current_user.name || current_user.email_address %>">
+        <%= current_user.name || current_user.email_address %>
       </span>
       <%= link_to edit_user_path(current_user), class: "btn btn-ghost btn-square btn-sm shrink-0", title: "Configurações" do %>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">

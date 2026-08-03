@@ -27,7 +27,7 @@ module ApplicationHelper
   def render_sidebar_menu
     safe_join([
       sidebar_menu_link("Propostas", conversations_path, ICON_PROPOSTAS, active: request.path.start_with?("/conversations")),
-      sidebar_menu_link("Configurações", settings_root_path, ICON_CONFIGURACOES, active: request.path.start_with?("/configuracoes")),
+      sidebar_menu_link("Configurações", settings_root_path, ICON_CONFIGURACOES, active: request.path.start_with?("/settings")),
       sidebar_menu_link("Usuários", users_path, ICON_USUARIOS)
     ])
   end
