@@ -40,7 +40,7 @@ gem "kamal", require: false
 gem "thruster", require: false
 
 # Use Active Storage variants [https://guides.rubyonrails.org/active_storage_overview.html#transforming-images]
-gem "image_processing", "~> 1.2"
+gem "image_processing", "~> 2.0"
 
 # The activerecord-postgis-adapter provides access to features of the PostGIS geospatial database from ActiveRecord.  [https://github.com/rgeo/activerecord-postgis-adapter]
 gem "activerecord-postgis-adapter"
