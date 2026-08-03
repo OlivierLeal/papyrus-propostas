@@ -47,15 +47,18 @@ end
 
 [
   {
-    email: "admin@papyrus.com",
+    email_address: "admin@papyrus.com",
     name: "Admin",
     password: "papyrus",
     password_confirmation: "papyrus"
   }
-].each do |user|
-  User.find_or_create_by!(email: user[:email]) do |user|
-    user.name = user[:name]
-    user.password = user[:password]
-    user.password_confirmation = user[:password_confirmation]
+].each do |attrs|
+  user = User.find_or_initialize_by(email_address: attrs[:email_address])
+
+  if user.new_record?
+    user.name = attrs[:name]
+    user.password = attrs[:password]
+    user.password_confirmation = attrs[:password_confirmation]
+    user.save!
   end
 end
