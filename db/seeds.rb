@@ -44,3 +44,18 @@
     study_type.description = attrs[:description]
   end
 end
+
+[
+  {
+    email: "admin@papyrus.com",
+    name: "Admin",
+    password: "papyrus",
+    password_confirmation: "papyrus"
+  }
+].each do |user|
+  User.find_or_create_by!(email: user[:email]) do |user|
+    user.name = user[:name]
+    user.password = user[:password]
+    user.password_confirmation = user[:password_confirmation]
+  end
+end
