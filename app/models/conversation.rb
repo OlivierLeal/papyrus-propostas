@@ -56,6 +56,7 @@ class Conversation < ApplicationRecord
 
   def apply_system_instructions!
     with_instructions(SYSTEM_INSTRUCTIONS)
+    messages.where(role: "system").find_each { |message| message.update!(internal: true) }
   end
 
   def attachments_of_kind(kind)
@@ -76,10 +77,14 @@ class Conversation < ApplicationRecord
 
   # Manda uma pergunta pra IA sem expor a instrução (prompt de sistema do job/controller) na
   # conversa que o consultor vê — só a resposta da IA aparece na tela de revisão/chat.
-  def ask_internally(prompt, with: nil)
+  # hide_response: true também esconde a resposta da IA do chat (ex.: extrações em JSON que não
+  # são pra consultor ler) — por padrão só a instrução fica escondida, porque GenerateSummaryJob
+  # depende de ask_internally pra gerar o resumo que o consultor DEVE ver na tela de revisão.
+  def ask_internally(prompt, with: nil, hide_response: false)
     instruction = create_user_message(prompt, with: with)
     instruction.update!(internal: true)
     complete
+    messages.where(role: "assistant").order(:created_at).last&.update!(internal: true) if hide_response
   end
 
   # Usa o operador jsonb `||` do Postgres pra fazer o merge no banco (atômico),

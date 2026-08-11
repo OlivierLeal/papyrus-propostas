@@ -41,8 +41,8 @@ class Proposal < ApplicationRecord
     end
 
     def fetch_ai_suggestion(templates)
-      conversation.ask_internally(suggestion_prompt(templates))
-      response = conversation.messages.where(role: "assistant", internal: false).order(:created_at).last
+      conversation.ask_internally(suggestion_prompt(templates), hide_response: true)
+      response = conversation.messages.where(role: "assistant").order(:created_at).last
       Array(JSON.parse(strip_json_fences(response.content))["linhas"])
     rescue JSON::ParserError, TypeError
       []

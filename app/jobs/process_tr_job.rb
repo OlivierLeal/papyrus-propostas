@@ -30,7 +30,7 @@ class ProcessTrJob < ApplicationJob
     return conversation.mark_step!("tr", "skipped") unless attachment
 
     conversation.mark_step!("tr", "running")
-    conversation.ask_internally(PROMPT, with: attachment)
+    conversation.ask_internally(PROMPT, with: attachment, hide_response: true)
     conversation.mark_step!("tr", "done")
   rescue StandardError => e
     Rails.logger.error("ProcessTrJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
