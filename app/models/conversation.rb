@@ -25,6 +25,7 @@ class Conversation < ApplicationRecord
   belongs_to :user
   belongs_to :study_type
   has_one :geospatial_result, dependent: :destroy
+  has_one :proposal, dependent: :destroy
 
   validates :client_name, presence: true
   validates :status, inclusion: { in: STATUSES }
@@ -47,6 +48,14 @@ class Conversation < ApplicationRecord
 
   def processing_step_label(step)
     PROCESSING_STEP_LABELS.fetch(step.to_s, step.to_s)
+  end
+
+  # Manda uma pergunta pra IA sem expor a instrução (prompt de sistema do job/controller) na
+  # conversa que o consultor vê — só a resposta da IA aparece na tela de revisão/chat.
+  def ask_internally(prompt, with: nil)
+    instruction = create_user_message(prompt, with: with)
+    instruction.update!(internal: true)
+    complete
   end
 
   # Usa o operador jsonb `||` do Postgres pra fazer o merge no banco (atômico),

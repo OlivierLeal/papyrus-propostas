@@ -1,0 +1,97 @@
+class ProposalsController < ApplicationController
+  before_action :set_conversation
+  before_action :set_proposal, only: %i[ show update approve add_external_cost remove_external_cost ]
+
+  def show
+    @professionals = Professional.active.order(:name)
+  end
+
+  def create
+    unless @conversation.status == "reviewing"
+      redirect_to @conversation, alert: "A proposta só pode ser precificada depois da revisão."
+      return
+    end
+
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_with_ai_suggested_team!
+    @conversation.update!(status: "pricing")
+
+    redirect_to conversation_proposal_path(@conversation),
+      notice: "Equipe sugerida pela IA com base no TR e nos documentos complementares. Revise as horas antes de aprovar."
+  end
+
+  def update
+    if editable?
+      pricing = @proposal.project_pricing
+
+      if pricing.update(pricing_params)
+        pricing.recalculate!
+        @proposal.update!(status: "priced")
+        redirect_to conversation_proposal_path(@conversation), notice: "Preço recalculado."
+      else
+        redirect_to conversation_proposal_path(@conversation), alert: pricing.errors.full_messages.to_sentence
+      end
+    else
+      redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."
+    end
+  end
+
+  def approve
+    if editable?
+      @proposal.update!(status: "approved")
+      @conversation.update!(status: "completed")
+      redirect_to conversation_proposal_path(@conversation), notice: "Preço aprovado."
+    else
+      redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."
+    end
+  end
+
+  def add_external_cost
+    description = params[:description].to_s.strip
+    value = params[:value].to_f
+
+    if description.blank? || value <= 0
+      redirect_to conversation_proposal_path(@conversation), alert: "Informe descrição e valor do custo externo."
+      return
+    end
+
+    pricing = @proposal.project_pricing
+    pricing.external_costs = pricing.external_costs + [ { "description" => description, "value" => value } ]
+    pricing.save!
+    pricing.recalculate!
+
+    redirect_to conversation_proposal_path(@conversation), notice: "Custo externo adicionado."
+  end
+
+  def remove_external_cost
+    pricing = @proposal.project_pricing
+    costs = pricing.external_costs.dup
+    costs.delete_at(params[:index].to_i)
+    pricing.external_costs = costs
+    pricing.save!
+    pricing.recalculate!
+
+    redirect_to conversation_proposal_path(@conversation), notice: "Custo externo removido."
+  end
+
+  private
+    def set_conversation
+      @conversation = current_user.conversations.find(params[:conversation_id])
+    end
+
+    def set_proposal
+      @proposal = @conversation.proposal
+      @proposal.project_pricing.proposal_professionals.includes(:professional).load
+    end
+
+    def editable?
+      @proposal.status != "approved"
+    end
+
+    def pricing_params
+      params.require(:project_pricing).permit(
+        :bdi, :tax_multiplier, :distance_km, :logistics_days, :rental_per_day, :meal_per_day, :fuel_total,
+        proposal_professionals_attributes: %i[ id hours_office hours_field ]
+      )
+    end
+end

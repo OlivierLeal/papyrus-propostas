@@ -10,6 +10,13 @@ Rails.application.routes.draw do
     end
 
     resources :messages, only: :create
+
+    resource :proposal, only: %i[show create update] do
+      post :approve
+      post :add_external_cost
+      delete "external_costs/:index", action: :remove_external_cost, as: :remove_external_cost
+      resources :proposal_professionals, only: %i[create destroy]
+    end
   end
 
   namespace :settings do

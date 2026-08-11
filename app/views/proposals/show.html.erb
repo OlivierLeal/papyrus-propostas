@@ -1,0 +1,221 @@
+<%
+  pricing = @proposal.project_pricing
+  editable = @proposal.status != "approved"
+%>
+
+<div class="p-2 mx-auto max-w-5xl">
+  <div class="flex items-center gap-3 mb-6">
+    <%= link_to conversation_path(@conversation), class: "btn btn-ghost btn-sm btn-square", title: "Voltar" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+      </svg>
+    <% end %>
+    <div>
+      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Precificação</h1>
+      <p class="text-sm text-base-content/60"><%= @conversation.client_name %> · <%= @conversation.study_type.name %></p>
+    </div>
+    <span class="badge badge-soft ml-auto <%= @proposal.status == "approved" ? "badge-success" : "badge-warning" %>">
+      <%= { "draft" => "Rascunho", "priced" => "Precificado", "approved" => "Aprovado" }.fetch(@proposal.status, @proposal.status) %>
+    </span>
+  </div>
+
+  <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, class: "flex flex-col gap-4" do |form| %>
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+      <h2 class="font-semibold text-base-content mb-4">Equipe e horas</h2>
+
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Profissional</th>
+              <th>Entregável</th>
+              <th class="text-right">Horas escritório</th>
+              <th class="text-right">Horas campo</th>
+              <th class="text-right">Subtotal</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <%= form.fields_for :proposal_professionals do |pp_form| %>
+              <% line = pp_form.object %>
+              <tr>
+                <td class="text-base-content"><%= line.professional.name %></td>
+                <td class="text-base-content/70"><%= line.deliverable_name %></td>
+                <td class="text-right">
+                  <%= pp_form.hidden_field :id %>
+                  <%= pp_form.number_field :hours_office, step: 0.5, min: 0, disabled: !editable,
+                        class: "input input-bordered input-sm w-24 text-right" %>
+                </td>
+                <td class="text-right">
+                  <%= pp_form.number_field :hours_field, step: 0.5, min: 0, disabled: !editable,
+                        class: "input input-bordered input-sm w-24 text-right" %>
+                </td>
+                <td class="text-right text-base-content/70"><%= number_to_currency(line.subtotal, unit: "R$", separator: ",", delimiter: ".") %></td>
+                <td class="text-right">
+                  <% if editable %>
+                    <%= button_to conversation_proposal_proposal_professional_path(@conversation, line), method: :delete,
+                          class: "btn btn-ghost btn-xs btn-square text-error",
+                          title: "Remover linha",
+                          form: { data: { turbo_confirm: "Remover #{line.deliverable_name}?" } } do %>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+                        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                      </svg>
+                    <% end %>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+            <% if pricing.proposal_professionals.none? %>
+              <tr><td colspan="6" class="text-center text-base-content/50 py-4">Nenhum profissional na equipe ainda.</td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+
+      <% if editable %>
+        <%= form_with url: conversation_proposal_proposal_professionals_path(@conversation), class: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-base-300" do |add_form| %>
+          <div class="form-control">
+            <div class="label"><span class="label-text text-xs">Profissional</span></div>
+            <%= add_form.select :professional_id, @professionals.map { |p| [ p.name, p.id ] },
+                  { include_blank: "Selecione" }, { class: "select select-bordered select-sm" } %>
+          </div>
+          <div class="form-control">
+            <div class="label"><span class="label-text text-xs">Entregável</span></div>
+            <%= add_form.text_field :deliverable_name, class: "input input-bordered input-sm" %>
+          </div>
+          <div class="form-control">
+            <div class="label"><span class="label-text text-xs">Horas escritório</span></div>
+            <%= add_form.number_field :hours_office, step: 0.5, min: 0, value: 0, class: "input input-bordered input-sm w-24" %>
+          </div>
+          <div class="form-control">
+            <div class="label"><span class="label-text text-xs">Horas campo</span></div>
+            <%= add_form.number_field :hours_field, step: 0.5, min: 0, value: 0, class: "input input-bordered input-sm w-24" %>
+          </div>
+          <%= add_form.submit "Adicionar linha", class: "btn btn-sm btn-outline" %>
+        <% end %>
+      <% end %>
+    </div>
+
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+      <h2 class="font-semibold text-base-content mb-4">Parâmetros</h2>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">BDI</span></div>
+          <%= form.number_field :bdi, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Impostos (ADM)</span></div>
+          <%= form.number_field :tax_multiplier, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Distância (km)</span></div>
+          <%= form.number_field :distance_km, step: 1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Dias de campo</span></div>
+          <%= form.number_field :logistics_days, step: 1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Aluguel/dia (R$)</span></div>
+          <%= form.number_field :rental_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Alimentação/dia (R$)</span></div>
+          <%= form.number_field :meal_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Combustível total (R$)</span></div>
+          <%= form.number_field :fuel_total, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+      </div>
+
+      <% if editable %>
+        <%= form.submit "Recalcular preço", class: "btn btn-primary btn-sm mt-4" %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
+    <h2 class="font-semibold text-base-content mb-4">Custos externos</h2>
+
+    <ul class="flex flex-col gap-2 mb-4">
+      <% pricing.external_costs.each_with_index do |cost, index| %>
+        <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
+          <span class="text-sm text-base-content"><%= cost["description"] %></span>
+          <div class="flex items-center gap-3 shrink-0">
+            <span class="text-sm text-base-content/70"><%= number_to_currency(cost["value"], unit: "R$", separator: ",", delimiter: ".") %></span>
+            <% if editable %>
+              <%= button_to remove_external_cost_conversation_proposal_path(@conversation, index: index), method: :delete,
+                    class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover" do %>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                </svg>
+              <% end %>
+            <% end %>
+          </div>
+        </li>
+      <% end %>
+      <% if pricing.external_costs.empty? %>
+        <li class="text-center text-base-content/50 py-2 text-sm">Nenhum custo externo lançado.</li>
+      <% end %>
+    </ul>
+
+    <% if editable %>
+      <%= form_with url: add_external_cost_conversation_proposal_path(@conversation), class: "flex flex-wrap items-end gap-2" do |cost_form| %>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Descrição</span></div>
+          <%= cost_form.text_field :description, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Valor (R$)</span></div>
+          <%= cost_form.number_field :value, step: 0.01, min: 0, class: "input input-bordered input-sm w-32" %>
+        </div>
+        <%= cost_form.submit "Adicionar custo", class: "btn btn-sm btn-outline" %>
+      <% end %>
+    <% end %>
+  </div>
+
+  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
+    <h2 class="font-semibold text-base-content mb-4">Resumo</h2>
+
+    <dl class="flex flex-col gap-2 text-sm">
+      <div class="flex justify-between">
+        <dt class="text-base-content/60">Equipe (profissionais)</dt>
+        <dd class="text-base-content"><%= number_to_currency(pricing.professionals_total, unit: "R$", separator: ",", delimiter: ".") %></dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-base-content/60">Logística</dt>
+        <dd class="text-base-content"><%= number_to_currency(pricing.logistics_total, unit: "R$", separator: ",", delimiter: ".") %></dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-base-content/60">Custos externos</dt>
+        <dd class="text-base-content"><%= number_to_currency(pricing.external_costs_total, unit: "R$", separator: ",", delimiter: ".") %></dd>
+      </div>
+      <div class="flex justify-between pt-2 border-t border-base-300 font-semibold text-base">
+        <dt class="text-base-content">Total</dt>
+        <dd class="text-base-content"><%= number_to_currency(pricing.total_value, unit: "R$", separator: ",", delimiter: ".") %></dd>
+      </div>
+    </dl>
+
+    <h3 class="font-semibold text-base-content text-sm mt-6 mb-2">Cronograma de desembolso</h3>
+    <ul class="flex flex-col gap-1 text-sm">
+      <% pricing.payment_schedule_amounts.each do |item| %>
+        <li class="flex justify-between">
+          <span class="text-base-content/60"><%= item["label"] %> (<%= item["percentage"] %>%)</span>
+          <span class="text-base-content"><%= number_to_currency(item["amount"], unit: "R$", separator: ",", delimiter: ".") %></span>
+        </li>
+      <% end %>
+    </ul>
+
+    <% if editable %>
+      <%= button_to "Aprovar preço", approve_conversation_proposal_path(@conversation), method: :post,
+            class: "btn btn-success w-full mt-6",
+            form: { data: { turbo_confirm: "Aprovar o preço de #{number_to_currency(pricing.total_value, unit: 'R$', separator: ',', delimiter: '.')}? Isso conclui a proposta." } } %>
+    <% else %>
+      <div class="alert alert-success mt-6">
+        <span>Preço aprovado. Proposta concluída.</span>
+      </div>
+    <% end %>
+  </div>
+</div>

@@ -1,5 +1,6 @@
 class Professional < ApplicationRecord
   has_many :study_templates, dependent: :destroy
+  has_many :proposal_professionals, dependent: :restrict_with_error
 
   validates :name, presence: true
   validates :role, presence: true

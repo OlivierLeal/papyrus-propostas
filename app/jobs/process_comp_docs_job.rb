@@ -10,7 +10,7 @@ class ProcessCompDocsJob < ApplicationJob
     conversation.mark_step!("comp_docs", "running")
 
     attachments.each do |attachment|
-      ask_internally(conversation, prompt_for(attachment), with: attachment)
+      conversation.ask_internally(prompt_for(attachment), with: attachment)
     end
 
     conversation.mark_step!("comp_docs", "done")

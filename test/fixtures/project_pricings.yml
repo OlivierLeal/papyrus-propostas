@@ -1,0 +1,27 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  proposal: one
+  bdi: 9.99
+  tax_multiplier: 9.99
+  distance_km: 9.99
+  logistics_days: 1
+  rental_per_day: 9.99
+  meal_per_day: 9.99
+  fuel_total: 9.99
+  external_costs: 
+  payment_schedule: 
+  total_value: 9.99
+
+two:
+  proposal: two
+  bdi: 9.99
+  tax_multiplier: 9.99
+  distance_km: 9.99
+  logistics_days: 1
+  rental_per_day: 9.99
+  meal_per_day: 9.99
+  fuel_total: 9.99
+  external_costs: 
+  payment_schedule: 
+  total_value: 9.99

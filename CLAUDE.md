@@ -83,10 +83,10 @@ RS→FEPAM, RJ→INEA, SC→IMA, BA→INEMA, SP→CETESB, MG→SEMAD/SUPRAM, out
 - `messages` — `acts_as_message`; colunas nativas da gem: conversation_id, role, content, content_raw, tokens de entrada/saída/cache. Anexos (TR, KMZ, complementares) via Active Storage nativo (`has_many_attached :attachments`), **não** uma tabela `attachments` própria — o upload na Tela de Setup é a primeira mensagem do usuário na conversa, já com os arquivos anexados
 - `tool_calls` / `models` — tabelas nativas da gem (function-calling e registro de modelos LLM com pricing/capabilities); não fazem parte do domínio, mas ficam disponíveis para uso futuro (ex.: extração estruturada de dados do TR)
 
-**Proposta e precificação:**
-- `proposals` — conversation_id, content_json, pdf_url, version, status
-- `project_pricings` — proposal_id, bdi, tax_multiplier, distance_km, total_value, payment_schedule (jsonb)
-- `proposal_professionals` — project_pricing_id, professional_id, hours_office, hours_field, subtotal
+**Proposta e precificação (implementado):**
+- `proposals` — conversation_id, content_json, pdf_url, version, status (`draft`/`priced`/`approved`)
+- `project_pricings` — proposal_id, bdi, tax_multiplier, distance_km, logistics_days, rental_per_day, meal_per_day, fuel_total, external_costs (jsonb, `[{description, value}]`), payment_schedule (jsonb, default 30/60/5/5), total_value. Os parâmetros de logística (aluguel, alimentação, combustível) são campos diretos aqui — **não existe mais uma tabela `logistics_configs`** (removida; ver seção 5).
+- `proposal_professionals` — project_pricing_id, professional_id, deliverable_name, hours_office, hours_field, subtotal
 
 **Configuração (admin, não muda por proposta):**
 - `professionals` — name, role, rate_office, rate_field, registration, specialties, active
@@ -100,22 +100,22 @@ Relacionamentos principais: `users` 1—N `conversations`; `conversations` 1—N
 
 ---
 
-## 5. Motor de precificação (detalhado)
+## 5. Motor de precificação (detalhado, implementado)
 
 Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística, sobreposições geoespaciais.
 
-1. **Template do tipo de estudo** define a composição padrão de profissionais × horas (ex.: EIA-RIMA = Pedro 30d + Beth 7d + Sara 10d campo + Fauna terceiro + Flora terceiro...).
-2. **Ajuste manual**: grade editável (Profissional × Entregável × Horas), recalcula em tempo real.
-3. **Cálculo**:
+1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do TR e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). A sugestão é **sempre restrita ao "menu"** de profissionais × entregáveis já cadastrados em `study_templates` para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha sugerida que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada. Se a chamada à IA falhar ou não retornar nenhuma linha válida, o sistema cai automaticamente no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`hours_office_default`/`hours_field_default`) direto do template.
+2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas escritório/campo, mais adição/remoção de linhas fora do menu sugerido (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
+3. **Cálculo** (`ProjectPricing#recalculate!` / `ProposalProfessional#recalculate_subtotal`):
    - `C1` = horas escritório × taxa escritório
    - `C2` = horas campo × taxa campo
    - `C3` = subtotal profissional = (C1 + C2) × BDI × impostos
-   - `C4` = logística = distância × parâmetros (diárias + combustível + alimentação) + hospedagem (ver abaixo)
-   - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone)
+   - `C4` = logística = (aluguel/dia + alimentação/dia) × dias de campo + combustível total
+   - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta em `external_costs` (jsonb)
    - `C6` = TOTAL = Σ profissionais + logística + externos
-4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo; BDI 1.15–1.30 e impostos ADM 1.25 (configuráveis por contrato); parâmetros de logística (aluguel, combustível, alimentação) em `logistics_config`.
-5. **Hospedagem não é mais um parâmetro fixo de `logistics_config`.** O sistema consulta a API do Stay22 usando o município identificado no TR e apresenta as opções de acomodação como mensagem no chat; o consultor escolhe a melhor opção. Por enquanto (fase inicial) essa escolha fica só registrada na conversa — ainda não alimenta automaticamente o `C4`, porque o motor de precificação em si ainda não existe como código.
-6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas, dados prontos para o PDF.
+4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo (`professionals`); BDI e impostos (`tax_multiplier`) editáveis por proposta em `project_pricings` (defaults 1.20/1.25). **Não existe mais uma tabela de configuração de logística** (`logistics_configs` foi removida) — aluguel/dia, alimentação/dia, combustível total e dias de campo são campos digitados direto na Tela de Precificação por proposta.
+5. **Hospedagem**: não entra no cálculo automático. O sistema consulta a API do Stay22 usando o município identificado no TR e apresenta as opções de acomodação como mensagem no chat; o consultor escolhe a melhor opção manualmente. Por enquanto isso fica só registrado na conversa (informativo) — pendente da chave de API do Stay22.
+6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas (`payment_schedule_amounts`, default 30/60/5/5), dados prontos para o PDF. Proposta só é editável enquanto `status != "approved"`; aprovar (`proposals#approve`) trava os campos e conclui a conversa.
 
 ---
 
@@ -197,12 +197,12 @@ A Papyrus trouxe um estudo propondo uma arquitetura de "motor de composição de
 
 O que é valioso mas depende de pré-requisitos que ainda não existem, nesta ordem:
 
-1. **Motor de precificação determinístico** (seção 5) — ainda não existe como código, é mais urgente que qualquer item abaixo.
+1. ~~Motor de precificação determinístico (seção 5)~~ — **implementado**: `Proposal`/`ProjectPricing`/`ProposalProfessional`, com sugestão de equipe pela IA restrita ao menu de `study_templates` e Tela de Precificação editável.
 2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado.
 3. **RAG com `pgvector` sobre propostas históricas** — só entrega valor depois que existir um volume real de propostas aprovadas para indexar; hoje o sistema tem zero propostas em produção. Quando chegar a hora, é a evolução natural do que os *documentos complementares* (seção 7) já fazem manualmente hoje (busca automática em vez de upload manual de proposta parecida).
 4. **Memória por cliente** (preferências, equipe recorrente, condicionantes) com score de confiança — a parte mais especulativa e cara do estudo; precisa de volume de uso real para ter o que aprender. Fica para depois do RAG estar validado.
 
-**Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, `logistics_config`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
+**Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
 
 ---
 

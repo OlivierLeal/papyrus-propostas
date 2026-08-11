@@ -4,7 +4,7 @@ class GenerateSummaryJob < ApplicationJob
   def perform(conversation_id)
     conversation = Conversation.find(conversation_id)
 
-    ask_internally(conversation, build_prompt(conversation))
+    conversation.ask_internally(build_prompt(conversation))
 
     conversation.mark_step!("summary", "done")
     conversation.update!(status: "reviewing")

@@ -64,6 +64,12 @@
             <% end %>
           </ul>
         </div>
+
+        <% if @conversation.status == "reviewing" %>
+          <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
+        <% elsif @conversation.status.in?(%w[pricing completed]) %>
+          <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
+        <% end %>
       </div>
 
       <div class="lg:col-span-3 bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh]"

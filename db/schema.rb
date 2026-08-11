@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_141600) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_11_151931) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -77,6 +77,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_141600) do
     t.index ["conversation_id"], name: "index_geospatial_results_on_conversation_id", unique: true
   end
 
+  create_table "logistics_configs", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.decimal "fuel_price_per_liter", precision: 10, scale: 2, null: false
+    t.decimal "lodging_per_day", precision: 10, scale: 2, null: false
+    t.decimal "meal_per_day", precision: 10, scale: 2, null: false
+    t.string "name", null: false
+    t.decimal "rental_per_day", precision: 10, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_logistics_configs_on_active"
+  end
+
   create_table "messages", force: :cascade do |t|
     t.integer "cache_creation_tokens"
     t.integer "cached_tokens"
@@ -131,6 +143,47 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_141600) do
     t.string "specialties"
     t.datetime "updated_at", null: false
     t.index ["active"], name: "index_professionals_on_active"
+  end
+
+  create_table "project_pricings", force: :cascade do |t|
+    t.decimal "bdi", precision: 6, scale: 4, default: "1.2", null: false
+    t.datetime "created_at", null: false
+    t.decimal "distance_km", precision: 10, scale: 2, default: "0.0", null: false
+    t.jsonb "external_costs", default: [], null: false
+    t.decimal "fuel_total", precision: 10, scale: 2, default: "0.0", null: false
+    t.integer "logistics_days", default: 0, null: false
+    t.decimal "meal_per_day", precision: 10, scale: 2, default: "0.0", null: false
+    t.jsonb "payment_schedule", default: [{"label"=>"Assinatura do contrato", "percentage"=>30}, {"label"=>"Protocolo no órgão ambiental", "percentage"=>60}, {"label"=>"Vistoria", "percentage"=>5}, {"label"=>"Emissão da licença", "percentage"=>5}], null: false
+    t.bigint "proposal_id", null: false
+    t.decimal "rental_per_day", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "tax_multiplier", precision: 6, scale: 4, default: "1.25", null: false
+    t.decimal "total_value", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.index ["proposal_id"], name: "index_project_pricings_on_proposal_id", unique: true
+  end
+
+  create_table "proposal_professionals", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "deliverable_name", null: false
+    t.decimal "hours_field", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "hours_office", precision: 8, scale: 2, default: "0.0", null: false
+    t.bigint "professional_id", null: false
+    t.bigint "project_pricing_id", null: false
+    t.decimal "subtotal", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.index ["professional_id"], name: "index_proposal_professionals_on_professional_id"
+    t.index ["project_pricing_id"], name: "index_proposal_professionals_on_project_pricing_id"
+  end
+
+  create_table "proposals", force: :cascade do |t|
+    t.jsonb "content_json", default: {}, null: false
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.string "pdf_url"
+    t.string "status", default: "draft", null: false
+    t.datetime "updated_at", null: false
+    t.integer "version", default: 1, null: false
+    t.index ["conversation_id"], name: "index_proposals_on_conversation_id", unique: true
   end
 
   create_table "sessions", force: :cascade do |t|
@@ -337,6 +390,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_141600) do
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"
+  add_foreign_key "project_pricings", "proposals"
+  add_foreign_key "proposal_professionals", "professionals"
+  add_foreign_key "proposal_professionals", "project_pricings"
+  add_foreign_key "proposals", "conversations"
   add_foreign_key "sessions", "users"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_claimed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

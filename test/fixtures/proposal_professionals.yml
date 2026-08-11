@@ -1,0 +1,17 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  project_pricing: one
+  professional: one
+  deliverable_name: MyString
+  hours_office: 9.99
+  hours_field: 9.99
+  subtotal: 9.99
+
+two:
+  project_pricing: two
+  professional: two
+  deliverable_name: MyString
+  hours_office: 9.99
+  hours_field: 9.99
+  subtotal: 9.99
