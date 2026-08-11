@@ -77,18 +77,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_141600) do
     t.index ["conversation_id"], name: "index_geospatial_results_on_conversation_id", unique: true
   end
 
-  create_table "logistics_configs", force: :cascade do |t|
-    t.boolean "active", default: true, null: false
-    t.datetime "created_at", null: false
-    t.decimal "fuel_price_per_liter", precision: 10, scale: 2, null: false
-    t.decimal "lodging_per_day", precision: 10, scale: 2, null: false
-    t.decimal "meal_per_day", precision: 10, scale: 2, null: false
-    t.string "name", null: false
-    t.decimal "rental_per_day", precision: 10, scale: 2, null: false
-    t.datetime "updated_at", null: false
-    t.index ["active"], name: "index_logistics_configs_on_active"
-  end
-
   create_table "messages", force: :cascade do |t|
     t.integer "cache_creation_tokens"
     t.integer "cached_tokens"

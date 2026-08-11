@@ -91,7 +91,6 @@ RS→FEPAM, RJ→INEA, SC→IMA, BA→INEMA, SP→CETESB, MG→SEMAD/SUPRAM, out
 - `professionals` — name, role, rate_office, rate_field, registration, specialties, active
 - `study_types` — name, code, description (EIA-RIMA, EMI, Relatório Técnico, PEA, RAP...)
 - `study_templates` — study_type_id, professional_id, deliverable_name, hours_office_default, hours_field_default (horas padrão copiadas para `proposal_professionals` no início; a taxa vem sempre atualizada de `professionals`)
-- `logistics_config` — parâmetros por tipo (aluguel, combustível, hospedagem)
 
 **Geoespacial:**
 - `geospatial_results` — conversation_id, area_ha, perimeter_km, municipalities (jsonb), mata_atlantica (bool), unidade_conservacao (bool), terra_indigena (bool), quilombo (bool), watershed, map_image_url, polygon (geometry, PostGIS)
