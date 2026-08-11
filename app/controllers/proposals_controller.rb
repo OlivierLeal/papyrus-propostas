@@ -76,7 +76,7 @@ class ProposalsController < ApplicationController
 
   private
     def set_conversation
-      @conversation = current_user.conversations.find(params[:conversation_id])
+      @conversation = Conversation.find(params[:conversation_id])
     end
 
     def set_proposal

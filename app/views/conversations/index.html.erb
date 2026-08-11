@@ -33,7 +33,7 @@
             <span class="badge badge-ghost w-fit"><%= conversation.study_type.name %></span>
 
             <div class="text-xs text-base-content/40">
-              Criada em <%= conversation.created_at.strftime("%d/%m/%Y") %>
+              <%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %>
             </div>
           </div>
         <% end %>

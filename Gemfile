@@ -60,6 +60,9 @@ gem "ruby_llm"
 # Centralization of locale data collection for Ruby on Rails. [https://github.com/svenfuchs/rails-i18n]
 gem "rails-i18n"
 
+# Renderiza o markdown que a IA devolve (negrito, listas, títulos) como HTML no chat. [https://github.com/vmg/redcarpet]
+gem "redcarpet"
+
 group :development, :test do
   # Loads environment variables from .env into ENV [https://github.com/bkeepers/dotenv]
   gem "dotenv-rails"

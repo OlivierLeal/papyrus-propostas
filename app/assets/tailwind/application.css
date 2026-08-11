@@ -99,3 +99,70 @@
   opacity: 0;
   transform: translateX(1.5rem);
 }
+
+/*
+  Conteúdo markdown renderizado nas mensagens do chat (ver ApplicationHelper#render_markdown).
+  Usa currentColor pra funcionar tanto na bolha "primary" (fundo escuro) quanto na "base-200"
+  (fundo claro) sem precisar de duas variantes de cor.
+*/
+.markdown-content {
+  line-height: 1.5;
+}
+.markdown-content > *:first-child { margin-top: 0; }
+.markdown-content > *:last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0.5em 0; }
+.markdown-content ul, .markdown-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.25em;
+}
+.markdown-content ul { list-style: disc; }
+.markdown-content ol { list-style: decimal; }
+.markdown-content li { margin: 0.15em 0; }
+.markdown-content li > ul, .markdown-content li > ol { margin: 0.15em 0; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3,
+.markdown-content h4, .markdown-content h5, .markdown-content h6 {
+  font-weight: 700;
+  margin: 0.75em 0 0.35em;
+}
+.markdown-content h1 { font-size: 1.15em; }
+.markdown-content h2 { font-size: 1.1em; }
+.markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { font-size: 1em; }
+.markdown-content strong { font-weight: 700; }
+.markdown-content em { font-style: italic; }
+.markdown-content a { text-decoration: underline; text-underline-offset: 2px; }
+.markdown-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}
+.markdown-content pre {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  padding: 0.6em 0.8em;
+  border-radius: 0.5em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.markdown-content pre code { background: none; padding: 0; }
+.markdown-content blockquote {
+  border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  opacity: 0.85;
+}
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  margin: 0.75em 0;
+}
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+}
+.markdown-content th, .markdown-content td {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  padding: 0.3em 0.6em;
+  text-align: left;
+}

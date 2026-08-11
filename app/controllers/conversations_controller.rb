@@ -3,8 +3,8 @@ class ConversationsController < ApplicationController
   before_action :set_study_types, only: %i[ new create ]
 
   def index
-    @conversations = current_user.conversations.order(created_at: :desc)
-  end
+    @conversations = Conversation.includes(:user, :study_type).order(created_at: :desc)
+   end
 
   def new
     @conversation = Conversation.new
@@ -30,6 +30,7 @@ class ConversationsController < ApplicationController
     end
 
     @conversation.save!
+    @conversation.apply_system_instructions!
     message = @conversation.messages.build(role: "user", content: setup_message_content(tr, kmz, complementary_documents))
     attach_with_kind(message, tr, "tr") if tr.present?
     attach_with_kind(message, kmz, "kmz") if kmz.present?
@@ -79,7 +80,7 @@ class ConversationsController < ApplicationController
 
   private
     def set_conversation
-      @conversation = current_user.conversations.find(params[:id])
+      @conversation = Conversation.find(params[:id])
     end
 
     def set_study_types

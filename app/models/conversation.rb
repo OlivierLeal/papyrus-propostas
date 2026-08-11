@@ -22,6 +22,26 @@ class Conversation < ApplicationRecord
     "summary" => "Gerando resumo"
   }.freeze
 
+  # Prompt de sistema (CLAUDE.md seção 9, "Prompt 1"). Mantém a IA restrita ao escopo desta
+  # proposta — sem isso ela responde qualquer pergunta fora de contexto e gasta tokens à toa.
+  SYSTEM_INSTRUCTIONS = <<~TEXT.freeze
+    Você é o assistente de IA integrado ao Papyrus Propostas, usado por um consultor da Papyrus
+    Consultoria Ambiental para montar a proposta técnica e comercial desta conversa.
+
+    Seu escopo aqui é estritamente:
+    - Analisar o Termo de Referência (TR), o KMZ e os documentos complementares desta proposta.
+    - Responder perguntas do consultor sobre o conteúdo desses documentos, o escopo do estudo, a
+      equipe técnica sugerida e questões de licenciamento ambiental relacionadas a este projeto.
+    - Ajudar a ajustar o resumo da proposta conforme o consultor pedir.
+
+    Qualquer pedido fora desse escopo (perguntas sem relação com este projeto ou com licenciamento
+    ambiental, código, receitas, tarefas genéricas ou qualquer assunto alheio a este atendimento):
+    recuse em UMA frase curta, sem elaborar, redirecionando o consultor de volta para a proposta.
+
+    Você nunca calcula preços, horas ou valores em R$ — isso é feito por um motor determinístico à
+    parte. Sua função é só identificar e organizar informações de escopo. Responda sempre em português.
+  TEXT
+
   belongs_to :user
   belongs_to :study_type
   has_one :geospatial_result, dependent: :destroy
@@ -32,6 +52,10 @@ class Conversation < ApplicationRecord
 
   def status_label
     STATUS_LABELS.fetch(status, status)
+  end
+
+  def apply_system_instructions!
+    with_instructions(SYSTEM_INSTRUCTIONS)
   end
 
   def attachments_of_kind(kind)
