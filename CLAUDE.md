@@ -56,6 +56,7 @@ Documentos complementares podem ser enviados a qualquer momento da conversa, nã
 | IA / LLM | Claude API (Anthropic) via gem `ruby_llm` — lê PDF/DOCX nativamente |
 | Geoespacial | RGeo + GDAL para parsing de KMZ/KML e cálculos; PostGIS para queries de sobreposição |
 | Mapas | Mapbox Static API — gera imagem estática do polígono para inserir no PDF |
+| Hospedagem | Stay22 API (`api.stay22.com/v2/accommodations`) — busca opções de acomodação pelo município identificado no TR; consultor escolhe a melhor opção no chat (ver seção 5) |
 | Geração de PDF | Grover (Chrome headless) renderizando templates HTML/CSS no padrão Papyrus |
 | Infra | VPS (Hostinger), deploy via Kamal ou Docker, CI/CD via GitHub Actions |
 
@@ -109,11 +110,12 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
    - `C1` = horas escritório × taxa escritório
    - `C2` = horas campo × taxa campo
    - `C3` = subtotal profissional = (C1 + C2) × BDI × impostos
-   - `C4` = logística = distância × parâmetros (diárias + combustível + hotel + alimentação)
+   - `C4` = logística = distância × parâmetros (diárias + combustível + alimentação) + hospedagem (ver abaixo)
    - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone)
    - `C6` = TOTAL = Σ profissionais + logística + externos
-4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo; BDI 1.15–1.30 e impostos ADM 1.25 (configuráveis por contrato); parâmetros de logística (aluguel, combustível, hospedagem).
-5. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas, dados prontos para o PDF.
+4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo; BDI 1.15–1.30 e impostos ADM 1.25 (configuráveis por contrato); parâmetros de logística (aluguel, combustível, alimentação) em `logistics_config`.
+5. **Hospedagem não é mais um parâmetro fixo de `logistics_config`.** O sistema consulta a API do Stay22 usando o município identificado no TR e apresenta as opções de acomodação como mensagem no chat; o consultor escolhe a melhor opção. Por enquanto (fase inicial) essa escolha fica só registrada na conversa — ainda não alimenta automaticamente o `C4`, porque o motor de precificação em si ainda não existe como código.
+6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas, dados prontos para o PDF.
 
 ---
 
@@ -121,7 +123,7 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
 
 Após confirmação na tela de setup, arquivos vão para Active Storage (criptografado) e disparam 3 jobs em paralelo:
 
-- **ProcessTR**: extração de texto (ou envio nativo do PDF/DOCX pra Claude) → IA identifica tipo de licença, tipo de estudo, órgão ambiental, municípios, diagnósticos, condicionantes, ressalvas.
+- **ProcessTR**: extração de texto (ou envio nativo do PDF/DOCX pra Claude) → IA identifica tipo de licença, tipo de estudo, órgão ambiental, municípios, diagnósticos, condicionantes, ressalvas. Ao concluir, dispara a busca de hospedagem (Stay22) usando o município identificado.
 - **ProcessKMZ**: descomprime → parseia XML/KML (Nokogiri) → extrai coordenadas → RGeo calcula área (ha), perímetro (km), centroide → PostGIS cruza com as 6 camadas de referência → gera imagem do mapa (Mapbox Static API, bounding box + margem 20%).
 - **ProcessCompDocs**: IA identifica tipo de cada documento complementar e extrai escopos anteriores, preços de referência, condicionantes, metodologias, equipes usadas.
 
@@ -189,6 +191,19 @@ O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA ger
 - Controle avançado de revisões com numeração automática.
 - Exportação em DOCX (só PDF nesta versão).
 
+### 11.1. RAG e memória por cliente (avaliado a partir de estudo de arquitetura trazido pela Papyrus)
+
+A Papyrus trouxe um estudo propondo uma arquitetura de "motor de composição de propostas" com RAG (`pgvector`), memória por cliente com confiança/rastreabilidade, e aprendizado a partir de edições humanas. Avaliação: os princípios centrais (LLM não calcula preço, LLM não é a fonte de verdade dos dados, regras determinísticas validam a sugestão da IA) **já são o que este projeto faz desde a seção 1** — não é novidade, é confirmação do desenho atual.
+
+O que é valioso mas depende de pré-requisitos que ainda não existem, nesta ordem:
+
+1. **Motor de precificação determinístico** (seção 5) — ainda não existe como código, é mais urgente que qualquer item abaixo.
+2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado.
+3. **RAG com `pgvector` sobre propostas históricas** — só entrega valor depois que existir um volume real de propostas aprovadas para indexar; hoje o sistema tem zero propostas em produção. Quando chegar a hora, é a evolução natural do que os *documentos complementares* (seção 7) já fazem manualmente hoje (busca automática em vez de upload manual de proposta parecida).
+4. **Memória por cliente** (preferências, equipe recorrente, condicionantes) com score de confiança — a parte mais especulativa e cara do estudo; precisa de volume de uso real para ter o que aprender. Fica para depois do RAG estar validado.
+
+**Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, `logistics_config`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
+
 ---
 
 ## 12. Convenções do projeto
@@ -201,3 +216,4 @@ O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA ger
 - Layout do PDF é código (templates HTML/CSS + Grover), não gerado pela IA.
 - IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
 - Anexos de conversa (TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
+- Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
