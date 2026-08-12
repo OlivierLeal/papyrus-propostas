@@ -3,8 +3,10 @@ class Proposal < ApplicationRecord
   has_one :project_pricing, dependent: :destroy
 
   STATUSES = %w[draft priced approved].freeze
+  DOCUMENT_SPLITS = %w[combined separated].freeze
 
   validates :status, inclusion: { in: STATUSES }
+  validates :document_split, inclusion: { in: DOCUMENT_SPLITS }
 
   # Pede pra IA sugerir horas por profissional/entregável com base em tudo que já foi
   # extraído do TR e dos documentos complementares desta conversa (CLAUDE.md seção 5).
@@ -16,8 +18,10 @@ class Proposal < ApplicationRecord
     pricing = create_project_pricing!
     return finalize!(pricing) if templates.empty?
 
-    apply_lines!(pricing, fetch_ai_suggestion(templates), templates)
+    suggestion = fetch_ai_suggestion(templates)
+    apply_lines!(pricing, Array(suggestion["linhas"]), templates)
     apply_lines!(pricing, template_fallback_lines(templates), templates) if pricing.proposal_professionals.none?
+    update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
 
     finalize!(pricing)
   rescue StandardError => e
@@ -43,9 +47,9 @@ class Proposal < ApplicationRecord
     def fetch_ai_suggestion(templates)
       conversation.ask_internally(suggestion_prompt(templates), hide_response: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
-      Array(JSON.parse(strip_json_fences(response.content))["linhas"])
+      JSON.parse(strip_json_fences(response.content))
     rescue JSON::ParserError, TypeError
-      []
+      {}
     end
 
     # O Gemini às vezes ignora a instrução "sem markdown" e envolve a resposta em
@@ -73,13 +77,19 @@ class Proposal < ApplicationRecord
         considerando a complexidade, os diagnósticos exigidos e as demais informações já extraídas
         nesta conversa. Se um item não for necessário para este projeto, sugira 0 para ambas as horas.
 
+        Além disso, releia o TR e diga se ele exige que a proposta técnica e a proposta comercial
+        sejam apresentadas como documentos/envelopes SEPARADOS (comum em licitação pública) — se o
+        TR não falar nada sobre isso, considere que NÃO exige (documento único).
+
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
 
         {
           "linhas": [
             { "professional_id": 12, "deliverable_name": "Coordenação geral", "hours_office": 30, "hours_field": 0 }
-          ]
+          ],
+          "documentos_separados": false,
+          "justificativa_documentos_separados": "..."
         }
       TEXT
     end

@@ -24,12 +24,13 @@ class ProposalsController < ApplicationController
     if editable?
       pricing = @proposal.project_pricing
 
-      if pricing.update(pricing_params)
+      if pricing.update(pricing_params) && @proposal.update(document_split_params)
         pricing.recalculate!
         @proposal.update!(status: "priced")
         redirect_to conversation_proposal_path(@conversation), notice: "Preço recalculado."
       else
-        redirect_to conversation_proposal_path(@conversation), alert: pricing.errors.full_messages.to_sentence
+        errors = (pricing.errors.full_messages + @proposal.errors.full_messages).to_sentence
+        redirect_to conversation_proposal_path(@conversation), alert: errors
       end
     else
       redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."
@@ -93,5 +94,9 @@ class ProposalsController < ApplicationController
         :bdi, :tax_multiplier, :distance_km, :logistics_days, :rental_per_day, :meal_per_day, :fuel_total,
         proposal_professionals_attributes: %i[ id hours_office hours_field ]
       )
+    end
+
+    def document_split_params
+      params.fetch(:proposal, {}).permit(:document_split)
     end
 end

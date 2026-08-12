@@ -130,6 +130,16 @@
         </div>
       </div>
 
+      <div class="form-control mt-4 max-w-xs">
+        <div class="label"><span class="label-text text-xs">Formato do documento final</span></div>
+        <%= select_tag "proposal[document_split]",
+              options_for_select(
+                [ [ "Documento único (técnica + comercial)", "combined" ], [ "Técnica e comercial separadas", "separated" ] ],
+                @proposal.document_split
+              ),
+              disabled: !editable, class: "select select-bordered select-sm" %>
+      </div>
+
       <% if editable %>
         <%= form.submit "Recalcular preço", class: "btn btn-primary btn-sm mt-4" %>
       <% end %>

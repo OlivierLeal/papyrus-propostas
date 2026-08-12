@@ -57,7 +57,7 @@ Documentos complementares podem ser enviados a qualquer momento da conversa, nã
 | Geoespacial | RGeo + GDAL para parsing de KMZ/KML e cálculos; PostGIS para queries de sobreposição |
 | Mapas | Mapbox Static API — gera imagem estática do polígono para inserir no PDF |
 | Hospedagem | Stay22 API (`api.stay22.com/v2/accommodations`) — busca opções de acomodação pelo município identificado no TR; consultor escolhe a melhor opção no chat (ver seção 5) |
-| Geração de PDF | Grover (Chrome headless) renderizando templates HTML/CSS no padrão Papyrus |
+| Geração de documento | **DOCX** (não PDF — decisão revista), preenchendo um modelo `.docx` real da Papyrus via manipulação direta do XML interno (gem `rubyzip`, já dependência do projeto pelo KMZ) — ver seção 8 |
 | Infra | VPS (Hostinger), deploy via Kamal ou Docker, CI/CD via GitHub Actions |
 
 ### Camadas geoespaciais de referência (importadas via shapefile para PostGIS)
@@ -147,16 +147,25 @@ Regras:
 
 ---
 
-## 8. Geração do PDF
+## 8. Geração do documento (DOCX — decisão revista, era PDF)
 
-Processo em duas etapas, com responsabilidades separadas:
+**Mudança de escopo:** o desenho original (seção histórica) previa PDF via Grover/Chrome headless.
+A Papyrus decidiu que o formato final precisa ser **DOCX**, preenchendo um modelo `.docx` real
+deles (com a identidade visual já aplicada) em vez de recriar o layout em HTML/CSS.
 
-1. A IA produz um **texto estruturado** com todo o conteúdo (seções, dados, escopo, equipe, valores), guiada pelo "Prompt de Geração de Proposta".
-2. O backend Rails recebe esse texto e monta o PDF com **layout padronizado** (Grover): capa, revisões, carta de apresentação, dados, objetivo, escopo, documentos, produtos, responsabilidades, equipe, prazo, dados bancários, assinaturas.
+Processo em duas etapas, com responsabilidades separadas (princípio mantido):
 
-O layout visual (fontes, cores, margens, logotipos) é controlado 100% pelo código — nunca pela IA. Isso garante consistência visual entre propostas independente do conteúdo gerado.
+1. A IA produz um **texto estruturado** com todo o conteúdo (seções, dados, escopo, equipe, valores), guiada pelo "Prompt de Geração de Proposta" (seção 9), incluindo se o TR exige apresentação em documentos/envelopes separados (técnico × comercial).
+2. O backend Rails preenche o(s) modelo(s) `.docx` da Papyrus com esse conteúdo — abrindo o arquivo (é um zip com XML dentro), substituindo marcadores de texto no `word/document.xml` via `rubyzip`, e re-empacotando. **Não é a IA que mexe no arquivo** — ela só gera o texto que entra nos marcadores.
 
-O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA gera novo texto estruturado e o backend remonta o PDF (nova versão).
+O layout visual (fontes, cores, margens, logotipos, tabelas) vem pronto do modelo `.docx` da Papyrus — o código só substitui conteúdo, nunca redesenha layout. Isso garante consistência visual entre propostas independente do conteúdo gerado.
+
+**Técnica × Comercial separadas ou juntas:** a IA lê o TR e sinaliza se ele exige documentos/envelopes
+separados (comum em licitação pública). O consultor vê essa sugestão na Tela de Precificação/Aprovação
+e pode trocar antes de gerar. Conforme a escolha, o sistema gera 1 arquivo (`.docx` único) ou 2
+(`proposta_tecnica.docx` + `proposta_comercial.docx`), a partir de modelos `.docx` correspondentes.
+
+O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA gera novo texto estruturado e o backend remonta o(s) DOCX (nova versão).
 
 ---
 
@@ -189,7 +198,6 @@ O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA ger
 - Dashboard com métricas e relatórios de propostas.
 - Mapa interativo com visualização de sobreposição (SIG Web).
 - Controle avançado de revisões com numeração automática.
-- Exportação em DOCX (só PDF nesta versão).
 
 ### 11.1. RAG e memória por cliente (avaliado a partir de estudo de arquitetura trazido pela Papyrus)
 
@@ -199,7 +207,9 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 
 1. ~~Motor de precificação determinístico (seção 5)~~ — **implementado**: `Proposal`/`ProjectPricing`/`ProposalProfessional`, com sugestão de equipe pela IA restrita ao menu de `study_templates` e Tela de Precificação editável.
 2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado.
-3. **RAG com `pgvector` sobre propostas históricas** — só entrega valor depois que existir um volume real de propostas aprovadas para indexar; hoje o sistema tem zero propostas em produção. Quando chegar a hora, é a evolução natural do que os *documentos complementares* (seção 7) já fazem manualmente hoje (busca automática em vez de upload manual de proposta parecida).
+3. **RAG com `pgvector`** — duas fontes distintas, com timing diferente:
+   - **Acervo histórico da Papyrus (fora do sistema)** — a Papyrus tem um volume grande de propostas reais de anos anteriores (despadronizadas, pré-sistema). **Isso já entra em escopo agora** (fase 2, depois do gerador de DOCX da seção 8): ingestão desses arquivos, geração de embeddings, busca por similaridade alimentando o Prompt 2 (Geração de Proposta) com trechos de propostas parecidas.
+   - **Propostas aprovadas dentro do sistema** — continua adiado: só entrega valor depois que existir volume real de propostas aprovadas *pelo próprio sistema* pra indexar; hoje é zero. Quando chegar a hora, reaproveita a mesma infraestrutura de embeddings montada para o acervo histórico.
 4. **Memória por cliente** (preferências, equipe recorrente, condicionantes) com score de confiança — a parte mais especulativa e cara do estudo; precisa de volume de uso real para ter o que aprender. Fica para depois do RAG estar validado.
 
 **Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
@@ -213,7 +223,7 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 - Jobs/WebSocket: usar Solid Queue + Solid Cable (já no Gemfile), não introduzir Redis/Sidekiq salvo necessidade concreta.
 - PostGIS: adicionar `activerecord-postgis-adapter`, habilitar extensão `postgis` via migration, ajustar `config/database.yml` para adapter `postgis`.
 - Preço é sempre calculado em Ruby, nunca pela IA — a IA só alimenta parâmetros de escopo (tipo de estudo, distância, sobreposições) que entram no motor de cálculo.
-- Layout do PDF é código (templates HTML/CSS + Grover), não gerado pela IA.
+- Layout do documento final vem do modelo `.docx` real da Papyrus (preenchido via `rubyzip`), não é gerado pela IA nem recriado em HTML/CSS — ver seção 8.
 - IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
 - Anexos de conversa (TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
