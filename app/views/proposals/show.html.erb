@@ -228,4 +228,25 @@
       </div>
     <% end %>
   </div>
+
+  <% if @proposal.generated_documents.attached? %>
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
+      <h2 class="font-semibold text-base-content mb-4">Documentos gerados</h2>
+
+      <ul class="flex flex-col gap-2">
+        <% @proposal.generated_documents.each do |document| %>
+          <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
+                <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+              </svg>
+              <span class="truncate text-sm text-base-content"><%= document.filename %></span>
+              <span class="text-xs text-base-content/50 shrink-0">(<%= document.created_at.strftime("%d/%m/%Y %H:%M") %>)</span>
+            </div>
+            <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
 </div>

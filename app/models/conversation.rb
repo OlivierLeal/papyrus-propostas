@@ -42,6 +42,44 @@ class Conversation < ApplicationRecord
     parte. Sua função é só identificar e organizar informações de escopo. Responda sempre em português.
   TEXT
 
+  # Passo a passo interno da Papyrus pra elaborar uma Proposta Técnica (documento cedido pela
+  # empresa). Uso interno da IA — não repita a lista inteira pro consultor a menos que ele peça.
+  PROPOSAL_CHECKLIST_INSTRUCTIONS = <<~TEXT.freeze
+    Passo a passo interno da Papyrus pra elaboração de uma Proposta Técnica:
+
+    1. Ler o TR e entender o que está sendo pedido. Nem sempre o cliente envia o TR, e cada empresa
+       apresenta as informações de um jeito diferente.
+    2. Se faltar documento necessário ou houver dúvida sobre o escopo, isso precisa ser resolvido
+       com o cliente (e-mail via Charlene) antes de prosseguir.
+    3. Enquadrar o empreendimento no órgão ambiental do estado onde fica o projeto (empreendimentos
+       em 2+ estados são federais, IBAMA).
+    4. Pesquisar propostas anteriores semelhantes em escopo, como base pra estruturar esta.
+    5. Confirmar dias de campo e deslocamento com a equipe técnica, se houver trabalho de campo.
+    6. Verificar se precisa de orçamento externo de prestadores (fauna, flora, meio físico,
+       arqueologia) — a flora normalmente é equipe interna.
+    7. Se for solicitar orçamento externo, confirmar se o prestador já tem NDA assinado.
+    8. Ter a planilha de orçamento completa: dias de campo, deslocamento, valores dos prestadores,
+       logística discriminada.
+    9. Consultar escopos e equipes técnicas já usados em serviços parecidos.
+    10. Se o TR exigir cronograma de execução, incluir — ainda não temos suporte estruturado pra
+        isso no sistema, avise o consultor que precisa ser montado à parte por enquanto.
+    11. Registro da proposta no controle interno (rede) e (13) revisão com a Sara acontecem depois
+        de gerado o rascunho — são lembretes pro consultor, nunca bloqueiam a geração.
+
+    Quando o consultor pedir para gerar a proposta técnica e/ou comercial, verifique os itens 1, 3,
+    4, 5, 6, 8 e 9 contra o que você já sabe desta conversa (TR, documentos complementares, equipe e
+    preço já definidos). Se faltar informação que bloqueia mesmo (TR pouco claro, dias de campo não
+    definidos, orçamento externo pendente, planilha de preço incompleta), NÃO chame a ferramenta —
+    diga exatamente o que falta e peça ao consultor. Os itens 2, 7 e 11 são administrativos e
+    internos da Papyrus — apenas lembre o consultor deles, nunca impeça a geração por causa deles.
+
+    Se nada bloquear, chame a ferramenta generate_proposal_document com o texto de cada seção
+    baseado em tudo que já foi lido nesta conversa (TR, documentos complementares, propostas
+    anteriores semelhantes). Nunca invente nome de cliente, CNPJ ou contato que você não tenha
+    visto em algum documento — escreva "A confirmar" nesses campos em vez de adivinhar. Preço,
+    equipe e formato do documento (único ou separado) a ferramenta já busca sozinha do sistema.
+  TEXT
+
   belongs_to :user
   belongs_to :study_type
   has_one :geospatial_result, dependent: :destroy
@@ -56,7 +94,23 @@ class Conversation < ApplicationRecord
 
   def apply_system_instructions!
     with_instructions(SYSTEM_INSTRUCTIONS)
+    with_instructions(PROPOSAL_CHECKLIST_INSTRUCTIONS, append: true)
     messages.where(role: "system").find_each { |message| message.update!(internal: true) }
+  end
+
+  PROPOSAL_STATE_MARKER = "[ESTADO ATUAL DA PROPOSTA]".freeze
+
+  # A IA só enxerga o que está no histórico do chat — os números da Tela de Precificação (que o
+  # consultor edita direto, fora do chat) nunca chegam até ela por conta própria. Sem isso, ao
+  # pedir "gera a proposta" ela acha que nada foi definido e trava à toa. Chamado antes de cada
+  # complete (ver RespondToMessageJob); apaga a versão anterior e recria, então nunca acumula
+  # nem fica desatualizado — e só existe depois que a proposta é criada (sem custo antes disso).
+  def refresh_proposal_state_snapshot!
+    return unless proposal
+
+    messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
+    snapshot = create_user_message(proposal_state_text)
+    snapshot.update!(internal: true)
   end
 
   def attachments_of_kind(kind)
@@ -114,5 +168,27 @@ class Conversation < ApplicationRecord
   private
     def merge_processing_steps!(patch)
       self.class.where(id: id).update_all([ "processing_steps = processing_steps || ?::jsonb", patch.to_json ])
+    end
+
+    def proposal_state_text
+      pricing = proposal.project_pricing
+      lines = pricing.proposal_professionals.includes(:professional).map do |pp|
+        "- #{pp.professional.name}: #{pp.deliverable_name} (#{pp.hours_office}h escritório, #{pp.hours_field}h campo)"
+      end.join("\n")
+
+      external_costs = pricing.external_costs.map { |c| "#{c['description']} (R$ #{c['value']})" }.join(", ")
+      logistics_filled = pricing.logistics_total.positive? || pricing.distance_km.positive?
+
+      <<~TEXT
+        #{PROPOSAL_STATE_MARKER} (gerado pelo sistema, sempre reflete o estado real da Tela de
+        Precificação — não pergunte isso ao consultor, apenas use como fato já resolvido):
+        - Status da proposta: #{proposal.status}
+        - Formato do documento: #{proposal.document_split == "separated" ? "técnica e comercial separadas" : "documento único"}
+        - Equipe e horas definidas:
+        #{lines.presence || "  (nenhuma linha definida ainda)"}
+        - Logística: #{pricing.logistics_days} dias de campo, #{pricing.distance_km} km de distância#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
+        - Custos externos: #{external_costs.presence || "nenhum lançado"}
+        - Preço total calculado: R$ #{pricing.total_value}
+      TEXT
     end
 end

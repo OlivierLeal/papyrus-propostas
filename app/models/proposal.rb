@@ -1,12 +1,56 @@
 class Proposal < ApplicationRecord
   belongs_to :conversation
   has_one :project_pricing, dependent: :destroy
+  has_many_attached :generated_documents
 
   STATUSES = %w[draft priced approved].freeze
   DOCUMENT_SPLITS = %w[combined separated].freeze
 
   validates :status, inclusion: { in: STATUSES }
   validates :document_split, inclusion: { in: DOCUMENT_SPLITS }
+
+  # Número da proposta = id da tabela (ver passo a passo interno, item 11) — automático, não é
+  # a IA que decide nem precisa de confirmação com a Charlene antes de gerar o rascunho.
+  def docx_numero_proposta
+    "PTC#{id.to_s.rjust(5, "0")}"
+  end
+
+  # Nome/qualificação da Equipe Técnica no DOCX vêm de dados reais do sistema (proposal_
+  # professionals + professionals.registration), nunca da IA — ela não deve inventar nome ou
+  # registro profissional de alguém. "Líder do projeto" = quem tem mais horas de escritório
+  # (normalmente quem coordena); "Segurança do trabalho" = quem tiver esse termo no cargo, se
+  # existir alguém assim na equipe desta proposta (em branco se não houver).
+  def team_slot_for_docx(role_hint: nil)
+    lines = project_pricing&.proposal_professionals&.includes(:professional).to_a || []
+    return [ "", "" ] if lines.empty?
+
+    line = if role_hint
+      lines.find { |l| l.professional.role.to_s.downcase.include?(role_hint.downcase) }
+    else
+      lines.max_by(&:hours_office)
+    end
+    return [ "", "" ] unless line
+
+    professional = line.professional
+    [ professional.name, [ professional.role, professional.registration ].compact_blank.join(" — ") ]
+  end
+
+  # Linhas do Quadro 10-1 (Preço) — direto de proposal_professionals + external_costs +
+  # logística, sem passar pela IA (CLAUDE.md seção 5: preço nunca é calculado ou descrito pela IA).
+  def docx_price_rows
+    pricing = project_pricing
+    rows = pricing.proposal_professionals.includes(:professional).map do |pp|
+      [ "#{pp.professional.name} — #{pp.deliverable_name}", format_currency(pp.subtotal) ]
+    end
+    rows += pricing.external_costs.map { |c| [ c["description"], format_currency(c["value"]) ] }
+    rows << [ "Logística (deslocamento, hospedagem, alimentação)", format_currency(pricing.logistics_total) ] if pricing.logistics_total.positive?
+    rows
+  end
+
+  # Linhas do Quadro 10-2 (Desembolso) — direto do payment_schedule já calculado.
+  def docx_payment_schedule_rows
+    project_pricing.payment_schedule_amounts.map { |item| [ item["label"], "#{item['percentage']}%" ] }
+  end
 
   # Pede pra IA sugerir horas por profissional/entregável com base em tudo que já foi
   # extraído do TR e dos documentos complementares desta conversa (CLAUDE.md seção 5).
@@ -39,6 +83,10 @@ class Proposal < ApplicationRecord
   end
 
   private
+    def format_currency(value)
+      ActionController::Base.helpers.number_to_currency(value, unit: "", separator: ",", delimiter: ".").strip
+    end
+
     def finalize!(pricing)
       pricing.recalculate!
       pricing
