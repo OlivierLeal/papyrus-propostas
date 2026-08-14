@@ -41,7 +41,9 @@ class ConversationsController < ApplicationController
   end
 
   def show
-    @setup_message = @conversation.messages.order(:created_at).first
+    # Não pode ser "a primeira mensagem por data" puro — as mensagens de sistema (prompt de
+    # escopo + checklist) são criadas antes desta e têm created_at igual/anterior.
+    @setup_message = @conversation.messages.where(role: "user", internal: false).order(:created_at).first
   end
 
   def confirm
