@@ -1,27 +1,20 @@
-# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
-
-one:
-  proposal: one
-  bdi: 9.99
-  tax_multiplier: 9.99
-  distance_km: 9.99
-  logistics_days: 1
-  rental_per_day: 9.99
-  meal_per_day: 9.99
-  fuel_total: 9.99
-  external_costs: 
-  payment_schedule: 
-  total_value: 9.99
-
-two:
-  proposal: two
-  bdi: 9.99
-  tax_multiplier: 9.99
-  distance_km: 9.99
-  logistics_days: 1
-  rental_per_day: 9.99
-  meal_per_day: 9.99
-  fuel_total: 9.99
-  external_costs: 
-  payment_schedule: 
-  total_value: 9.99
+priced_pricing:
+  proposal: priced_proposal
+  bdi: 1.20
+  tax_multiplier: 1.25
+  distance_km: 100
+  logistics_days: 5
+  rental_per_day: 150.00
+  meal_per_day: 80.00
+  fuel_total: 500.00
+  external_costs: []
+  payment_schedule:
+    - label: Assinatura do contrato
+      percentage: 30
+    - label: Protocolo no órgão ambiental
+      percentage: 60
+    - label: Vistoria
+      percentage: 5
+    - label: Emissão da licença
+      percentage: 5
+  total_value: 44910.00

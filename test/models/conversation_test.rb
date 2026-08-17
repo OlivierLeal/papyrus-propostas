@@ -1,0 +1,121 @@
+require "test_helper"
+
+class ConversationTest < ActiveSupport::TestCase
+  test "requires client_name" do
+    conversation = Conversation.new(user: users(:one), study_type: study_types(:eia_rima))
+    assert_not conversation.valid?
+    assert_includes conversation.errors[:client_name], "não pode ficar em branco"
+  end
+
+  test "requires a valid status" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.status = "estado_invalido"
+    assert_not conversation.valid?
+  end
+
+  test "status_label translates the status to Portuguese" do
+    conversation = conversations(:reviewing_conversation)
+    assert_equal "Em revisão", conversation.status_label
+  end
+
+  test "apply_system_instructions! creates two hidden system messages" do
+    conversation = conversations(:processing_conversation)
+    # Fixtures inserem via SQL puro e pulam callbacks — o before_save que resolve o Model (ruby_llm)
+    # só roda com um save de verdade, senão to_llm quebra tentando ler model_association.model_id.
+    conversation.save!
+
+    conversation.apply_system_instructions!
+
+    system_messages = conversation.messages.where(role: "system")
+    assert_equal 2, system_messages.count
+    assert system_messages.all?(&:internal?)
+  end
+
+  test "ask_internally hides the instruction but keeps the reply visible by default" do
+    conversation = conversations(:processing_conversation)
+
+    stub_ai_complete("resposta da IA") do
+      conversation.ask_internally("pergunta interna")
+    end
+
+    instruction = conversation.messages.where(role: "user").order(:created_at).last
+    reply = conversation.messages.where(role: "assistant").order(:created_at).last
+
+    assert instruction.internal?
+    assert_not reply.internal?
+    assert_equal "resposta da IA", reply.content
+  end
+
+  test "ask_internally with hide_response also hides the reply" do
+    conversation = conversations(:processing_conversation)
+
+    stub_ai_complete("json escondido") do
+      conversation.ask_internally("pergunta interna", hide_response: true)
+    end
+
+    reply = conversation.messages.where(role: "assistant").order(:created_at).last
+    assert reply.internal?
+  end
+
+  test "attachments_of_kind filters by the blob metadata kind" do
+    conversation = conversations(:reviewing_conversation)
+    message = conversation.messages.first
+    message.attachments.attach(
+      io: StringIO.new("conteúdo"), filename: "tr.pdf", content_type: "application/pdf",
+      metadata: { kind: "tr" }
+    )
+    message.attachments.attach(
+      io: StringIO.new("conteúdo"), filename: "extra.pdf", content_type: "application/pdf",
+      metadata: { kind: "complementary" }
+    )
+
+    assert_equal [ "tr.pdf" ], conversation.attachments_of_kind("tr").map { |a| a.filename.to_s }
+    assert_equal "tr.pdf", conversation.attachment_of_kind("tr").filename.to_s
+  end
+
+  test "mark_step! merges the step atomically and keeps other steps untouched" do
+    conversation = conversations(:processing_conversation)
+
+    conversation.mark_step!("tr", "done")
+
+    assert_equal "done", conversation.reload.processing_step_status("tr")
+    assert_equal "skipped", conversation.processing_step_status("comp_docs")
+  end
+
+  test "check_processing_complete! enqueues GenerateSummaryJob once tr and comp_docs are resolved" do
+    conversation = conversations(:processing_conversation)
+    conversation.mark_step!("tr", "done")
+
+    assert_enqueued_with(job: GenerateSummaryJob, args: [ conversation.id ]) do
+      conversation.check_processing_complete!
+    end
+  end
+
+  test "check_processing_complete! does not enqueue twice" do
+    conversation = conversations(:processing_conversation)
+    conversation.mark_step!("tr", "done")
+    conversation.check_processing_complete!
+
+    assert_no_enqueued_jobs only: GenerateSummaryJob do
+      conversation.check_processing_complete!
+    end
+  end
+
+  test "refresh_proposal_state_snapshot! does nothing without a proposal" do
+    conversation = conversations(:reviewing_conversation)
+    assert_no_difference -> { conversation.messages.count } do
+      conversation.refresh_proposal_state_snapshot!
+    end
+  end
+
+  test "refresh_proposal_state_snapshot! creates a single hidden marker reflecting the pricing state" do
+    conversation = conversations(:priced_conversation)
+
+    conversation.refresh_proposal_state_snapshot!
+    conversation.refresh_proposal_state_snapshot!
+
+    markers = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%")
+    assert_equal 1, markers.count
+    assert_includes markers.first.content, "Preço total calculado"
+  end
+end

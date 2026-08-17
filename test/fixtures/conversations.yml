@@ -1,0 +1,29 @@
+reviewing_conversation:
+  user: one
+  study_type: eia_rima
+  client_name: Serra Verde Energias Renováveis S.A.
+  status: reviewing
+  processing_steps:
+    tr: done
+    comp_docs: skipped
+    summary: done
+
+processing_conversation:
+  user: one
+  study_type: eia_rima
+  client_name: Cliente Em Processamento
+  status: processing
+  processing_steps:
+    tr: pending
+    comp_docs: skipped
+    summary: pending
+
+priced_conversation:
+  user: two
+  study_type: rap
+  client_name: Cliente Já Precificado
+  status: pricing
+  processing_steps:
+    tr: done
+    comp_docs: skipped
+    summary: done

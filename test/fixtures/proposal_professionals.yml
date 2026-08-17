@@ -1,17 +1,15 @@
-# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+coordenacao_line:
+  project_pricing: priced_pricing
+  professional: coordenador
+  deliverable_name: Coordenação geral
+  hours_office: 40
+  hours_field: 0
+  subtotal: 15000.00
 
-one:
-  project_pricing: one
-  professional: one
-  deliverable_name: MyString
-  hours_office: 9.99
-  hours_field: 9.99
-  subtotal: 9.99
-
-two:
-  project_pricing: two
-  professional: two
-  deliverable_name: MyString
-  hours_office: 9.99
-  hours_field: 9.99
-  subtotal: 9.99
+fauna_flora_line:
+  project_pricing: priced_pricing
+  professional: biologa
+  deliverable_name: Diagnóstico de fauna e flora
+  hours_office: 30
+  hours_field: 48
+  subtotal: 28260.00

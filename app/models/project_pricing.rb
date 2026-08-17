@@ -24,10 +24,14 @@ class ProjectPricing < ApplicationRecord
 
   # C6 = TOTAL = Σ profissionais + logística + externos
   def recalculate!
-    proposal_professionals.each { |pp| pp.recalculate_subtotal(bdi: bdi, tax_multiplier: tax_multiplier) }
+    # Usa a mesma lista de objetos pra calcular, salvar e somar — carregar a associação de novo
+    # (proposal_professionals.sum) logo após o save arriscaria pegar um cache desatualizado sem
+    # os subtotais recém-calculados, dependendo do que já tinha sido carregado antes na request.
+    lines = proposal_professionals.includes(:professional).to_a
+    lines.each { |pp| pp.recalculate_subtotal(bdi: bdi, tax_multiplier: tax_multiplier) }
     ActiveRecord::Base.transaction do
-      proposal_professionals.each(&:save!)
-      update!(total_value: (professionals_total + logistics_total + external_costs_total).round(2))
+      lines.each(&:save!)
+      update!(total_value: (lines.sum(&:subtotal) + logistics_total + external_costs_total).round(2))
     end
   end
 

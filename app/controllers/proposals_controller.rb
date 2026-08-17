@@ -4,6 +4,7 @@ class ProposalsController < ApplicationController
 
   def show
     @professionals = Professional.active.order(:name)
+    @proposal.project_pricing.proposal_professionals.includes(:professional).load
   end
 
   def create
@@ -82,7 +83,6 @@ class ProposalsController < ApplicationController
 
     def set_proposal
       @proposal = @conversation.proposal
-      @proposal.project_pricing.proposal_professionals.includes(:professional).load
     end
 
     def editable?

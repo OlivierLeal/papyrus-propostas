@@ -1,0 +1,20 @@
+reviewing_setup_message:
+  conversation: reviewing_conversation
+  role: user
+  content: "Arquivos enviados para análise — TR: tr.pdf."
+  internal: false
+
+reviewing_summary_message:
+  conversation: reviewing_conversation
+  role: assistant
+  content: |-
+    # RESUMO ESTRUTURADO
+
+    **Tipo de licença:** Licença Prévia (LP)
+  internal: false
+
+priced_setup_message:
+  conversation: priced_conversation
+  role: user
+  content: "Proposta criada sem arquivos anexados."
+  internal: false

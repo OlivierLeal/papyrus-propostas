@@ -1,11 +1,9 @@
-# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+eia_rima:
+  name: EIA-RIMA
+  code: eia_rima
+  description: Estudo de Impacto Ambiental e Relatório de Impacto Ambiental.
 
-one:
-  name: MyString
-  code: MyString
-  description: MyText
-
-two:
-  name: MyString
-  code: MyString
-  description: MyText
+rap:
+  name: RAP
+  code: rap
+  description: Relatório Ambiental Preliminar.

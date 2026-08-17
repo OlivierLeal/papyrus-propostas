@@ -1,19 +1,26 @@
-# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+coordenador:
+  name: Pedro Almeida
+  role: Coordenador Técnico
+  rate_office: 250.00
+  rate_field: 350.00
+  registration: CREA 12345
+  specialties: Coordenação de estudos ambientais
+  active: true
 
-one:
-  name: MyString
-  role: MyString
-  rate_office: 9.99
-  rate_field: 9.99
-  registration: MyString
-  specialties: MyString
-  active: false
+biologa:
+  name: Beth Ferreira
+  role: Bióloga
+  rate_office: 180.00
+  rate_field: 280.00
+  registration: CRBio 54321
+  specialties: Fauna e flora
+  active: true
 
-two:
-  name: MyString
-  role: MyString
-  rate_office: 9.99
-  rate_field: 9.99
-  registration: MyString
-  specialties: MyString
+inativo:
+  name: Profissional Inativo
+  role: Engenheiro Ambiental
+  rate_office: 200.00
+  rate_field: 300.00
+  registration: CREA 99999
+  specialties: Meio físico
   active: false

@@ -1,15 +1,13 @@
-# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+coordenacao_eia_rima:
+  study_type: eia_rima
+  professional: coordenador
+  deliverable_name: Coordenação geral
+  hours_office_default: 40
+  hours_field_default: 0
 
-one:
-  study_type: one
-  professional: one
-  deliverable_name: MyString
-  hours_office_default: 9.99
-  hours_field_default: 9.99
-
-two:
-  study_type: two
-  professional: two
-  deliverable_name: MyString
-  hours_office_default: 9.99
-  hours_field_default: 9.99
+fauna_flora_eia_rima:
+  study_type: eia_rima
+  professional: biologa
+  deliverable_name: Diagnóstico de fauna e flora
+  hours_office_default: 30
+  hours_field_default: 48
