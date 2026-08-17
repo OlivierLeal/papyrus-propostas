@@ -1,5 +1,5 @@
 class ConversationsController < ApplicationController
-  before_action :set_conversation, only: %i[ show confirm remove_attachment ]
+  before_action :set_conversation, only: %i[ show ]
   before_action :set_study_types, only: %i[ new create ]
 
   def index
@@ -37,50 +37,28 @@ class ConversationsController < ApplicationController
     complementary_documents.each { |doc| attach_with_kind(message, doc, "complementary") }
     message.save!
 
-    redirect_to @conversation, notice: "Arquivos enviados. Revise antes de confirmar."
+    start_processing!
+
+    redirect_to @conversation, notice: "Proposta criada e enviada para processamento."
   end
 
   def show
-    # Não pode ser "a primeira mensagem por data" puro — as mensagens de sistema (prompt de
-    # escopo + checklist) são criadas antes desta e têm created_at igual/anterior.
-    @setup_message = @conversation.messages.where(role: "user", internal: false).order(:created_at).first
-  end
-
-  def confirm
-    unless @conversation.status == "setup"
-      redirect_to @conversation, alert: "Esta proposta já foi enviada para processamento."
-      return
-    end
-
-    steps = Conversation::PROCESSING_STEPS.index_with do |step|
-      @conversation.attachments_of_kind(step == "comp_docs" ? "complementary" : step).any? ? "pending" : "skipped"
-    end.merge("summary" => "pending")
-
-    @conversation.update!(status: "processing", setup_completed_at: Time.current, processing_steps: steps)
-
-    ProcessTrJob.perform_later(@conversation.id) if steps["tr"] == "pending"
-    ProcessCompDocsJob.perform_later(@conversation.id) if steps["comp_docs"] == "pending"
-    @conversation.check_processing_complete!
-
-    redirect_to @conversation, notice: "Proposta confirmada e enviada para processamento."
-  end
-
-  def remove_attachment
-    unless @conversation.status == "setup"
-      redirect_to @conversation, alert: "Não é possível remover arquivos após o envio para processamento."
-      return
-    end
-
-    attachment = ActiveStorage::Attachment
-      .joins("INNER JOIN messages ON messages.id = active_storage_attachments.record_id")
-      .where(record_type: "Message", messages: { conversation_id: @conversation.id })
-      .find(params[:attachment_id])
-    attachment.purge
-
-    redirect_to @conversation, notice: "Arquivo removido."
   end
 
   private
+    # Dispara automaticamente ao criar a proposta — não existe mais uma etapa manual de
+    # "confirmar antes de processar" (ver CLAUDE.md, decisão revista).
+    def start_processing!
+      steps = Conversation::PROCESSING_STEPS.index_with do |step|
+        @conversation.attachments_of_kind(step == "comp_docs" ? "complementary" : step).any? ? "pending" : "skipped"
+      end.merge("summary" => "pending")
+
+      @conversation.update!(status: "processing", setup_completed_at: Time.current, processing_steps: steps)
+
+      ProcessTrJob.perform_later(@conversation.id) if steps["tr"] == "pending"
+      ProcessCompDocsJob.perform_later(@conversation.id) if steps["comp_docs"] == "pending"
+      @conversation.check_processing_complete!
+    end
     def set_conversation
       @conversation = Conversation.find(params[:id])
     end

@@ -4,11 +4,6 @@ Rails.application.routes.draw do
   resources :users, except: :show
 
   resources :conversations, only: %i[index new create show] do
-    member do
-      post :confirm
-      delete "attachments/:attachment_id", action: :remove_attachment, as: :remove_attachment
-    end
-
     resources :messages, only: :create
 
     resource :proposal, only: %i[show create update] do

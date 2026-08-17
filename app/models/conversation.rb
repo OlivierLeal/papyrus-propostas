@@ -88,6 +88,11 @@ class Conversation < ApplicationRecord
   validates :client_name, presence: true
   validates :status, inclusion: { in: STATUSES }
 
+  # Refresca a página inteira (só o que mudou, via morph — ver layout) sempre que a conversa é
+  # atualizada, ex.: status "processing" -> "reviewing". Cobre updates via `update!` normal; o
+  # merge atômico em mark_step! usa update_all (bypassa callback), por isso chama na mão lá embaixo.
+  broadcasts_refreshes
+
   def status_label
     STATUS_LABELS.fetch(status, status)
   end
@@ -148,7 +153,7 @@ class Conversation < ApplicationRecord
   def mark_step!(step, status)
     merge_processing_steps!(step.to_s => status)
     reload
-    broadcast_replace_to self, target: "processing_status", partial: "conversations/processing_status", locals: { conversation: self }
+    broadcast_refresh
   end
 
   # Chamado ao final de cada job de processamento; dispara o GenerateSummaryJob

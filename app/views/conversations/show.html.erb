@@ -14,38 +14,9 @@
     </span>
   </div>
 
-  <% if @conversation.status == "setup" %>
-    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-      <h2 class="font-semibold text-base-content mb-4">Arquivos enviados</h2>
+  <%= turbo_stream_from @conversation %>
 
-      <ul class="flex flex-col gap-2 mb-6">
-        <% @setup_message.attachments.each do |attachment| %>
-          <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
-            <div class="flex items-center gap-2 min-w-0">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
-                <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
-              </svg>
-              <span class="truncate text-sm text-base-content"><%= attachment.filename %></span>
-              <span class="text-xs text-base-content/50 shrink-0">(<%= number_to_human_size(attachment.byte_size) %>)</span>
-            </div>
-
-            <%= button_to remove_attachment_conversation_path(@conversation, attachment_id: attachment.id), method: :delete,
-                  class: "btn btn-ghost btn-xs btn-square text-error shrink-0",
-                  title: "Remover",
-                  form: { data: { turbo_confirm: "Remover #{attachment.filename}?" } } do %>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-              </svg>
-            <% end %>
-          </li>
-        <% end %>
-      </ul>
-
-      <%= button_to "Gerar Proposta", confirm_conversation_path(@conversation), class: "btn btn-primary w-full" %>
-    </div>
-  <% elsif @conversation.status.in?(%w[reviewing pricing completed]) %>
-    <%= turbo_stream_from @conversation %>
-
+  <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
       <div class="lg:col-span-1 flex flex-col gap-4">
         <%= render "processing_status", conversation: @conversation %>
@@ -59,7 +30,13 @@
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
                   <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
                 </svg>
-                <span class="truncate text-sm text-base-content"><%= attachment.filename %></span>
+                <span class="truncate text-sm text-base-content flex-1"><%= attachment.filename %></span>
+                <%= link_to rails_blob_path(attachment, disposition: "attachment"),
+                      class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar" do %>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+                    <path fill-rule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v6.638l1.96-2.158a.75.75 0 1 1 1.08 1.04l-3.25 3.5a.75.75 0 0 1-1.08 0l-3.25-3.5a.75.75 0 1 1 1.08-1.04l1.96 2.158V3.75A.75.75 0 0 1 10 3ZM3.75 13.5a.75.75 0 0 0-1.5 0v3.75a.75.75 0 0 0 .75.75h13.5a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-1.5 0v3H3.75v-3Z" clip-rule="evenodd" />
+                  </svg>
+                <% end %>
               </li>
             <% end %>
           </ul>
@@ -107,8 +84,6 @@
       </div>
     </div>
   <% else %>
-    <%= turbo_stream_from @conversation %>
-
     <%= render "processing_status", conversation: @conversation %>
   <% end %>
 </div>
