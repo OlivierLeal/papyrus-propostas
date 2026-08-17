@@ -31,7 +31,7 @@ class ConversationsController < ApplicationController
 
     @conversation.save!
     @conversation.apply_system_instructions!
-    message = @conversation.messages.build(role: "user", content: setup_message_content(tr, kmz, complementary_documents))
+    message = @conversation.messages.build(role: "user", content: setup_message_content(tr, kmz, complementary_documents, params[:notes]))
     attach_with_kind(message, tr, "tr") if tr.present?
     attach_with_kind(message, kmz, "kmz") if kmz.present?
     complementary_documents.each { |doc| attach_with_kind(message, doc, "complementary") }
@@ -112,14 +112,14 @@ class ConversationsController < ApplicationController
       file.original_filename.match?(/\.(kmz|kml)\z/i)
     end
 
-    def setup_message_content(tr, kmz, complementary_documents)
+    def setup_message_content(tr, kmz, complementary_documents, notes)
       parts = []
       parts << "TR: #{tr.original_filename}" if tr.present?
       parts << "KMZ: #{kmz.original_filename}" if kmz.present?
       parts << "#{complementary_documents.size} documento(s) complementar(es)" if complementary_documents.any?
 
-      return "Proposta criada sem arquivos anexados." if parts.empty?
-
-      "Arquivos enviados para análise — #{parts.join(', ')}."
+      content = parts.any? ? "Arquivos enviados para análise — #{parts.join(', ')}." : "Proposta criada sem arquivos anexados."
+      content += "\n\nObservações do consultor: #{notes.to_s.strip}" if notes.present?
+      content
     end
 end
