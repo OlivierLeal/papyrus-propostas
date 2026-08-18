@@ -81,6 +81,9 @@ group :development, :test do
 
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
+
+  # Linter/formatter HTML-aware para os templates ERB das views [https://github.com/marcoroth/herb]
+  gem "herb", require: false
 end
 
 group :development do

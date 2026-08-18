@@ -21,13 +21,15 @@ module ApplicationHelper
   ICON_PROPOSTAS = "M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2.75 6a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z"
 
   # Notificações de flash (shared/_flash.html.erb), no estilo dos "types" do Ant Design Notification.
+  # `text_class`/`bar_class` guardam o nome de classe completo em vez da cor solta: o Tailwind
+  # varre o código-fonte procurando classes literais e não enxerga nomes montados por interpolação.
   FLASH_TYPES = {
-    "notice"  => { title: "Sucesso",    color: "success", icon: :check },
-    "success" => { title: "Sucesso",    color: "success", icon: :check },
-    "alert"   => { title: "Erro",       color: "error",   icon: :error },
-    "error"   => { title: "Erro",       color: "error",   icon: :error },
-    "warning" => { title: "Atenção",    color: "warning", icon: :warning },
-    "info"    => { title: "Informação", color: "info",    icon: :info }
+    "notice"  => { title: "Sucesso",    text_class: "text-success", bar_class: "bg-success", icon: :check },
+    "success" => { title: "Sucesso",    text_class: "text-success", bar_class: "bg-success", icon: :check },
+    "alert"   => { title: "Erro",       text_class: "text-error",   bar_class: "bg-error",   icon: :error },
+    "error"   => { title: "Erro",       text_class: "text-error",   bar_class: "bg-error",   icon: :error },
+    "warning" => { title: "Atenção",    text_class: "text-warning", bar_class: "bg-warning", icon: :warning },
+    "info"    => { title: "Informação", text_class: "text-info",    bar_class: "bg-info",    icon: :info }
   }.freeze
 
   FLASH_ICON_PATHS = {

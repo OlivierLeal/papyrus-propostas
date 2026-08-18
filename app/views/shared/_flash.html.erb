@@ -7,7 +7,7 @@
            data-controller="flash-item"
            data-action="mouseenter->flash-item#pause mouseleave->flash-item#resume">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-             class="size-5 shrink-0 text-<%= config[:color] %>">
+             class="size-5 shrink-0 <%= config[:text_class] %>">
           <path fill-rule="evenodd" d="<%= ApplicationHelper::FLASH_ICON_PATHS[config[:icon]] %>" clip-rule="evenodd" />
         </svg>
 
@@ -23,7 +23,7 @@
           </svg>
         </button>
 
-        <div class="absolute bottom-0 left-0 h-0.5 bg-<%= config[:color] %> animate-[flash-progress_1.5s_linear_forwards]"
+        <div class="absolute bottom-0 left-0 h-0.5 <%= config[:bar_class] %> animate-[flash-progress_1.5s_linear_forwards]"
              data-flash-item-target="progress"></div>
       </div>
     <% end %>

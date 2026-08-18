@@ -77,7 +77,7 @@
                     data: { chat_attach_target: "input", action: "change->chat-attach#update" } %>
             </label>
             <input type="text" name="content" placeholder="Peça um ajuste, envie um documento..."
-                   class="input input-bordered flex-1">
+                   autocomplete="off" class="input input-bordered flex-1">
             <%= form.submit "Enviar", class: "btn btn-primary" %>
           </div>
         <% end %>

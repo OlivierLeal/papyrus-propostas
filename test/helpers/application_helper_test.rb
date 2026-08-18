@@ -32,17 +32,18 @@ class ApplicationHelperTest < ActionView::TestCase
   end
 
   test "flash_config returns the success config for notice and success" do
-    assert_equal "success", flash_config("notice")[:color]
-    assert_equal "success", flash_config("success")[:color]
+    assert_equal "text-success", flash_config("notice")[:text_class]
+    assert_equal "bg-success", flash_config("notice")[:bar_class]
+    assert_equal "text-success", flash_config("success")[:text_class]
   end
 
   test "flash_config returns the error config for alert and error" do
-    assert_equal "error", flash_config("alert")[:color]
-    assert_equal "error", flash_config("error")[:color]
+    assert_equal "text-error", flash_config("alert")[:text_class]
+    assert_equal "text-error", flash_config("error")[:text_class]
   end
 
   test "flash_config returns the warning config for warning" do
-    assert_equal "warning", flash_config("warning")[:color]
+    assert_equal "text-warning", flash_config("warning")[:text_class]
   end
 
   test "flash_config falls back to the info config for an unknown flash type" do
