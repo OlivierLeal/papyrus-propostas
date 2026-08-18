@@ -23,6 +23,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :escopo_e_metodologia, desc: "Texto da seção 'Escopo e Metodologia', descrevendo como o serviço será executado"
   param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
   param :produtos, type: "array", desc: "Lista dos produtos/entregáveis a serem entregues (ex.: \"EIA - Estudo de Impacto Ambiental\")"
+  param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
+    "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
   def initialize(proposal:)
     super()
@@ -30,25 +32,30 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   def execute(**args)
-    return { error: "A precificação ainda não está completa — não é possível gerar o documento agora." } unless @proposal.status.in?(%w[priced approved])
+    return { error: "A precificação ainda não está completa — não é possível gerar o documento agora." }.to_json unless @proposal.status.in?(%w[priced approved])
+
+    @proposal.increment!(:version)
+    description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
 
     filler = ProposalDocxFiller.new(Rails.root.join("app/templates/docx/proposta_tecnica_comercial.docx"))
     placeholders = build_placeholders(args)
-    tables = build_tables(args)
+    tables = build_tables(args, description)
 
     if @proposal.document_split == "separated"
       files = filler.fill_split(placeholders: placeholders, tables: tables)
-      attach!(files[:technical], "proposta_tecnica.docx", "tecnica")
-      attach!(files[:commercial], "proposta_comercial.docx", "comercial")
-      { success: true, message: "Gerados 2 arquivos: proposta_tecnica.docx e proposta_comercial.docx, disponíveis na Tela de Precificação." }
+      attach!(files[:technical], "proposta_tecnica.docx", "tecnica", description)
+      attach!(files[:commercial], "proposta_comercial.docx", "comercial", description)
+      { success: true, version: @proposal.version, filenames: %w[proposta_tecnica.docx proposta_comercial.docx],
+        message: "Gerados 2 arquivos: proposta_tecnica.docx e proposta_comercial.docx (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
     else
       bytes = filler.fill(placeholders: placeholders, tables: tables)
-      attach!(bytes, "proposta_tecnica_comercial.docx", "combined")
-      { success: true, message: "Gerado o arquivo proposta_tecnica_comercial.docx, disponível na Tela de Precificação." }
+      attach!(bytes, "proposta_tecnica_comercial.docx", "combined", description)
+      { success: true, version: @proposal.version, filenames: %w[proposta_tecnica_comercial.docx],
+        message: "Gerado o arquivo proposta_tecnica_comercial.docx (versão #{@proposal.version}), disponível na Tela de Precificação." }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
-    { error: "Não consegui gerar o documento agora. Tente novamente em instantes." }
+    { error: "Não consegui gerar o documento agora. Tente novamente em instantes." }.to_json
   end
 
   private
@@ -58,6 +65,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
       {
         "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta,
+        "REVISAO_ATUAL" => format("%02d", @proposal.version - 1),
         "DATA_EMISSAO_INICIAL" => Date.current.strftime("%d/%m/%Y"),
         "NOME_CLIENTE" => args[:nome_cliente],
         "CONTATO_CLIENTE" => args[:contato_cliente],
@@ -78,22 +86,23 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       }
     end
 
-    def build_tables(args)
+    def build_tables(args, description)
       produtos = Array(args[:produtos]).map { |nome| [ nome, "1", "Digital (PDF)" ] }
 
       {
+        0 => { rows: @proposal.docx_revision_rows(current_description: description) },
         1 => { rows: produtos },
         3 => { rows: @proposal.docx_price_rows, auto_number: true },
         4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
     end
 
-    def attach!(bytes, filename, kind)
+    def attach!(bytes, filename, kind, description)
       @proposal.generated_documents.attach(
         io: StringIO.new(bytes),
         filename: filename,
         content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        metadata: { kind: kind }
+        metadata: { kind: kind, version: @proposal.version, description: description }
       )
     end
 end

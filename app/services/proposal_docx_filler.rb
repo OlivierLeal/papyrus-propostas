@@ -20,6 +20,14 @@ class ProposalDocxFiller
   # for editado (parágrafo adicionado/removido antes da seção 10), esses números têm que ser
   # remapeados. 0..77 = capa + sumário de revisões + carta (compartilhado nos dois documentos);
   # 79..167 = seções 1 a 9 (técnica); 168.. = seção 10 em diante (comercial).
+  #
+  # ATENÇÃO ao editar o .docx do modelo diretamente (não os documentos gerados, o arquivo em si):
+  # nunca salve via Nokogiri (`doc.to_xml`) — o Word não indenta o XML, e o `to_xml` do Nokogiri
+  # insere texto de indentação entre as tags, dobrando a contagem de filhos de <w:body> (visto na
+  # prática: 206 -> 413) e quebrando esses índices pra sempre. Edite com substituição de string
+  # crua no XML (via rubyzip, rodando dentro do ambiente Rails com `bin/rails runner` — fora dele
+  # o arquivo resultante não abre direto no Word/LibreOffice, só depois de reprocessado por este
+  # próprio serviço) e confirme a contagem de filhos antes/depois bater.
   SHARED_FRONT_MATTER = (0..77)
   TECHNICAL_SECTIONS = (79..167)
   COMMERCIAL_SECTIONS = (168..9999)
@@ -78,8 +86,32 @@ class ProposalDocxFiller
       doc.xpath("//w:t", NS).each do |t|
         next unless t.text.include?("{{")
 
-        t.content = t.text.gsub(/\{\{(\w+)\}\}/) { values.fetch(::Regexp.last_match(1), "{{#{::Regexp.last_match(1)}}}").to_s }
+        replaced = t.text.gsub(/\{\{(\w+)\}\}/) { values.fetch(::Regexp.last_match(1), "{{#{::Regexp.last_match(1)}}}").to_s }
+
+        if replaced.include?("\n")
+          expand_into_paragraphs!(t, replaced)
+        else
+          t.content = replaced
+        end
       end
+    end
+
+    # Um <w:t> com "\n" literal não vira parágrafo novo no Word — e uma linha terminada por
+    # quebra manual nunca é justificada (jc="both" só estica linha que quebra sozinha por
+    # largura). Texto da IA em vários parágrafos (separados por "\n\n") saía sempre alinhado à
+    # esquerda por causa disso. Em vez de só trocar o texto, clonamos o <w:p> inteiro (preserva
+    # pPr/jc/fonte) uma vez por linha, então cada parágrafo da IA vira um <w:p> de verdade.
+    def expand_into_paragraphs!(t, replaced)
+      paragraph = t.at_xpath("ancestor::w:p", NS)
+      lines = replaced.split(/\n+/).map(&:strip).reject(&:empty?)
+      return (t.content = replaced) if paragraph.nil? || lines.size <= 1
+
+      lines.each do |line|
+        new_paragraph = paragraph.dup
+        new_paragraph.at_xpath(".//w:t", NS).content = line
+        paragraph.add_previous_sibling(new_paragraph)
+      end
+      paragraph.remove
     end
 
     # tbl: nó <w:tbl>. A 2ª linha (1ª de dados) vira o "molde": clonada se faltar linha,

@@ -3,4 +3,4 @@ priced_proposal:
   status: priced
   document_split: combined
   content_json: {}
-  version: 1
+  version: 0

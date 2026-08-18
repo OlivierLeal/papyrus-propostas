@@ -230,23 +230,57 @@
   </div>
 
   <% if @proposal.generated_documents.attached? %>
+    <% versions = @proposal.generated_documents.group_by { |d| d.blob.metadata["version"].to_i }.sort_by { |v, _| -v } %>
+    <% current_version, current_documents = versions.first %>
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
-      <h2 class="font-semibold text-base-content mb-4">Documentos gerados</h2>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-base-content">Documentos gerados</h2>
+        <span class="badge badge-soft badge-primary">Versão <%= current_version %> · atual</span>
+      </div>
+
+      <p class="text-sm text-base-content/60 mb-3">
+        <%= current_documents.first.blob.metadata["description"] %> ·
+        <%= current_documents.first.created_at.strftime("%d/%m/%Y %H:%M") %>
+      </p>
 
       <ul class="flex flex-col gap-2">
-        <% @proposal.generated_documents.each do |document| %>
+        <% current_documents.each do |document| %>
           <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
             <div class="flex items-center gap-2 min-w-0">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
                 <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
               </svg>
               <span class="truncate text-sm text-base-content"><%= document.filename %></span>
-              <span class="text-xs text-base-content/50 shrink-0">(<%= document.created_at.strftime("%d/%m/%Y %H:%M") %>)</span>
             </div>
             <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
           </li>
         <% end %>
       </ul>
+
+      <% if versions.size > 1 %>
+        <details class="mt-4">
+          <summary class="cursor-pointer text-sm text-base-content/60 hover:text-base-content">Histórico de versões anteriores (<%= versions.size - 1 %>)</summary>
+
+          <ul class="flex flex-col gap-3 mt-3">
+            <% versions[1..].each do |version, documents| %>
+              <li>
+                <p class="text-sm text-base-content/60 mb-1">
+                  Versão <%= version %> — <%= documents.first.blob.metadata["description"] %> ·
+                  <%= documents.first.created_at.strftime("%d/%m/%Y %H:%M") %>
+                </p>
+                <ul class="flex flex-col gap-2">
+                  <% documents.each do |document| %>
+                    <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
+                      <span class="truncate text-sm text-base-content"><%= document.filename %></span>
+                      <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
+                    </li>
+                  <% end %>
+                </ul>
+              </li>
+            <% end %>
+          </ul>
+        </details>
+      <% end %>
     </div>
   <% end %>
 </div>

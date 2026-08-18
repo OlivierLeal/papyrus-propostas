@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_11_192357) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_18_223000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -183,7 +183,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_11_192357) do
     t.string "pdf_url"
     t.string "status", default: "draft", null: false
     t.datetime "updated_at", null: false
-    t.integer "version", default: 1, null: false
+    t.integer "version", default: 0, null: false
     t.index ["conversation_id"], name: "index_proposals_on_conversation_id", unique: true
   end
 

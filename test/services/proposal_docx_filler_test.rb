@@ -82,6 +82,33 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal "15.000,00", cells[2]
   end
 
+  test "fill turns multi-paragraph placeholder text into separate justified paragraphs" do
+    multiline = "Primeiro parágrafo do objetivo.\n\nSegundo parágrafo do objetivo."
+    bytes = @filler.fill(placeholders: @placeholders.merge("OBJETIVO_SERVICOS" => multiline), tables: @tables)
+    doc = parsed_document(bytes)
+
+    first_p = doc.xpath("//w:p[.//w:t[contains(text(), 'Primeiro parágrafo')]]", NS).first
+    second_p = doc.xpath("//w:p[.//w:t[contains(text(), 'Segundo parágrafo')]]", NS).first
+
+    assert first_p.present?
+    assert second_p.present?
+    assert_not_equal first_p, second_p # parágrafos <w:p> de verdade, não um só com "\n" cru
+    assert_equal "both", first_p.at_xpath(".//w:pPr/w:jc", NS)["w:val"]
+    assert_equal "both", second_p.at_xpath(".//w:pPr/w:jc", NS)["w:val"]
+  end
+
+  test "fill_table also fills the SUMÁRIO DE REVISÕES table (index 0), same as any other table" do
+    tables = @tables.merge(0 => { rows: [ [ "01", "Ajuste de escopo", "18/08/2026" ] ] })
+    bytes = @filler.fill(placeholders: @placeholders, tables: tables)
+    doc = parsed_document(bytes)
+
+    revisoes_table = doc.xpath("//w:tbl", NS)[0]
+    data_rows = revisoes_table.xpath(".//w:tr", NS)[1..]
+
+    assert_equal 1, data_rows.size
+    assert_equal [ "01", "Ajuste de escopo", "18/08/2026" ], cell_texts(data_rows[0])
+  end
+
   test "fill_split produces two documents that only share the front matter" do
     result = @filler.fill_split(placeholders: @placeholders, tables: @tables)
 

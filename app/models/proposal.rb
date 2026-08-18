@@ -52,6 +52,26 @@ class Proposal < ApplicationRecord
     project_pricing.payment_schedule_amounts.map { |item| [ item["label"], "#{item['percentage']}%" ] }
   end
 
+  # Linhas da tabela "Sumário de Revisões" (página 2 do modelo) — cada geração vira uma linha
+  # nova, nunca apaga histórico. As versões passadas vêm do metadata já gravado nos blobs de
+  # generated_documents (version/description); a data de cada uma é a do próprio blob
+  # (created_at), sem precisar de coluna própria. Chamado com `version` já incrementado pra
+  # versão atual (ver GenerateProposalDocumentTool) — a linha dela entra por último.
+  def docx_revision_rows(current_description:)
+    # Blobs sem version no metadata são de antes desse controle existir — sem número de revisão
+    # nem descrição pra mostrar, não entram na tabela (evita linha "-1" em branco no documento).
+    past_rows = generated_documents.map(&:blob)
+      .select { |blob| blob.metadata["version"].present? }
+      .group_by { |blob| blob.metadata["version"] }
+      .map do |v, blobs|
+        blob = blobs.first
+        [ format("%02d", v.to_i - 1), blob.metadata["description"], blob.created_at.strftime("%d/%m/%Y") ]
+      end
+      .sort_by { |row| row[0] }
+
+    past_rows << [ format("%02d", version - 1), current_description, Date.current.strftime("%d/%m/%Y") ]
+  end
+
   # Pede pra IA sugerir horas por profissional/entregável com base em tudo que já foi
   # extraído do TR e dos documentos complementares desta conversa (CLAUDE.md seção 5).
   # A sugestão é restrita ao "menu" de profissionais/entregáveis do study_templates —

@@ -16,7 +16,25 @@
     <span class="text-xs text-base-content/40 px-1"><%= is_user ? "Você" : "IA" %></span>
 
     <div class="w-fit max-w-full rounded-box px-4 py-3 text-sm <%= is_user ? "bg-primary text-primary-content" : "bg-base-200 text-base-content" %>">
-      <% if parsed_content.is_a?(Hash) %>
+      <% if parsed_content.is_a?(Hash) && parsed_content["success"] && parsed_content["version"].present? %>
+        <% documents = message.conversation.proposal&.generated_documents&.select { |d| d.blob.metadata["version"].to_i == parsed_content["version"] } || [] %>
+        <div class="flex flex-col gap-3">
+          <p><%= parsed_content["message"] %></p>
+          <ul class="flex flex-col gap-2">
+            <% documents.each do |document| %>
+              <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-100/60">
+                <div class="flex items-center gap-2 min-w-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
+                    <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+                  </svg>
+                  <span class="truncate">Versão <%= parsed_content["version"] %> — <%= document.filename %></span>
+                </div>
+                <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-primary btn-xs shrink-0" %>
+              </li>
+            <% end %>
+          </ul>
+        </div>
+      <% elsif parsed_content.is_a?(Hash) %>
         <dl class="flex flex-col gap-2">
           <% parsed_content.each do |key, value| %>
             <div>

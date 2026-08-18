@@ -134,6 +134,31 @@ class ProposalTest < ActiveSupport::TestCase
     assert_includes rows, [ "Assinatura do contrato", "30%" ]
   end
 
+  test "docx_revision_rows has only the current row when nothing was generated before" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+
+    rows = proposal.docx_revision_rows(current_description: "Emissão Inicial")
+
+    assert_equal [ [ "00", "Emissão Inicial", Date.current.strftime("%d/%m/%Y") ] ], rows
+  end
+
+  test "docx_revision_rows keeps past versions (from generated_documents metadata) and appends the current one" do
+    proposal = proposals(:priced_proposal)
+    proposal.generated_documents.attach(
+      io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 1, description: "Emissão Inicial" }
+    )
+    proposal.update!(version: 2)
+
+    rows = proposal.docx_revision_rows(current_description: "Ajuste de escopo")
+
+    assert_equal 2, rows.size
+    assert_equal "00", rows[0][0]
+    assert_equal "Emissão Inicial", rows[0][1]
+    assert_equal [ "01", "Ajuste de escopo", Date.current.strftime("%d/%m/%Y") ], rows[1]
+  end
+
   test "docx_numero_proposta prefixes the record id with PTC padded to 5 digits" do
     proposal = proposals(:priced_proposal)
     assert_equal "PTC#{proposal.id.to_s.rjust(5, '0')}", proposal.docx_numero_proposta
