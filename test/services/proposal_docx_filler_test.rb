@@ -128,6 +128,22 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_not_includes technical_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
   end
 
+  test "fill_split applies technical_overrides and commercial_overrides on top of the shared placeholders" do
+    result = @filler.fill_split(
+      placeholders: @placeholders, tables: @tables,
+      technical_overrides: { "NOME_CLIENTE" => "Só na Técnica" },
+      commercial_overrides: { "NOME_CLIENTE" => "Só na Comercial" }
+    )
+
+    technical_xml = document_xml(result[:technical])
+    commercial_xml = document_xml(result[:commercial])
+
+    assert_includes technical_xml, "Só na Técnica"
+    assert_not_includes technical_xml, "Só na Comercial"
+    assert_includes commercial_xml, "Só na Comercial"
+    assert_not_includes commercial_xml, "Só na Técnica"
+  end
+
   test "fill_split keeps both resulting files valid, openable zip packages" do
     result = @filler.fill_split(placeholders: @placeholders, tables: @tables)
 

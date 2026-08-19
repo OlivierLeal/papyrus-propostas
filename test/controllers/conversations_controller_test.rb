@@ -101,4 +101,30 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     get conversation_path(conversations(:reviewing_conversation))
     assert_response :success
   end
+
+  test "show does not render the 'Gerados pela IA' divider when the proposal has no generated documents yet" do
+    get conversation_path(conversations(:priced_conversation))
+
+    assert_response :success
+    assert_no_match "Gerados pela IA", response.body
+  end
+
+  test "show lists only the current version's generated documents, under the 'Gerados pela IA' divider" do
+    proposal = proposals(:priced_proposal)
+    proposal.generated_documents.attach(
+      io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 1, description: "Emissão Inicial" }
+    )
+    proposal.generated_documents.attach(
+      io: StringIO.new("v2"), filename: "v2.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 2, description: "Ajuste" }
+    )
+
+    get conversation_path(proposal.conversation)
+
+    assert_response :success
+    assert_match "Gerados pela IA", response.body
+    assert_match "v2.docx", response.body
+    assert_no_match "v1.docx", response.body
+  end
 end

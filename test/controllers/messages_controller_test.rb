@@ -39,6 +39,16 @@ class MessagesControllerTest < ActionDispatch::IntegrationTest
     assert_match "Aguarde o processamento", response.body
   end
 
+  test "create responds with a turbo_stream that replaces the composer, without redirecting" do
+    assert_difference "@conversation.messages.count", 1 do
+      post conversation_messages_path(@conversation), params: { content: "Pode ajustar a equipe sugerida?" }, as: :turbo_stream
+    end
+
+    assert_response :success
+    assert_equal "text/vnd.turbo-stream.html", response.media_type
+    assert_match(/turbo-stream action="replace" target="message_composer"/, response.body)
+  end
+
   test "create attaches uploaded documents as complementary and defaults the content" do
     doc = fixture_file_upload("comp_sample.pdf", "application/pdf")
 

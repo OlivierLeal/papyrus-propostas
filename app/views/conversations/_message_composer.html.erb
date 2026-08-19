@@ -1,0 +1,21 @@
+<%= form_with url: conversation_messages_path(conversation), multipart: true, id: "message_composer",
+      class: "flex flex-col gap-2 p-6 pt-4 shrink-0 border-t border-base-300",
+      data: { controller: "chat-attach chat-composer",
+              action: "turbo:submit-start->chat-composer#lock turbo:submit-end->chat-composer#unlock" } do |form| %>
+  <p class="text-xs text-base-content/50 px-1 hidden" data-chat-attach-target="filenames"></p>
+
+  <div class="flex items-end gap-2">
+    <label class="btn btn-ghost btn-square shrink-0" title="Anexar documento complementar">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
+        <path fill-rule="evenodd" d="M8.75 2.75a3.5 3.5 0 0 0-3.5 3.5v6.5a2.5 2.5 0 0 0 5 0v-5.5a.75.75 0 0 1 1.5 0v5.5a4 4 0 1 1-8 0v-6.5a5 5 0 0 1 10 0v5.75a.75.75 0 0 1-1.5 0V6.25a3.5 3.5 0 0 0-3.5-3.5Z" clip-rule="evenodd" />
+      </svg>
+      <%= file_field_tag "documents[]", multiple: true, class: "hidden",
+            data: { chat_attach_target: "input", action: "change->chat-attach#update" } %>
+    </label>
+    <%= text_area_tag "content", nil, placeholder: "Peça um ajuste, envie um documento... (Enter envia, Shift+Enter pula linha)",
+          autocomplete: "off", rows: 1,
+          class: "textarea textarea-bordered flex-1 resize-none overflow-y-auto max-h-40 py-2 leading-normal",
+          data: { chat_composer_target: "input", action: "input->chat-composer#resize keydown->chat-composer#submitOnEnter" } %>
+    <%= form.submit "Enviar", class: "btn btn-primary", data: { chat_composer_target: "submit" } %>
+  </div>
+<% end %>

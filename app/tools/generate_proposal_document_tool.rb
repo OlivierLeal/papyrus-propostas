@@ -42,7 +42,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     tables = build_tables(args, description)
 
     if @proposal.document_split == "separated"
-      files = filler.fill_split(placeholders: placeholders, tables: tables)
+      files = filler.fill_split(
+        placeholders: placeholders, tables: tables,
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "" },
+        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "" }
+      )
       attach!(files[:technical], "proposta_tecnica.docx", "tecnica", description)
       attach!(files[:commercial], "proposta_comercial.docx", "comercial", description)
       { success: true, version: @proposal.version, filenames: %w[proposta_tecnica.docx proposta_comercial.docx],
@@ -66,6 +70,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       {
         "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta,
         "REVISAO_ATUAL" => format("%02d", @proposal.version - 1),
+        "TITULO_LINHA2" => "TÉCNICA E",
+        "TITULO_LINHA3" => "COMERCIAL",
         "DATA_EMISSAO_INICIAL" => Date.current.strftime("%d/%m/%Y"),
         "NOME_CLIENTE" => args[:nome_cliente],
         "CONTATO_CLIENTE" => args[:contato_cliente],

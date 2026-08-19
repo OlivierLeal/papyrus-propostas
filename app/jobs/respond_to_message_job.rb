@@ -4,7 +4,10 @@ class RespondToMessageJob < ApplicationJob
   def perform(conversation_id)
     conversation = Conversation.find(conversation_id)
     conversation.refresh_proposal_state_snapshot!
-    conversation.with_tool(GenerateProposalDocumentTool.new(proposal: conversation.proposal)) if conversation.proposal
+    if conversation.proposal
+      conversation.with_tool(GenerateProposalDocumentTool.new(proposal: conversation.proposal))
+      conversation.with_tool(AddExternalCostTool.new(proposal: conversation.proposal))
+    end
     conversation.complete
 
     message = conversation.messages.where(role: "assistant", internal: false).order(:created_at).last

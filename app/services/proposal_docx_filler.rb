@@ -40,10 +40,14 @@ class ProposalDocxFiller
     build(placeholders: placeholders, tables: tables)
   end
 
-  def fill_split(placeholders:, tables: {})
+  # technical_overrides/commercial_overrides: placeholders que diferem entre os dois arquivos
+  # (ex.: título da capa) — mesclados por cima de `placeholders` só na respectiva variante. Quem
+  # decide os valores é quem chama (ver GenerateProposalDocumentTool); este serviço não sabe o
+  # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
+  def fill_split(placeholders:, tables: {}, technical_overrides: {}, commercial_overrides: {})
     {
-      technical: build(placeholders: placeholders, tables: tables) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, TECHNICAL_SECTIONS ]) },
-      commercial: build(placeholders: placeholders, tables: tables) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, COMMERCIAL_SECTIONS ]) }
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, TECHNICAL_SECTIONS ]) },
+      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, COMMERCIAL_SECTIONS ]) }
     }
   end
 

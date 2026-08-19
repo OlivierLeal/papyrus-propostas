@@ -109,6 +109,29 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "Ajuste de escopo conforme pedido do consultor"
   end
 
+  test "the cover title matches the document: combined shows 'técnica e comercial', split shows only its own half" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool.execute(**@args)
+
+    combined_xml = document_xml(@proposal.generated_documents.first)
+    assert_includes combined_xml, "<w:t>TÉCNICA E</w:t>"
+    assert_includes combined_xml, "<w:t>COMERCIAL</w:t>"
+
+    @proposal.update!(document_split: "separated")
+    tool.execute(**@args)
+    @proposal.reload
+
+    technical_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "tecnica" })
+    commercial_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "comercial" })
+
+    assert_includes technical_xml, "<w:t>TÉCNICA</w:t>"
+    assert_not_includes technical_xml, "<w:t>COMERCIAL</w:t>"
+
+    assert_includes commercial_xml, "<w:t>COMERCIAL</w:t>"
+    assert_not_includes commercial_xml, "<w:t>TÉCNICA</w:t>"
+  end
+
   test "returns a friendly error and attaches nothing when the filler raises" do
     @proposal.update!(document_split: "combined")
     tool = GenerateProposalDocumentTool.new(proposal: @proposal)

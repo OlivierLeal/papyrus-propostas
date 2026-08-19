@@ -43,6 +43,22 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     assert_empty with_tool_calls # reviewing_conversation não tem proposal ainda
   end
 
+  test "registers both the document-generation and external-cost tools when there is a proposal" do
+    conversation = conversations(:priced_conversation)
+    with_tool_calls = []
+    original_method = Conversation.instance_method(:with_tool)
+    Conversation.define_method(:with_tool) { |tool| with_tool_calls << tool.class; self }
+
+    begin
+      stub_ai_complete("ok") { RespondToMessageJob.perform_now(conversation.id) }
+    ensure
+      Conversation.define_method(:with_tool, original_method)
+    end
+
+    assert_includes with_tool_calls, GenerateProposalDocumentTool
+    assert_includes with_tool_calls, AddExternalCostTool
+  end
+
   test "broadcasts a friendly error bubble and does not raise when the AI call errors out" do
     turbo_streams = capture_turbo_stream_broadcasts @conversation do
       stub_ai_error { RespondToMessageJob.perform_now(@conversation.id) }

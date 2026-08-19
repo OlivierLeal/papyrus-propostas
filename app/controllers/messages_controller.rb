@@ -23,7 +23,14 @@ class MessagesController < ApplicationController
       RespondToMessageJob.perform_later(@conversation.id)
     end
 
-    redirect_to @conversation
+    # turbo_stream (padrão dos forms com Turbo habilitado) só devolve o composer limpo — a
+    # mensagem em si já chega pra esta mesma aba via broadcast acima (WebSocket), sem precisar
+    # navegar a página inteira de novo. html continua existindo como fallback (JS desabilitado,
+    # ou os testes que ainda fazem POST simples).
+    respond_to do |format|
+      format.turbo_stream
+      format.html { redirect_to @conversation }
+    end
   end
 
   private

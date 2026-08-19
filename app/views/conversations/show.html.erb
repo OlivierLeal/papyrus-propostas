@@ -38,6 +38,32 @@
               </li>
             <% end %>
           </ul>
+
+          <% generated_documents = @conversation.proposal&.generated_documents&.to_a || [] %>
+          <% if generated_documents.any? %>
+            <div class="divider text-xs text-base-content/50 my-3">Gerados pela IA</div>
+
+            <% current_version = generated_documents.filter_map { |d| d.blob.metadata["version"] }.max %>
+            <ul class="flex flex-col gap-2">
+              <% generated_documents.select { |d| d.blob.metadata["version"] == current_version }.each do |document| %>
+                <li class="flex items-center gap-2 px-3 py-2 rounded-field bg-primary/5 min-w-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-primary shrink-0">
+                    <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+                  </svg>
+                  <span class="truncate text-sm text-base-content flex-1"><%= document.filename %></span>
+                  <% if current_version %>
+                    <span class="badge badge-ghost badge-xs shrink-0">v<%= current_version %></span>
+                  <% end %>
+                  <%= link_to rails_blob_path(document, disposition: "attachment"),
+                        class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar" do %>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+                      <path fill-rule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v6.638l1.96-2.158a.75.75 0 1 1 1.08 1.04l-3.25 3.5a.75.75 0 0 1-1.08 0l-3.25-3.5a.75.75 0 1 1 1.08-1.04l1.96 2.158V3.75A.75.75 0 0 1 10 3ZM3.75 13.5a.75.75 0 0 0-1.5 0v3.75a.75.75 0 0 0 .75.75h13.5a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-1.5 0v3H3.75v-3Z" clip-rule="evenodd" />
+                    </svg>
+                  <% end %>
+                </li>
+              <% end %>
+            </ul>
+          <% end %>
         </div>
 
         <% if @conversation.geospatial_result.present? %>
@@ -73,24 +99,7 @@
           <% end %>
         </div>
 
-        <%= form_with url: conversation_messages_path(@conversation), multipart: true,
-              class: "flex flex-col gap-2 p-6 pt-4 shrink-0 border-t border-base-300",
-              data: { controller: "chat-attach" } do |form| %>
-          <p class="text-xs text-base-content/50 px-1 hidden" data-chat-attach-target="filenames"></p>
-
-          <div class="flex items-center gap-2">
-            <label class="btn btn-ghost btn-square shrink-0" title="Anexar documento complementar">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
-                <path fill-rule="evenodd" d="M8.75 2.75a3.5 3.5 0 0 0-3.5 3.5v6.5a2.5 2.5 0 0 0 5 0v-5.5a.75.75 0 0 1 1.5 0v5.5a4 4 0 1 1-8 0v-6.5a5 5 0 0 1 10 0v5.75a.75.75 0 0 1-1.5 0V6.25a3.5 3.5 0 0 0-3.5-3.5Z" clip-rule="evenodd" />
-              </svg>
-              <%= file_field_tag "documents[]", multiple: true, class: "hidden",
-                    data: { chat_attach_target: "input", action: "change->chat-attach#update" } %>
-            </label>
-            <input type="text" name="content" placeholder="Peça um ajuste, envie um documento..."
-                   autocomplete="off" class="input input-bordered flex-1">
-            <%= form.submit "Enviar", class: "btn btn-primary" %>
-          </div>
-        <% end %>
+        <%= render "message_composer", conversation: @conversation %>
       </div>
     </div>
   <% else %>
