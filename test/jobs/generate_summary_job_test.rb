@@ -49,6 +49,23 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     assert_not_includes sent_prompt, "isso não é json"
   end
 
+  test "includes the geospatial summary in the prompt when a GeospatialResult exists" do
+    @conversation.create_geospatial_result!(area_ha: 478.07, perimeter_km: 8.75)
+
+    stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
+    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+
+    assert_includes sent_prompt, "Área: 478.07 ha"
+    assert_includes sent_prompt, "Perímetro: 8.75 km"
+  end
+
+  test "omits the geospatial section entirely when there is no GeospatialResult" do
+    stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
+    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+
+    assert_not_includes sent_prompt, "Dados geoespaciais"
+  end
+
   test "falls back to a placeholder message when there is no structured data yet" do
     sent_prompt = nil
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }

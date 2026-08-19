@@ -27,17 +27,19 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  test "create persists the conversation, applies system instructions and enqueues both processing jobs" do
+  test "create persists the conversation, applies system instructions and enqueues all processing jobs" do
     tr = fixture_file_upload("tr_sample.pdf", "application/pdf")
     kmz = fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz")
 
     assert_enqueued_with(job: ProcessTrJob) do
       assert_enqueued_with(job: ProcessCompDocsJob) do
-        assert_difference "Conversation.count", 1 do
-          post conversations_path, params: {
-            conversation: { client_name: "Cliente Novo", study_type_id: study_types(:eia_rima).id },
-            tr: tr, kmz: kmz, complementary_documents: [ fixture_file_upload("comp_sample.pdf", "application/pdf") ]
-          }
+        assert_enqueued_with(job: ProcessKmzJob) do
+          assert_difference "Conversation.count", 1 do
+            post conversations_path, params: {
+              conversation: { client_name: "Cliente Novo", study_type_id: study_types(:eia_rima).id },
+              tr: tr, kmz: kmz, complementary_documents: [ fixture_file_upload("comp_sample.pdf", "application/pdf") ]
+            }
+          end
         end
       end
     end
@@ -49,8 +51,8 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert conversation.messages.where(role: "system").exists?
   end
 
-  test "create works with no attachments at all (comp_docs and tr both skipped)" do
-    assert_no_enqueued_jobs(only: [ ProcessTrJob, ProcessCompDocsJob ]) do
+  test "create works with no attachments at all (tr, comp_docs and kmz all skipped)" do
+    assert_no_enqueued_jobs(only: [ ProcessTrJob, ProcessCompDocsJob, ProcessKmzJob ]) do
       post conversations_path, params: {
         conversation: { client_name: "Cliente Sem Arquivos", study_type_id: study_types(:eia_rima).id }
       }
@@ -60,6 +62,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to conversation
     assert_equal "skipped", conversation.processing_step_status("tr")
     assert_equal "skipped", conversation.processing_step_status("comp_docs")
+    assert_equal "skipped", conversation.processing_step_status("kmz")
   end
 
   test "create re-renders the form with errors when client_name is missing" do

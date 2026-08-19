@@ -6,6 +6,7 @@ reviewing_conversation:
   processing_steps:
     tr: done
     comp_docs: skipped
+    kmz: skipped
     summary: done
 
 processing_conversation:
@@ -16,6 +17,7 @@ processing_conversation:
   processing_steps:
     tr: pending
     comp_docs: skipped
+    kmz: skipped
     summary: pending
 
 priced_conversation:
@@ -26,4 +28,5 @@ priced_conversation:
   processing_steps:
     tr: done
     comp_docs: skipped
+    kmz: skipped
     summary: done

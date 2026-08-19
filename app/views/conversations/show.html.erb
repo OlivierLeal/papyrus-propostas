@@ -19,8 +19,6 @@
   <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
       <div class="lg:col-span-1 flex flex-col gap-4">
-        <%= render "processing_status", conversation: @conversation %>
-
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
           <h2 class="font-semibold text-base-content mb-4">Documentos</h2>
 
@@ -41,6 +39,18 @@
             <% end %>
           </ul>
         </div>
+
+        <% if @conversation.geospatial_result.present? %>
+          <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+            <h2 class="font-semibold text-base-content mb-4">Área do KMZ</h2>
+
+            <% if @conversation.geospatial_result.sketch_image.attached? %>
+              <%= image_tag @conversation.geospatial_result.sketch_image, alt: "Croqui do polígono da área de estudo", class: "w-full rounded-field border border-base-300 mb-3" %>
+            <% end %>
+
+            <p class="text-sm text-base-content/70"><%= @conversation.geospatial_result.summary_text %></p>
+          </div>
+        <% end %>
 
         <% if @conversation.status == "reviewing" %>
           <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>

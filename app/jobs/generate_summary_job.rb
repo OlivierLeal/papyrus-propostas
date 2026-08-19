@@ -21,7 +21,18 @@ class GenerateSummaryJob < ApplicationJob
         não estiver disponível, diga isso explicitamente em vez de inventar.
 
         #{extracted_data_summary(conversation)}
+
+        #{geospatial_summary(conversation)}
       TEXT
+    end
+
+    # Determinístico (KmzGeometryExtractor) — só informa o que já foi calculado, a IA não
+    # recalcula nem estima área/perímetro por conta própria (CLAUDE.md seção 1).
+    def geospatial_summary(conversation)
+      result = conversation.geospatial_result
+      return "" unless result
+
+      "Dados geoespaciais do KMZ (já calculados pelo sistema): #{result.summary_text}"
     end
 
     def extracted_data_summary(conversation)

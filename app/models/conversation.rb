@@ -13,12 +13,12 @@ class Conversation < ApplicationRecord
 
   # Etapas de processamento em background disparadas ao confirmar o setup.
   # "summary" roda depois que as etapas abaixo terminam (done/skipped/failed).
-  # KMZ/geoespacial ainda não entra aqui — ver GeospatialResult (pendente).
-  PROCESSING_STEPS = %w[tr comp_docs].freeze
+  PROCESSING_STEPS = %w[tr comp_docs kmz].freeze
 
   PROCESSING_STEP_LABELS = {
     "tr" => "Processando TR",
     "comp_docs" => "Analisando documentos complementares",
+    "kmz" => "Processando KMZ",
     "summary" => "Gerando resumo"
   }.freeze
 

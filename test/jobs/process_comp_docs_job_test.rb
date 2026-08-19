@@ -48,7 +48,7 @@ class ProcessCompDocsJobTest < ActiveSupport::TestCase
   end
 
   test "triggers GenerateSummaryJob once tr is already resolved" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "pending", "kmz" => "skipped", "summary" => "pending" })
 
     assert_enqueued_with(job: GenerateSummaryJob, args: [ @conversation.id ]) do
       ProcessCompDocsJob.perform_now(@conversation.id)

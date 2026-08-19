@@ -57,6 +57,7 @@ class ConversationsController < ApplicationController
 
       ProcessTrJob.perform_later(@conversation.id) if steps["tr"] == "pending"
       ProcessCompDocsJob.perform_later(@conversation.id) if steps["comp_docs"] == "pending"
+      ProcessKmzJob.perform_later(@conversation.id) if steps["kmz"] == "pending"
       @conversation.check_processing_complete!
     end
     def set_conversation
