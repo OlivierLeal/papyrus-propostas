@@ -4,6 +4,7 @@ require "tempfile"
 class ProposalDocxFillerTest < ActiveSupport::TestCase
   TEMPLATE_PATH = Rails.root.join("app/templates/docx/proposta_tecnica_comercial.docx")
   NS = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }.freeze
+  PNG_1X1 = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 
   setup do
     @filler = ProposalDocxFiller.new(TEMPLATE_PATH)
@@ -144,6 +145,55 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_not_includes commercial_xml, "Só na Técnica"
   end
 
+  test "fill embeds a real image when images: is given, and the placeholder text disappears" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, images: { "MAPA_AREA_ESTUDO" => PNG_1X1 })
+    xml = document_xml(bytes)
+
+    assert_includes xml, "<w:drawing>"
+    assert_includes xml, "rId_MAPA_AREA_ESTUDO"
+    assert_not_includes xml, "{{MAPA_AREA_ESTUDO}}"
+    assert_includes zip_entry_names(bytes), "word/media/mapa_area_estudo.png"
+
+    rels = zip_entry_content(bytes, "word/_rels/document.xml.rels")
+    assert_includes rels, %(Id="rId_MAPA_AREA_ESTUDO")
+    assert_includes rels, %(Target="media/mapa_area_estudo.png")
+  end
+
+  test "fill leaves the placeholder as plain text when no image is supplied for it" do
+    bytes = @filler.fill(placeholders: @placeholders.merge("MAPA_AREA_ESTUDO" => ""), tables: @tables, images: {})
+    xml = document_xml(bytes)
+
+    assert_not_includes xml, "{{MAPA_AREA_ESTUDO}}"
+    assert_not_includes xml, "rId_MAPA_AREA_ESTUDO"
+    assert_not_includes zip_entry_names(bytes), "word/media/mapa_area_estudo.png"
+  end
+
+  test "fill_split only keeps the map image in the technical variant (Caracterização do Empreendimento is section 4)" do
+    result = @filler.fill_split(placeholders: @placeholders, tables: @tables, images: { "MAPA_AREA_ESTUDO" => PNG_1X1 })
+
+    technical_xml = document_xml(result[:technical])
+    commercial_xml = document_xml(result[:commercial])
+
+    assert_includes technical_xml, "rId_MAPA_AREA_ESTUDO"
+    assert_not_includes commercial_xml, "rId_MAPA_AREA_ESTUDO"
+  end
+
+  test "fill_split still produces openable docx files when an image is embedded" do
+    result = @filler.fill_split(placeholders: @placeholders, tables: @tables, images: { "MAPA_AREA_ESTUDO" => PNG_1X1 })
+
+    result.each_value do |bytes|
+      Tempfile.create([ "split", ".docx" ], binmode: true) do |tmp|
+        tmp.write(bytes)
+        tmp.flush
+
+        Zip::File.open(tmp.path) do |zip|
+          assert zip.find_entry("[Content_Types].xml")
+          assert zip.find_entry("word/document.xml")
+        end
+      end
+    end
+  end
+
   test "fill_split keeps both resulting files valid, openable zip packages" do
     result = @filler.fill_split(placeholders: @placeholders, tables: @tables)
 
@@ -176,5 +226,21 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     def cell_texts(row)
       row.xpath(".//w:tc", NS).map { |cell| cell.xpath(".//w:t", NS).map(&:text).join }
+    end
+
+    def zip_entry_names(bytes)
+      Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
+        tmp.write(bytes)
+        tmp.flush
+        Zip::File.open(tmp.path) { |zip| return zip.entries.map(&:name) }
+      end
+    end
+
+    def zip_entry_content(bytes, entry_name)
+      Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
+        tmp.write(bytes)
+        tmp.flush
+        Zip::File.open(tmp.path) { |zip| return zip.read(entry_name).force_encoding("UTF-8") }
+      end
     end
 end

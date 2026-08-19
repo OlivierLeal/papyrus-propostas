@@ -38,12 +38,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
 
     filler = ProposalDocxFiller.new(Rails.root.join("app/templates/docx/proposta_tecnica_comercial.docx"))
-    placeholders = build_placeholders(args)
+    images = build_images
+    placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
 
     if @proposal.document_split == "separated"
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables,
+        placeholders: placeholders, tables: tables, images: images,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "" },
         commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "" }
       )
@@ -52,7 +53,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: %w[proposta_tecnica.docx proposta_comercial.docx],
         message: "Gerados 2 arquivos: proposta_tecnica.docx e proposta_comercial.docx (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
     else
-      bytes = filler.fill(placeholders: placeholders, tables: tables)
+      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images)
       attach!(bytes, "proposta_tecnica_comercial.docx", "combined", description)
       { success: true, version: @proposal.version, filenames: %w[proposta_tecnica_comercial.docx],
         message: "Gerado o arquivo proposta_tecnica_comercial.docx (versão #{@proposal.version}), disponível na Tela de Precificação." }.to_json
@@ -63,7 +64,17 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
-    def build_placeholders(args)
+    # Só o mapa real da Mapbox (PNG) entra no .docx — o croqui SVG de reserva (quando a Mapbox
+    # não está disponível) não tem como virar imagem embutida do Word sem conversão, então nesse
+    # caso o placeholder cai no fluxo de texto normal e sai em branco (ver build_placeholders).
+    def build_images
+      area_image = @proposal.conversation.geospatial_result&.area_image
+      return {} unless area_image&.attached? && area_image.content_type == "image/png"
+
+      { "MAPA_AREA_ESTUDO" => area_image.download }
+    end
+
+    def build_placeholders(args, images)
       lider = @proposal.team_slot_for_docx
       seguranca = @proposal.team_slot_for_docx(role_hint: "segurança")
 
@@ -89,7 +100,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "EQUIPE_LIDER_PROJETO_QUALIFICACAO" => lider[1],
         "EQUIPE_SEG_TRABALHO_NOME" => seguranca[0],
         "EQUIPE_SEG_TRABALHO_QUALIFICACAO" => seguranca[1]
-      }
+      }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }
     end
 
     def build_tables(args, description)

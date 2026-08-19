@@ -84,8 +84,8 @@
           <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
             <h2 class="font-semibold text-base-content mb-4">Área do KMZ</h2>
 
-            <% if @conversation.geospatial_result.sketch_image.attached? %>
-              <%= image_tag @conversation.geospatial_result.sketch_image, alt: "Croqui do polígono da área de estudo", class: "w-full rounded-field border border-base-300 mb-3" %>
+            <% if @conversation.geospatial_result.area_image.attached? %>
+              <%= image_tag @conversation.geospatial_result.area_image, alt: "Mapa da área de estudo", class: "w-full rounded-field border border-base-300 mb-3" %>
             <% end %>
 
             <p class="text-sm text-base-content/70"><%= @conversation.geospatial_result.summary_text %></p>

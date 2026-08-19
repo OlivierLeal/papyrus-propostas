@@ -30,11 +30,11 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     assert_equal "skipped", @conversation.reload.processing_step_status("kmz")
   end
 
-  test "processes a valid KMZ and populates the geospatial result, including the sketch image" do
+  test "processes a valid KMZ and populates the geospatial result, falling back to the SVG croqui when Mapbox is unavailable" do
     @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz(VALID_KML)
 
-    ProcessKmzJob.perform_now(@conversation.id)
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
 
     @conversation.reload
     assert_equal "done", @conversation.processing_step_status("kmz")
@@ -43,8 +43,23 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     assert result.present?
     assert_in_delta 478.07, result.area_ha, 0.5
     assert_in_delta 8.75, result.perimeter_km, 0.05
-    assert result.sketch_image.attached?
-    assert_equal "image/svg+xml", result.sketch_image.content_type
+    assert result.area_image.attached?
+    assert_equal "image/svg+xml", result.area_image.content_type
+  end
+
+  test "uses the real Mapbox map instead of the SVG croqui when it's available" do
+    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    attach_kmz(VALID_KML)
+
+    stub_mapbox_fetch("fake-png-bytes") { ProcessKmzJob.perform_now(@conversation.id) }
+
+    @conversation.reload
+    assert_equal "done", @conversation.processing_step_status("kmz")
+
+    result = @conversation.geospatial_result
+    assert result.area_image.attached?
+    assert_equal "image/png", result.area_image.content_type
+    assert_equal "fake-png-bytes", result.area_image.download
   end
 
   test "marks kmz as failed and does not raise when the KMZ has no polygon" do
@@ -72,5 +87,15 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
         io: StringIO.new(kml_content), filename: "area.kml", content_type: "application/vnd.google-earth.kml+xml",
         metadata: { kind: "kmz" }
       )
+    end
+
+    # Sem isso, ProcessKmzJob chamaria a Mapbox de verdade em todo teste (MAPBOX_API_KEY já vem
+    # do .env em qualquer ambiente via dotenv-rails, inclusive test).
+    def stub_mapbox_fetch(result)
+      original = MapboxStaticMap.instance_method(:fetch)
+      MapboxStaticMap.define_method(:fetch) { result }
+      yield
+    ensure
+      MapboxStaticMap.define_method(:fetch, original)
     end
 end

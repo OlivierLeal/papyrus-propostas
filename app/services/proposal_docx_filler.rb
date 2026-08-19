@@ -15,6 +15,13 @@
 class ProposalDocxFiller
   NS = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }.freeze
 
+  # Tamanho de exibição fixo pro mapa da área de estudo (6 x 4,5 pol, proporção 4:3 — mesma
+  # proporção pedida à Mapbox Static Images API, ver MapboxStaticMap::WIDTH/HEIGHT). EMU
+  # (914400 = 1 polegada) não depende da dimensão real do arquivo de imagem: o Word escala
+  # qualquer imagem pro cx/cy pedido, então não precisamos ler os pixels de verdade.
+  IMAGE_WIDTH_EMU = 5486400
+  IMAGE_HEIGHT_EMU = 4114800
+
   # Índices dos filhos diretos de <w:body> no modelo atual (app/templates/docx/proposta_tecnica_
   # comercial.docx) — não são cálculo, foram mapeados inspecionando o XML do modelo. Se o modelo
   # for editado (parágrafo adicionado/removido antes da seção 10), esses números têm que ser
@@ -36,31 +43,39 @@ class ProposalDocxFiller
     @template_path = template_path
   end
 
-  def fill(placeholders:, tables: {})
-    build(placeholders: placeholders, tables: tables)
+  # images: { "MAPA_AREA_ESTUDO" => bytes_png } — substitui o <w:r> do parágrafo que contém
+  # literalmente "{{TOKEN}}" por uma imagem embutida de verdade (ver #fill_images!). Quem chama
+  # decide se manda bytes aqui ou "" em `placeholders` pro mesmo token (nunca os dois).
+  def fill(placeholders:, tables: {}, images: {})
+    build(placeholders: placeholders, tables: tables, images: images)
   end
 
   # technical_overrides/commercial_overrides: placeholders que diferem entre os dois arquivos
   # (ex.: título da capa) — mesclados por cima de `placeholders` só na respectiva variante. Quem
   # decide os valores é quem chama (ver GenerateProposalDocumentTool); este serviço não sabe o
   # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
-  def fill_split(placeholders:, tables: {}, technical_overrides: {}, commercial_overrides: {})
+  def fill_split(placeholders:, tables: {}, images: {}, technical_overrides: {}, commercial_overrides: {})
     {
-      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, TECHNICAL_SECTIONS ]) },
-      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, COMMERCIAL_SECTIONS ]) }
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, TECHNICAL_SECTIONS ]) },
+      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, COMMERCIAL_SECTIONS ]) }
     }
   end
 
   private
     # Sempre opera numa cópia descartável — Zip::File#open com bloco reescreve o arquivo no
     # próprio caminho ao sair do bloco, então nunca toca no modelo original.
-    def build(placeholders:, tables:)
+    def build(placeholders:, tables:, images: {})
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
         FileUtils.cp(@template_path, tmp.path)
 
         Zip::File.open(tmp.path) do |zip|
           doc = Nokogiri::XML(zip.read("word/document.xml"))
 
+          # Antes de fill_simple_placeholders!, pra achar o token "{{TOKEN}}" intacto no <w:t>.
+          # Roda também pra variantes que depois são cortadas por trim_body! (ex.: comercial em
+          # fill_split) — a seção some do documento final de qualquer forma, então a única sobra é
+          # uma mídia/relationship sem uso no zip, inofensiva (Word/LibreOffice ignoram sem erro).
+          fill_images!(doc, images, zip)
           fill_simple_placeholders!(doc, placeholders)
           tables.each do |table_index, config|
             table_node = doc.xpath("//w:tbl", NS)[table_index]
@@ -86,6 +101,42 @@ class ProposalDocxFiller
         node.remove unless keep_indices.include?(i) || node.name == "sectPr"
       end
     end
+    # Troca o <w:r> do parágrafo que contém "{{TOKEN}}" por uma imagem embutida de verdade — 3
+    # mudanças coordenadas no mesmo zip: arquivo novo em word/media/, relationship novo em
+    # document.xml.rels, e um <w:drawing><wp:inline> no lugar do run (ver plano no topo do
+    # arquivo). Token sem entrada em `images` simplesmente não é tocado aqui.
+    def fill_images!(doc, images, zip)
+      images.each do |token, bytes|
+        next unless bytes
+
+        text_node = doc.xpath("//w:t[contains(text(), '{{#{token}}}')]", NS).first
+        run = text_node&.at_xpath("ancestor::w:r", NS)
+        next unless run
+
+        filename = "#{token.downcase}.png"
+        rel_id = "rId_#{token}"
+        zip.get_output_stream("word/media/#{filename}") { |f| f.write(bytes) }
+        add_image_relationship!(zip, rel_id, filename)
+
+        run.replace(Nokogiri::XML::DocumentFragment.parse(drawing_run_xml(rel_id, filename)))
+      end
+    end
+
+    def add_image_relationship!(zip, rel_id, filename)
+      rels_xml = zip.read("word/_rels/document.xml.rels")
+      relationship = %(<Relationship Id="#{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/#{filename}"/>)
+      zip.get_output_stream("word/_rels/document.xml.rels") { |f| f.write(rels_xml.sub("</Relationships>", "#{relationship}</Relationships>")) }
+    end
+
+    # xmlns de w/wp/r/a/pic auto-declarados aqui pra ficar autossuficiente — o fragmento é
+    # parseado fora do contexto do documento principal (sem herdar as declarações da raiz
+    # <w:document>), então precisa carregar as próprias.
+    def drawing_run_xml(rel_id, filename)
+      <<~XML
+        <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="#{IMAGE_WIDTH_EMU}" cy="#{IMAGE_HEIGHT_EMU}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="9001" name="#{filename}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="#{filename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="#{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="#{IMAGE_WIDTH_EMU}" cy="#{IMAGE_HEIGHT_EMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>
+      XML
+    end
+
     def fill_simple_placeholders!(doc, values)
       doc.xpath("//w:t", NS).each do |t|
         next unless t.text.include?("{{")

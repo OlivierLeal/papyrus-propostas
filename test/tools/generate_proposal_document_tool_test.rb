@@ -132,6 +132,31 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_not_includes commercial_xml, "<w:t>TÉCNICA</w:t>"
   end
 
+  test "embeds the real Mapbox map in the docx when the geospatial result has a PNG area_image" do
+    @proposal.update!(document_split: "combined")
+    attach_area_image!("image/png")
+    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "rId_MAPA_AREA_ESTUDO"
+    assert_not_includes xml, "{{MAPA_AREA_ESTUDO}}"
+    assert_includes zip_entry_names(@proposal.generated_documents.first), "word/media/mapa_area_estudo.png"
+  end
+
+  test "leaves the map placeholder blank when there's no PNG area_image (SVG croqui fallback or no geospatial_result at all)" do
+    @proposal.update!(document_split: "combined")
+    attach_area_image!("image/svg+xml")
+    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_not_includes xml, "rId_MAPA_AREA_ESTUDO"
+    assert_not_includes xml, "{{MAPA_AREA_ESTUDO}}"
+  end
+
   test "returns a friendly error and attaches nothing when the filler raises" do
     @proposal.update!(document_split: "combined")
     tool = GenerateProposalDocumentTool.new(proposal: @proposal)
@@ -152,7 +177,20 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   end
 
   private
+    # PNG mínimo (1x1) válido — só precisa abrir como imagem de verdade, não importa o conteúdo.
+    PNG_1X1 = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+
+    def attach_area_image!(content_type)
+      result = @proposal.conversation.create_geospatial_result!(area_ha: 10.0, perimeter_km: 1.0)
+      bytes = content_type == "image/png" ? PNG_1X1 : "<svg></svg>"
+      result.area_image.attach(io: StringIO.new(bytes), filename: "area.#{content_type == 'image/png' ? 'png' : 'svg'}", content_type: content_type)
+    end
+
     def document_xml(document)
       Zip::File.open(ActiveStorage::Blob.service.path_for(document.blob.key)) { |zip| zip.read("word/document.xml") }.force_encoding("UTF-8")
+    end
+
+    def zip_entry_names(document)
+      Zip::File.open(ActiveStorage::Blob.service.path_for(document.blob.key)) { |zip| zip.entries.map(&:name) }
     end
 end
