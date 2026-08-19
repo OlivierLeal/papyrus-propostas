@@ -1,6 +1,5 @@
 class ConversationsController < ApplicationController
-  before_action :set_conversation, only: %i[ show ]
-  before_action :set_study_types, only: %i[ new create ]
+  before_action :set_conversation, only: %i[ show update ]
 
   def index
     @conversations = Conversation.includes(:user, :study_type).order(created_at: :desc)
@@ -18,10 +17,10 @@ class ConversationsController < ApplicationController
       return
     end
 
-    tr = params[:tr]
+    trs = Array(params[:tr]).reject(&:blank?)
     kmz = params[:kmz]
     complementary_documents = Array(params[:complementary_documents]).reject(&:blank?)
-    file_errors = validate_setup_files(tr, kmz)
+    file_errors = validate_setup_files(trs, kmz)
 
     if file_errors.any?
       @conversation.errors.add(:base, file_errors.join(" "))
@@ -31,8 +30,8 @@ class ConversationsController < ApplicationController
 
     @conversation.save!
     @conversation.apply_system_instructions!
-    message = @conversation.messages.build(role: "user", content: setup_message_content(tr, kmz, complementary_documents, params[:notes]))
-    attach_with_kind(message, tr, "tr") if tr.present?
+    message = @conversation.messages.build(role: "user", content: setup_message_content(trs, kmz, complementary_documents, params[:notes]))
+    trs.each { |tr| attach_with_kind(message, tr, "tr") }
     attach_with_kind(message, kmz, "kmz") if kmz.present?
     complementary_documents.each { |doc| attach_with_kind(message, doc, "complementary") }
     message.save!
@@ -43,6 +42,13 @@ class ConversationsController < ApplicationController
   end
 
   def show
+  end
+
+  # Único jeito de definir/corrigir o tipo de estudo depois da criação — nunca no setup (ver
+  # ProcessTrJob#assign_study_type!, que já preenche isso sozinho lendo a TR).
+  def update
+    @conversation.update!(study_type_params)
+    redirect_to @conversation, notice: "Tipo de estudo atualizado."
   end
 
   private
@@ -64,17 +70,17 @@ class ConversationsController < ApplicationController
       @conversation = Conversation.find(params[:id])
     end
 
-    def set_study_types
-      @study_types = StudyType.order(:name)
-    end
-
     def conversation_params
-      params.require(:conversation).permit(:client_name, :study_type_id)
+      params.require(:conversation).permit(:client_name)
     end
 
-    def validate_setup_files(tr, kmz)
+    def study_type_params
+      params.require(:conversation).permit(:study_type_id)
+    end
+
+    def validate_setup_files(trs, kmz)
       errors = []
-      errors << "TR deve ser um arquivo PDF ou DOCX." if tr.present? && !tr_content_type?(tr)
+      errors << "TR deve ser um arquivo PDF ou DOCX." if trs.any? { |tr| !tr_content_type?(tr) }
       errors << "KMZ deve ser um arquivo .kmz ou .kml." if kmz.present? && !kmz_filename?(kmz)
       errors
     end
@@ -91,9 +97,9 @@ class ConversationsController < ApplicationController
       file.original_filename.match?(/\.(kmz|kml)\z/i)
     end
 
-    def setup_message_content(tr, kmz, complementary_documents, notes)
+    def setup_message_content(trs, kmz, complementary_documents, notes)
       parts = []
-      parts << "TR: #{tr.original_filename}" if tr.present?
+      parts << "TR: #{trs.map(&:original_filename).join(', ')}" if trs.any?
       parts << "KMZ: #{kmz.original_filename}" if kmz.present?
       parts << "#{complementary_documents.size} documento(s) complementar(es)" if complementary_documents.any?
 

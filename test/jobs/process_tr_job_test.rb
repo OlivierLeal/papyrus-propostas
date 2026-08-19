@@ -34,6 +34,99 @@ class ProcessTrJobTest < ActiveSupport::TestCase
     assert reply.internal? # ProcessTrJob usa hide_response: true — o JSON bruto não é pro consultor ver
   end
 
+  test "sends every TR attachment together in a single call, not one per file" do
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "anexo_tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    stub_ai_complete('{"tipo_licenca": "LP"}') { ProcessTrJob.perform_now(@conversation.id) }
+
+    @conversation.reload
+    assert_equal "done", @conversation.processing_step_status("tr")
+    # Uma instrução e uma resposta só — os dois arquivos foram lidos juntos, não em duas chamadas.
+    assert_equal 1, @conversation.messages.where(role: "user", internal: true).count
+    assert_equal 1, @conversation.messages.where(role: "assistant").count
+  end
+
+  test "assigns the study type when the AI answers with a real code from the menu" do
+    @conversation.update_column(:study_type_id, nil)
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    stub_ai_complete('{"tipo_estudo_codigo": "eia_rima"}') { ProcessTrJob.perform_now(@conversation.id) }
+
+    assert_equal study_types(:eia_rima), @conversation.reload.study_type
+  end
+
+  test "the prompt lists the real study_type menu and asks for one of its codes" do
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    stub_ai_complete('{"tipo_estudo_codigo": "eia_rima"}') { ProcessTrJob.perform_now(@conversation.id) }
+    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+
+    assert_includes sent_prompt, "código: eia_rima"
+    assert_includes sent_prompt, "código: rap"
+  end
+
+  test "assigns the study type even when the AI wraps the JSON reply in markdown fences" do
+    # Achado em teste manual com IA real: o Gemini/Bedrock às vezes ignora "sem markdown" e
+    # embrulha em ```json ... ``` — sem tirar isso antes do parse, a atribuição falhava em
+    # silêncio (ver AiJsonResponse).
+    @conversation.update_column(:study_type_id, nil)
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    fenced_reply = "```json\n{\"tipo_estudo_codigo\": \"eia_rima\"}\n```"
+    stub_ai_complete(fenced_reply) { ProcessTrJob.perform_now(@conversation.id) }
+
+    assert_equal study_types(:eia_rima), @conversation.reload.study_type
+  end
+
+  test "does not assign a study type when the AI invents a code outside the menu" do
+    @conversation.update_column(:study_type_id, nil)
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    stub_ai_complete('{"tipo_estudo_codigo": "tipo_que_nao_existe"}') { ProcessTrJob.perform_now(@conversation.id) }
+
+    assert_nil @conversation.reload.study_type_id
+  end
+
+  test "does not assign a study type and does not raise when the AI reply isn't valid JSON" do
+    @conversation.update_column(:study_type_id, nil)
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    stub_ai_complete("isso não é json") { ProcessTrJob.perform_now(@conversation.id) }
+
+    @conversation.reload
+    assert_equal "done", @conversation.processing_step_status("tr")
+    assert_nil @conversation.study_type_id
+  end
+
+  test "does not overwrite a study type that was already set" do
+    original = @conversation.study_type
+
+    stub_ai_complete('{"tipo_estudo_codigo": "rap"}') { ProcessTrJob.perform_now(@conversation.id) }
+
+    assert_equal original, @conversation.reload.study_type
+  end
+
   test "marks tr as failed and does not raise when the AI call errors out" do
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(

@@ -36,18 +36,10 @@ class GenerateSummaryJob < ApplicationJob
     end
 
     def extracted_data_summary(conversation)
-      parsed_findings = conversation.messages.where(role: "assistant").filter_map { |message| parse_json(message.content) }
+      parsed_findings = conversation.messages.where(role: "assistant").filter_map { |message| AiJsonResponse.parse(message.content) }
       return "Nenhum dado estruturado disponível ainda." if parsed_findings.empty?
 
       parsed_findings.map { |hash| format_hash(hash) }.join("\n\n")
-    end
-
-    def parse_json(text)
-      return nil if text.blank?
-
-      JSON.parse(text)
-    rescue JSON::ParserError
-      nil
     end
 
     def format_hash(hash)

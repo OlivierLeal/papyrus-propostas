@@ -8,8 +8,13 @@ class ProposalsController < ApplicationController
   end
 
   def create
-    unless @conversation.status == "reviewing"
+    if @conversation.status != "reviewing"
       redirect_to @conversation, alert: "A proposta só pode ser precificada depois da revisão."
+      return
+    end
+
+    if @conversation.study_type.blank?
+      redirect_to @conversation, alert: "Defina o tipo de estudo antes de avançar para a precificação."
       return
     end
 

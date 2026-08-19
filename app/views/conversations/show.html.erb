@@ -7,7 +7,7 @@
     <% end %>
     <div>
       <h1 class="font-display text-2xl font-bold text-base-content leading-tight"><%= @conversation.client_name %></h1>
-      <p class="text-sm text-base-content/60"><%= @conversation.study_type.name %></p>
+      <p class="text-sm text-base-content/60"><%= @conversation.study_type&.name || "Tipo de estudo: aguardando identificação da IA" %></p>
     </div>
     <span class="badge badge-soft ml-auto <%= @conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
       <%= @conversation.status_label %>
@@ -19,6 +19,20 @@
   <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
       <div class="lg:col-span-1 flex flex-col gap-4">
+        <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+          <h2 class="font-semibold text-base-content mb-4">Tipo de estudo</h2>
+
+          <% if @conversation.study_type.present? %>
+            <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, class: "flex items-center gap-2" do |form| %>
+              <%= form.collection_select :study_type_id, StudyType.order(:name), :id, :name, {}, class: "select select-bordered select-sm flex-1" %>
+              <%= form.submit "Salvar", class: "btn btn-ghost btn-sm" %>
+            <% end %>
+            <p class="text-xs text-base-content/50 mt-2">Identificado pela IA a partir da TR — troque aqui se achar que ela errou.</p>
+          <% else %>
+            <p class="text-sm text-base-content/60">Aguardando identificação pela IA — precisa de um TR enviado no setup da proposta pra continuar.</p>
+          <% end %>
+        </div>
+
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
           <h2 class="font-semibold text-base-content mb-4">Documentos</h2>
 
@@ -78,8 +92,10 @@
           </div>
         <% end %>
 
-        <% if @conversation.status == "reviewing" %>
+        <% if @conversation.status == "reviewing" && @conversation.study_type.present? %>
           <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
+        <% elsif @conversation.status == "reviewing" %>
+          <button class="btn btn-primary w-full" disabled>Avançar para Precificação</button>
         <% elsif @conversation.status.in?(%w[pricing completed]) %>
           <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
         <% end %>

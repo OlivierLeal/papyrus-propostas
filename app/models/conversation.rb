@@ -81,7 +81,9 @@ class Conversation < ApplicationRecord
   TEXT
 
   belongs_to :user
-  belongs_to :study_type
+  # Não é escolhido no setup — a IA identifica lendo a TR (ver ProcessTrJob#assign_study_type!),
+  # restrito ao menu real de StudyType. Fica nil até isso acontecer (ou se não houver TR).
+  belongs_to :study_type, optional: true
   has_one :geospatial_result, dependent: :destroy
   has_one :proposal, dependent: :destroy
 
@@ -118,8 +120,13 @@ class Conversation < ApplicationRecord
     snapshot.update!(internal: true)
   end
 
+  # Só mensagens internal: false — o ruby_llm, ao enviar um anexo pra IA via `with:` em
+  # ask_internally, persiste uma cópia do attachment na própria mensagem de instrução (internal:
+  # true) que carrega o prompt. Sem esse filtro, cada chamada a ask_internally(with: anexo) faz
+  # esse anexo "duplicar" nesta lista — TR com 2 arquivos virava 4 depois do primeiro
+  # processamento, por exemplo.
   def attachments_of_kind(kind)
-    messages.flat_map(&:attachments).select { |attachment| attachment.blob.metadata["kind"] == kind.to_s }
+    messages.where(internal: false).flat_map(&:attachments).select { |attachment| attachment.blob.metadata["kind"] == kind.to_s }
   end
 
   def attachment_of_kind(kind)

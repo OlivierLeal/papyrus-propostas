@@ -33,6 +33,20 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match "só pode ser precificada", response.body
   end
 
+  test "create refuses when the study type was not identified yet, even in reviewing status" do
+    reviewing = conversations(:reviewing_conversation)
+    reviewing.update_column(:study_type_id, nil)
+    sign_in_as reviewing.user
+
+    assert_no_difference "Proposal.count" do
+      post conversation_proposal_path(reviewing)
+    end
+
+    assert_redirected_to reviewing
+    follow_redirect!
+    assert_match "Defina o tipo de estudo", response.body
+  end
+
   test "update recalculates pricing and marks the proposal as priced" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "1.30", tax_multiplier: "1.25", distance_km: "120", logistics_days: "4",

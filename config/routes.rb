@@ -3,7 +3,7 @@ Rails.application.routes.draw do
   resources :passwords, param: :token
   resources :users, except: :show
 
-  resources :conversations, only: %i[index new create show] do
+  resources :conversations, only: %i[index new create show update] do
     resources :messages, only: :create
 
     resource :proposal, only: %i[show create update] do

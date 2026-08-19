@@ -30,18 +30,11 @@
         Informações básicas
       </h2>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <label class="form-control">
-          <div class="label"><span class="label-text">Nome do cliente</span></div>
-          <%= form.text_field :client_name, class: "input input-bordered w-full", placeholder: "Ex.: Serra Verde Energias Renováveis", required: true %>
-        </label>
-
-        <label class="form-control">
-          <div class="label"><span class="label-text">Tipo de estudo</span></div>
-          <%= form.collection_select :study_type_id, @study_types, :id, :name,
-                { prompt: "Selecione..." }, class: "select select-bordered w-full", required: true %>
-        </label>
-      </div>
+      <label class="form-control">
+        <div class="label"><span class="label-text">Nome do cliente</span></div>
+        <%= form.text_field :client_name, class: "input input-bordered w-full", placeholder: "Ex.: Serra Verde Energias Renováveis", required: true %>
+      </label>
+      <p class="text-xs text-base-content/50 mt-2">O tipo de estudo não é escolhido aqui — a IA identifica lendo a TR e você confirma na tela de revisão.</p>
     </div>
 
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
@@ -62,9 +55,9 @@
           </div>
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-base-content">Termo de Referência (TR)</p>
-            <p class="text-xs text-base-content/50">PDF ou DOCX</p>
+            <p class="text-xs text-base-content/50">PDF ou DOCX — pode escolher vários (ex.: TR + anexos)</p>
           </div>
-          <input type="file" name="tr" accept=".pdf,.doc,.docx" class="file-input file-input-sm file-input-bordered max-w-[10rem]">
+          <input type="file" name="tr[]" multiple accept=".pdf,.doc,.docx" class="file-input file-input-sm file-input-bordered max-w-[10rem]">
         </label>
 
         <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">

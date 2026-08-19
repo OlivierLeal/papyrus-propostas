@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_18_223000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_19_152416) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -50,7 +50,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_18_223000) do
     t.jsonb "processing_steps", default: {}, null: false
     t.datetime "setup_completed_at"
     t.string "status", default: "setup", null: false
-    t.bigint "study_type_id", null: false
+    t.bigint "study_type_id"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.index ["model_id"], name: "index_conversations_on_model_id"

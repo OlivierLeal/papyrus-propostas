@@ -36,7 +36,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
         assert_enqueued_with(job: ProcessKmzJob) do
           assert_difference "Conversation.count", 1 do
             post conversations_path, params: {
-              conversation: { client_name: "Cliente Novo", study_type_id: study_types(:eia_rima).id },
+              conversation: { client_name: "Cliente Novo" },
               tr: tr, kmz: kmz, complementary_documents: [ fixture_file_upload("comp_sample.pdf", "application/pdf") ]
             }
           end
@@ -51,10 +51,19 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert conversation.messages.where(role: "system").exists?
   end
 
+  test "create never sets study_type — it's identified later by ProcessTrJob, not chosen at setup" do
+    post conversations_path, params: {
+      conversation: { client_name: "Cliente Novo" }
+    }
+
+    conversation = Conversation.order(:created_at).last
+    assert_nil conversation.study_type_id # study_type_id nos params é ignorado — não é mais permitido
+  end
+
   test "create works with no attachments at all (tr, comp_docs and kmz all skipped)" do
     assert_no_enqueued_jobs(only: [ ProcessTrJob, ProcessCompDocsJob, ProcessKmzJob ]) do
       post conversations_path, params: {
-        conversation: { client_name: "Cliente Sem Arquivos", study_type_id: study_types(:eia_rima).id }
+        conversation: { client_name: "Cliente Sem Arquivos" }
       }
     end
 
@@ -67,7 +76,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
 
   test "create re-renders the form with errors when client_name is missing" do
     assert_no_difference "Conversation.count" do
-      post conversations_path, params: { conversation: { client_name: "", study_type_id: study_types(:eia_rima).id } }
+      post conversations_path, params: { conversation: { client_name: "" } }
     end
 
     assert_response :unprocessable_entity
@@ -78,7 +87,31 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
 
     assert_no_difference "Conversation.count" do
       post conversations_path, params: {
-        conversation: { client_name: "Cliente Novo", study_type_id: study_types(:eia_rima).id }, tr: bad_tr
+        conversation: { client_name: "Cliente Novo" }, tr: bad_tr
+      }
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  test "create accepts more than one TR file, attaching all of them with kind tr" do
+    trs = [ fixture_file_upload("tr_sample.pdf", "application/pdf"), fixture_file_upload("comp_sample.pdf", "application/pdf") ]
+
+    post conversations_path, params: {
+      conversation: { client_name: "Cliente TR Múltiplo" }, tr: trs
+    }
+
+    conversation = Conversation.order(:created_at).last
+    assert_redirected_to conversation
+    assert_equal 2, conversation.attachments_of_kind("tr").size
+  end
+
+  test "create rejects the whole batch when any of the multiple TR files isn't PDF or DOCX" do
+    trs = [ fixture_file_upload("tr_sample.pdf", "application/pdf"), fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz") ]
+
+    assert_no_difference "Conversation.count" do
+      post conversations_path, params: {
+        conversation: { client_name: "Cliente Novo" }, tr: trs
       }
     end
 
@@ -90,7 +123,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
 
     assert_no_difference "Conversation.count" do
       post conversations_path, params: {
-        conversation: { client_name: "Cliente Novo", study_type_id: study_types(:eia_rima).id }, kmz: bad_kmz
+        conversation: { client_name: "Cliente Novo" }, kmz: bad_kmz
       }
     end
 
@@ -100,6 +133,35 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
   test "show renders an existing conversation" do
     get conversation_path(conversations(:reviewing_conversation))
     assert_response :success
+  end
+
+  test "show renders a message asking for a TR when the study type is not identified yet" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.update_column(:study_type_id, nil)
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_match "aguardando identificação", response.body
+    assert_no_match "Avançar para Precificação\"", response.body # some, vira botão desabilitado
+  end
+
+  test "show renders a select to correct the study type once it's identified" do
+    get conversation_path(conversations(:reviewing_conversation))
+
+    assert_response :success
+    assert_select "form[action=?]", conversation_path(conversations(:reviewing_conversation)) do
+      assert_select "select[name=?]", "conversation[study_type_id]"
+    end
+  end
+
+  test "update changes the study type" do
+    conversation = conversations(:reviewing_conversation)
+
+    patch conversation_path(conversation), params: { conversation: { study_type_id: study_types(:rap).id } }
+
+    assert_redirected_to conversation
+    assert_equal study_types(:rap), conversation.reload.study_type
   end
 
   test "show does not render the 'Gerados pela IA' divider when the proposal has no generated documents yet" do

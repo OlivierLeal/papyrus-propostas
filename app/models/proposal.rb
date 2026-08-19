@@ -115,15 +115,7 @@ class Proposal < ApplicationRecord
     def fetch_ai_suggestion(templates)
       conversation.ask_internally(suggestion_prompt(templates), hide_response: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
-      JSON.parse(strip_json_fences(response.content))
-    rescue JSON::ParserError, TypeError
-      {}
-    end
-
-    # O Gemini às vezes ignora a instrução "sem markdown" e envolve a resposta em
-    # ```json ... ``` — removemos as cercas antes do parse em vez de depender do prompt.
-    def strip_json_fences(text)
-      text.to_s.sub(/\A```(?:json)?\s*/i, "").sub(/```\s*\z/, "")
+      AiJsonResponse.parse(response.content) || {}
     end
 
     def suggestion_prompt(templates)

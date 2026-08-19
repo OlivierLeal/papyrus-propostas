@@ -7,6 +7,12 @@ class ConversationTest < ActiveSupport::TestCase
     assert_includes conversation.errors[:client_name], "não pode ficar em branco"
   end
 
+  test "study_type is optional — não é escolhido no setup, a IA identifica lendo a TR" do
+    conversation = Conversation.new(user: users(:one), client_name: "Cliente Teste")
+    assert conversation.valid?
+    assert_nil conversation.study_type_id
+  end
+
   test "requires a valid status" do
     conversation = conversations(:reviewing_conversation)
     conversation.status = "estado_invalido"
@@ -71,6 +77,23 @@ class ConversationTest < ActiveSupport::TestCase
 
     assert_equal [ "tr.pdf" ], conversation.attachments_of_kind("tr").map { |a| a.filename.to_s }
     assert_equal "tr.pdf", conversation.attachment_of_kind("tr").filename.to_s
+  end
+
+  test "attachments_of_kind ignores copies ruby_llm persists onto the internal instruction message" do
+    conversation = conversations(:reviewing_conversation)
+    message = conversation.messages.first
+    message.attachments.attach(
+      io: StringIO.new("conteúdo"), filename: "tr.pdf", content_type: "application/pdf",
+      metadata: { kind: "tr" }
+    )
+    attachment = conversation.attachments_of_kind("tr").first
+
+    # ask_internally(with: attachment) faz o ruby_llm persistir uma cópia do anexo na própria
+    # mensagem de instrução (internal: true) — sem o filtro em attachments_of_kind, esse anexo
+    # "dobra" de contagem depois dessa chamada.
+    stub_ai_complete("ok") { conversation.ask_internally("instrução interna", with: attachment) }
+
+    assert_equal 1, conversation.attachments_of_kind("tr").size
   end
 
   test "mark_step! merges the step atomically and keeps other steps untouched" do
