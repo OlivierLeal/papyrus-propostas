@@ -27,15 +27,11 @@
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
           <h2 class="font-semibold text-base-content mb-4">Tipo de estudo</h2>
 
-          <% if @conversation.study_type.present? %>
-            <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, class: "flex items-center gap-2" do |form| %>
-              <%= form.collection_select :study_type_id, StudyType.order(:name), :id, :name, {}, class: "select select-bordered select-sm flex-1" %>
-              <%= form.submit "Salvar", class: "btn btn-ghost btn-sm" %>
-            <% end %>
-            <p class="text-xs text-base-content/50 mt-2">Identificado pela IA a partir da TR — troque aqui se achar que ela errou.</p>
-          <% else %>
-            <p class="text-sm text-base-content/60">Aguardando identificação pela IA — precisa de um TR enviado no setup da proposta pra continuar.</p>
+          <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, class: "flex items-center gap-2" do |form| %>
+            <%= form.collection_select :study_type_id, StudyType.order(:name), :id, :name, {}, class: "select select-bordered select-sm flex-1" %>
+            <%= form.submit "Salvar", class: "btn btn-ghost btn-sm" %>
           <% end %>
+          <p class="text-xs text-base-content/50 mt-2">Identificado pela IA a partir da TR — troque aqui se achar que ela errou.</p>
         </div>
 
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
