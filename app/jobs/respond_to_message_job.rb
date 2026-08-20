@@ -4,10 +4,11 @@ class RespondToMessageJob < ApplicationJob
   def perform(conversation_id)
     conversation = Conversation.find(conversation_id)
     conversation.refresh_proposal_state_snapshot!
-    if conversation.proposal
-      conversation.with_tool(GenerateProposalDocumentTool.new(proposal: conversation.proposal))
-      conversation.with_tool(AddExternalCostTool.new(proposal: conversation.proposal))
-    end
+    # Sempre registrada, mesmo sem proposal ainda — ela cria a proposta sozinha na primeira vez
+    # que é chamada de verdade (ver GenerateProposalDocumentTool#execute/Conversation#ensure_
+    # proposal!), então não depende mais do consultor clicar em "Avançar para Precificação" antes.
+    conversation.with_tool(GenerateProposalDocumentTool.new(conversation: conversation))
+    conversation.with_tool(AddExternalCostTool.new(proposal: conversation.proposal)) if conversation.proposal
     conversation.complete
 
     message = conversation.messages.where(role: "assistant", internal: false).order(:created_at).last

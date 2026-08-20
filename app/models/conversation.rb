@@ -129,6 +129,25 @@ class Conversation < ApplicationRecord
     STATUS_LABELS.fetch(status, status)
   end
 
+  # Cria a proposta (e a equipe sugerida pela IA) sob demanda — chamado tanto pelo botão "Avançar
+  # para Precificação" quanto pelo chat, na primeira vez que o consultor pede pra gerar algo.
+  # Antes disso só existia via clique no botão, e a IA acabava respondendo "clique em Avançar pra
+  # Precificação" pra QUALQUER pedido de geração, mesmo só-técnica — visto na prática confundindo
+  # o consultor ("não quero avançar pra preço ainda, quero só a técnica"). Continua sendo a mesma
+  # Proposal/ProjectPricing de sempre por baixo (a técnica em draft já usa isso — ver
+  # GenerateProposalDocumentTool); só o gatilho de criação deixou de exigir a tela.
+  # Retorna nil (sem criar nada) se faltar pré-requisito real (revisão concluída, tipo de estudo
+  # identificado) — quem chama decide o que fazer com isso.
+  def ensure_proposal!
+    return proposal if proposal.present?
+    return nil unless status == "reviewing" && study_type.present?
+
+    new_proposal = create_proposal!(status: "draft")
+    new_proposal.build_with_ai_suggested_team!
+    update!(status: "pricing")
+    new_proposal
+  end
+
   def apply_system_instructions!
     with_instructions(SYSTEM_INSTRUCTIONS)
     with_instructions(PROPOSAL_CHECKLIST_INSTRUCTIONS, append: true)
@@ -243,12 +262,15 @@ class Conversation < ApplicationRecord
       <<~TEXT
         #{PROPOSAL_STATE_MARKER} (gerado pelo sistema, sempre reflete o estado real — não pergunte
         isso ao consultor, apenas use como fato já resolvido):
-        - A proposta AINDA NÃO FOI CRIADA no sistema. A ferramenta generate_proposal_document não
-          existe nesta conversa enquanto isso não acontecer — não tente chamá-la nem finja que
-          chamou. Se o consultor pedir pra gerar a proposta técnica/comercial agora, explique que
-          falta clicar em "Avançar para Precificação" na tela de revisão primeiro (isso cria a
-          proposta e já sugere a equipe/horas automaticamente) — você não consegue fazer isso por
-          ele, é uma ação da tela.
+        - A proposta AINDA NÃO FOI CRIADA no sistema, mas isso NÃO bloqueia pedir a técnica — a
+          ferramenta generate_proposal_document cria a proposta sozinha (com a equipe já sugerida
+          pela IA) na hora que você a chama de verdade, sem precisar que o consultor clique em nada
+          na tela antes. Se ele pedir a proposta técnica, siga o passo a passo normal (itens 1, 3,
+          4, 9) e chame a ferramenta — ela cuida do resto. O único caso em que isso NÃO funciona é
+          se o tipo de estudo ainda não foi identificado (TR ainda em processamento) ou a revisão
+          ainda não foi concluída — nesse caso a ferramenta devolve um erro explicando; só então
+          diga ao consultor o que falta (não invente "clique em Avançar para Precificação" fora
+          desse caso específico).
       TEXT
     end
 

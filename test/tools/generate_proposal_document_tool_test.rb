@@ -24,7 +24,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "generates only the technical docx when the proposal is still a draft (pricing not approved yet)" do
     @proposal.update!(status: "draft", document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     result = JSON.parse(tool.execute(**@args))
 
@@ -42,7 +42,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "still refuses nothing and always increments version, even across the draft -> priced transition" do
     @proposal.update!(status: "draft", document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
     tool.execute(**@args) # versão 1, só técnica
 
     @proposal.update!(status: "priced")
@@ -56,7 +56,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "attaches a single combined docx when document_split is combined" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     result = JSON.parse(tool.execute(**@args))
 
@@ -69,7 +69,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "attaches two docx files when document_split is separated" do
     @proposal.update!(document_split: "separated")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     result = JSON.parse(tool.execute(**@args))
 
@@ -82,7 +82,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "never lets the AI supply the price table, team names or proposal number" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args)
 
@@ -94,7 +94,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "the first generation always increments version to 1, tags the blob and ignores descricao_revisao (fica Emissão Inicial)" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args)
 
@@ -111,7 +111,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "a second generation bumps to version 2, uses the AI-supplied description and keeps the version 1 row in the revision table" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args) # versão 1
     result = JSON.parse(tool.execute(**@args)) # versão 2
@@ -132,7 +132,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "the cover title matches the document: combined shows 'técnica e comercial', split shows only its own half" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
     tool.execute(**@args)
 
     combined_xml = document_xml(@proposal.generated_documents.first)
@@ -155,7 +155,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   test "the proposal number uses the right prefix per variant: PTC combined, PT/PC when separated" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
     tool.execute(**@args)
 
     combined_xml = document_xml(@proposal.generated_documents.first)
@@ -176,7 +176,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   test "embeds the real Mapbox map in the docx when the geospatial result has a PNG area_image" do
     @proposal.update!(document_split: "combined")
     attach_area_image!("image/png")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args)
 
@@ -189,7 +189,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   test "leaves the map placeholder blank when there's no PNG area_image (SVG croqui fallback or no geospatial_result at all)" do
     @proposal.update!(document_split: "combined")
     attach_area_image!("image/svg+xml")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args)
 
@@ -198,9 +198,53 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_not_includes xml, "{{MAPA_AREA_ESTUDO}}"
   end
 
+  # Achado na prática: exigir clicar em "Avançar para Precificação" antes de QUALQUER geração,
+  # inclusive só-técnica, não fazia sentido pro consultor ("não quero avançar pra preço ainda").
+  test "auto-creates the proposal and AI-suggested team when none exists yet, then generates the technical docx" do
+    conversation = conversations(:reviewing_conversation)
+    assert_nil conversation.proposal
+    tool = GenerateProposalDocumentTool.new(conversation: conversation)
+
+    result = stub_ai_complete('{"linhas": [], "documentos_separados": false}') { JSON.parse(tool.execute(**@args)) }
+
+    assert result["success"], result.inspect
+    conversation.reload
+    assert conversation.proposal.present?
+    assert_equal "draft", conversation.proposal.status
+    assert_equal "pricing", conversation.status
+    assert_equal 1, conversation.proposal.generated_documents.count
+  end
+
+  test "returns a friendly error instead of hallucinating when the proposal can't be created yet" do
+    conversation = conversations(:processing_conversation) # status "processing", ainda não é "reviewing"
+    tool = GenerateProposalDocumentTool.new(conversation: conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert result["error"].present?
+    assert_nil conversation.reload.proposal
+  end
+
+  test "broadcasts a refresh after successfully attaching a generated document, so the sidebar updates without F5" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    broadcasted = false
+    original = Conversation.instance_method(:broadcast_refresh)
+    Conversation.define_method(:broadcast_refresh) { broadcasted = true }
+
+    begin
+      tool.execute(**@args)
+    ensure
+      Conversation.define_method(:broadcast_refresh, original)
+    end
+
+    assert broadcasted
+  end
+
   test "returns a friendly error and attaches nothing when the filler raises" do
     @proposal.update!(document_split: "combined")
-    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     # Minitest 6.0.6 não empacota minitest/mock nesta instalação (sem Object#stub),
     # então redefinimos o singleton method e restauramos no ensure — mesmo padrão do AiStubHelper.

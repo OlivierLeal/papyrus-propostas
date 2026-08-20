@@ -29,7 +29,7 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     assert marker.present?
   end
 
-  test "registers the document-generation tool only when the conversation has a proposal" do
+  test "registers the document-generation tool even without a proposal yet (it creates one on demand), but not the external-cost tool" do
     with_tool_calls = []
     original_method = Conversation.instance_method(:with_tool)
     Conversation.define_method(:with_tool) { |tool| with_tool_calls << tool.class; self }
@@ -40,7 +40,7 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
       Conversation.define_method(:with_tool, original_method)
     end
 
-    assert_empty with_tool_calls # reviewing_conversation não tem proposal ainda
+    assert_equal [ GenerateProposalDocumentTool ], with_tool_calls # reviewing_conversation não tem proposal ainda
   end
 
   test "registers both the document-generation and external-cost tools when there is a proposal" do

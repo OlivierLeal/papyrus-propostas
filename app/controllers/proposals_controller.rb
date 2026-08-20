@@ -18,9 +18,7 @@ class ProposalsController < ApplicationController
       return
     end
 
-    proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_with_ai_suggested_team!
-    @conversation.update!(status: "pricing")
+    @conversation.ensure_proposal!
 
     redirect_to conversation_proposal_path(@conversation),
       notice: "Equipe sugerida pela IA com base no TR e nos documentos complementares. Revise as horas antes de aprovar."

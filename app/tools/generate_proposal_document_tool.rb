@@ -7,6 +7,13 @@
 # que não mostra valores. A comercial (ou o documento combinado) exige status "priced"/"approved"
 # (Tela de Precificação confirmada pelo consultor), porque mostra números que ainda não foram
 # revisados. Ver #execute.
+#
+# Recebe `conversation:`, não `proposal:` — a Proposal pode nem existir ainda (o consultor nunca
+# clicou em "Avançar para Precificação"). Achado na prática: exigir isso antes de QUALQUER geração,
+# inclusive só-técnica, deixava o fluxo sem sentido pro consultor ("não quero avançar pra preço,
+# quero só a técnica"). Agora #execute cria a proposta sozinha (Conversation#ensure_proposal!) na
+# primeira vez que a ferramenta é chamada de verdade — o botão continua existindo pra quem prefere
+# ir direto pra Tela de Precificação, mas deixou de ser pré-requisito pra gerar a técnica pelo chat.
 class GenerateProposalDocumentTool < RubyLLM::Tool
   description <<~DESC
     Gera o(s) arquivo(s) .docx da proposta preenchidos, usando o texto que você escrever pra
@@ -36,12 +43,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
-  def initialize(proposal:)
+  def initialize(conversation:)
     super()
-    @proposal = proposal
+    @conversation = conversation
   end
 
   def execute(**args)
+    @proposal = @conversation.proposal || @conversation.ensure_proposal!
+    return { error: "Ainda não dá pra criar a proposta — falta o tipo de estudo ser identificado " \
+      "(TR ainda em processamento) ou a revisão ser concluída." }.to_json if @proposal.nil?
+
     @proposal.increment!(:version)
     description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
 
@@ -140,6 +151,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       }
     end
 
+    # broadcast_refresh na mão: anexar um blob em generated_documents não passa pelos callbacks de
+    # Conversation (broadcasts_refreshes só reage a create/update/destroy da própria Conversation),
+    # então sem isso o card "Documentos" da barra lateral só atualizava com F5 — achado na prática.
     def attach!(bytes, filename, kind, description)
       @proposal.generated_documents.attach(
         io: StringIO.new(bytes),
@@ -147,5 +161,6 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         metadata: { kind: kind, version: @proposal.version, description: description }
       )
+      @conversation.broadcast_refresh
     end
 end

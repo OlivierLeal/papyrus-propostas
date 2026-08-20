@@ -1,0 +1,9 @@
+# Registro do modelo usado por conversation.rb (config/initializers/ruby_llm.rb). Sem essa
+# fixture, RespondToMessageJob#with_tool (que chama Chat#to_llm por baixo) quebra com
+# "undefined method `model_id' for nil" em qualquer teste que não estube `with_tool` — fixtures
+# pulam callbacks do ActiveRecord (before_save :resolve_model_from_strings, do ruby_llm), então
+# conversation_id nunca ficaria populado sozinho como fica numa Conversation criada de verdade.
+default:
+  model_id: global.anthropic.claude-haiku-4-5-20251001-v1:0
+  name: Claude Haiku 4.5
+  provider: bedrock

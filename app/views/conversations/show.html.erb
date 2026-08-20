@@ -62,16 +62,16 @@
           <% if generated_documents.any? %>
             <div class="divider text-xs text-base-content/50 my-3">Gerados pela IA</div>
 
-            <% current_version = generated_documents.filter_map { |d| d.blob.metadata["version"] }.max %>
+            <% sorted_documents = generated_documents.sort_by { |d| [ -(d.blob.metadata["version"] || 0), -d.created_at.to_i ] } %>
             <ul class="flex flex-col gap-2">
-              <% generated_documents.select { |d| d.blob.metadata["version"] == current_version }.each do |document| %>
+              <% sorted_documents.each do |document| %>
                 <li class="flex items-center gap-2 px-3 py-2 rounded-field bg-primary/5 min-w-0">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-primary shrink-0">
                     <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
                   </svg>
                   <span class="truncate text-sm text-base-content flex-1"><%= document.filename %></span>
-                  <% if current_version %>
-                    <span class="badge badge-ghost badge-xs shrink-0">v<%= current_version %></span>
+                  <% if document.blob.metadata["version"] %>
+                    <span class="badge badge-ghost badge-xs shrink-0">v<%= document.blob.metadata["version"] %></span>
                   <% end %>
                   <%= link_to rails_blob_path(document, disposition: "attachment"),
                         class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar" do %>
