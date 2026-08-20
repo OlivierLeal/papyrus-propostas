@@ -9,10 +9,23 @@ class Proposal < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
   validates :document_split, inclusion: { in: DOCUMENT_SPLITS }
 
-  # Número da proposta = id da tabela (ver passo a passo interno, item 11) — automático, não é
-  # a IA que decide nem precisa de confirmação com a Charlene antes de gerar o rascunho.
-  def docx_numero_proposta
-    "PTC#{id.to_s.rjust(5, "0")}"
+  # PTC = técnica e comercial num arquivo só; PT = só a técnica; PC = só a comercial (ver
+  # GenerateProposalDocumentTool#execute — cada arquivo gerado usa o prefixo do que ele é).
+  DOCX_NUMERO_PREFIXES = { "combined" => "PTC", "tecnica" => "PT", "comercial" => "PC" }.freeze
+
+  # Número da proposta = prefixo do tipo de arquivo + ano de criação (2 dígitos) + id da tabela
+  # (ver passo a passo interno, item 11) — automático, não é a IA que decide nem precisa de
+  # confirmação com a Charlene antes de gerar o rascunho. Mesmo id em toda revisão/variante da
+  # mesma proposta — só o prefixo muda entre técnica/comercial/combinado.
+  def docx_numero_proposta(kind = "combined")
+    "#{DOCX_NUMERO_PREFIXES.fetch(kind, "PTC")}#{created_at.strftime("%y")}#{id}"
+  end
+
+  # Nome de arquivo no padrão real já usado pela Papyrus (ex.:
+  # PTC25108_Girassol_Pedras do Litoral_Rev00.docx) — número + cliente + revisão atual.
+  def docx_filename(kind)
+    cliente = conversation.client_name.to_s.gsub(%r{[/\\:*?"<>|]}, "-")
+    "#{docx_numero_proposta(kind)}_#{cliente}_Rev#{format("%02d", version - 1)}.docx"
   end
 
   # Nome/qualificação da Equipe Técnica no DOCX vêm de dados reais do sistema (proposal_

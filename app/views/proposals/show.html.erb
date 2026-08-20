@@ -11,7 +11,10 @@
       </svg>
     <% end %>
     <div>
-      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Precificação</h1>
+      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">
+        Precificação
+        <span class="text-base-content/50 font-normal"><%= @proposal.docx_numero_proposta %></span>
+      </h1>
       <p class="text-sm text-base-content/60"><%= @conversation.client_name %> · <%= @conversation.study_type.name %></p>
     </div>
     <span class="badge badge-soft ml-auto <%= @proposal.status == "approved" ? "badge-success" : "badge-warning" %>">

@@ -29,10 +29,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     result = JSON.parse(tool.execute(**@args))
 
     assert result["success"]
-    assert_equal [ "proposta_tecnica.docx" ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("tecnica") ], result["filenames"]
     assert_equal 1, @proposal.generated_documents.count
     document = @proposal.generated_documents.first
-    assert_equal "proposta_tecnica.docx", document.filename.to_s
+    assert_equal @proposal.docx_filename("tecnica"), document.filename.to_s
     assert_equal "tecnica", document.blob.metadata["kind"]
 
     xml = document_xml(document)
@@ -50,7 +50,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert result["success"]
     assert_equal 2, result["version"]
-    assert_equal [ "proposta_tecnica_comercial.docx" ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("combined") ], result["filenames"]
     assert_equal 2, @proposal.generated_documents.count
   end
 
@@ -63,7 +63,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert result["success"]
     assert_equal 1, result["version"]
     assert_equal 1, @proposal.generated_documents.count
-    assert_equal "proposta_tecnica_comercial.docx", @proposal.generated_documents.first.filename.to_s
+    assert_equal @proposal.docx_filename("combined"), @proposal.generated_documents.first.filename.to_s
     assert_equal "combined", @proposal.generated_documents.first.blob.metadata["kind"]
   end
 
@@ -151,6 +151,26 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert_includes commercial_xml, "<w:t>COMERCIAL</w:t>"
     assert_not_includes commercial_xml, "<w:t>TÉCNICA</w:t>"
+  end
+
+  test "the proposal number uses the right prefix per variant: PTC combined, PT/PC when separated" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool.execute(**@args)
+
+    combined_xml = document_xml(@proposal.generated_documents.first)
+    assert_includes combined_xml, @proposal.docx_numero_proposta("combined")
+
+    @proposal.update!(document_split: "separated")
+    tool.execute(**@args)
+    @proposal.reload
+
+    technical_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "tecnica" && d.blob.metadata["version"] == @proposal.version })
+    commercial_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "comercial" && d.blob.metadata["version"] == @proposal.version })
+
+    assert_includes technical_xml, @proposal.docx_numero_proposta("tecnica")
+    assert_not_includes technical_xml, @proposal.docx_numero_proposta("combined")
+    assert_includes commercial_xml, @proposal.docx_numero_proposta("comercial")
   end
 
   test "embeds the real Mapbox map in the docx when the geospatial result has a PNG area_image" do

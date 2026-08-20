@@ -80,9 +80,18 @@ class Conversation < ApplicationRecord
     e o que dizer ao consultor:
 
     - Se o pedido for só a proposta TÉCNICA (ou o consultor não especificar e a proposta ainda
-      estiver com status "draft"): verifique só os itens 1, 3, 4 e 9. Os itens 5, 6 e 8 (dias de
-      campo, orçamento externo, planilha de preço) são coisa de PRECIFICAÇÃO — não bloqueiam a
-      técnica, nem pergunte isso pro consultor nesse caso. Se 1, 3, 4 e 9 estiverem OK, chame a
+      estiver com status "draft"): verifique só os itens 1, 3, 4 e 9 — e mesmo esses, só bloqueiam
+      de verdade se forem IMPOSSÍVEIS de resolver com o que você já tem (ex.: item 1 bloqueia só se
+      não houver TR nenhum anexado; item 3 bloqueia só se você não souber nem dizer se o órgão é
+      estadual ou federal). Os itens 5, 6 e 8 (dias de campo, orçamento externo, planilha de preço)
+      são coisa de PRECIFICAÇÃO — não bloqueiam a técnica, nem pergunte isso pro consultor nesse
+      caso. DETALHE regulatório incerto (data exata de perímetro urbano, percentual de vegetação a
+      manter, necessidade de inventário florestal, documentação geológica pendente, etc.) TAMBÉM
+      NÃO bloqueia — escreva a condicionante no texto da seção cabível cobrindo os cenários
+      possíveis, ou como "A confirmar com o cliente" (mesma regra que já vale pra nome/CNPJ
+      incerto), e gere a proposta assim mesmo. O consultor prefere um rascunho pra revisar e
+      ajustar no chat depois a ficar esperando um menu de opções antes de ver qualquer coisa —
+      não pergunte "Opção A/B/C", só gere. Se 1, 3, 4 e 9 estiverem minimamente resolvidos, chame a
       ferramenta — com a proposta em "draft" ela gera só a proposta_tecnica.docx sozinha.
     - Se o pedido for a proposta COMERCIAL ou o documento completo (ou "a proposta" sem
       qualificar, quando o status já não é mais "draft"): verifique também os itens 5, 6 e 8. Além
@@ -131,13 +140,17 @@ class Conversation < ApplicationRecord
   # A IA só enxerga o que está no histórico do chat — os números da Tela de Precificação (que o
   # consultor edita direto, fora do chat) nunca chegam até ela por conta própria. Sem isso, ao
   # pedir "gera a proposta" ela acha que nada foi definido e trava à toa. Chamado antes de cada
-  # complete (ver RespondToMessageJob); apaga a versão anterior e recria, então nunca acumula
-  # nem fica desatualizado — e só existe depois que a proposta é criada (sem custo antes disso).
+  # complete (ver RespondToMessageJob); apaga a versão anterior e recria, então nunca acumula nem
+  # fica desatualizado.
+  #
+  # Roda mesmo sem proposal (visto na prática: sem isso, quando o consultor pede pra gerar antes
+  # de clicar "Avançar para Precificação" — GenerateProposalDocumentTool nem existe nesse ponto,
+  # ver RespondToMessageJob — a IA não tem como saber disso e inventa que chamou a ferramenta e
+  # que "faltam confirmações do cliente", quando na verdade a proposta simplesmente não existe
+  # ainda no sistema).
   def refresh_proposal_state_snapshot!
-    return unless proposal
-
     messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
-    snapshot = create_user_message(proposal_state_text)
+    snapshot = create_user_message(proposal.present? ? proposal_state_text : no_proposal_state_text)
     snapshot.update!(internal: true)
   end
 
@@ -224,6 +237,19 @@ class Conversation < ApplicationRecord
 
     def merge_processing_steps!(patch)
       self.class.where(id: id).update_all([ "processing_steps = processing_steps || ?::jsonb", patch.to_json ])
+    end
+
+    def no_proposal_state_text
+      <<~TEXT
+        #{PROPOSAL_STATE_MARKER} (gerado pelo sistema, sempre reflete o estado real — não pergunte
+        isso ao consultor, apenas use como fato já resolvido):
+        - A proposta AINDA NÃO FOI CRIADA no sistema. A ferramenta generate_proposal_document não
+          existe nesta conversa enquanto isso não acontecer — não tente chamá-la nem finja que
+          chamou. Se o consultor pedir pra gerar a proposta técnica/comercial agora, explique que
+          falta clicar em "Avançar para Precificação" na tela de revisão primeiro (isso cria a
+          proposta e já sugere a equipe/horas automaticamente) — você não consegue fazer isso por
+          ele, é uma ação da tela.
+      TEXT
     end
 
     def proposal_state_text

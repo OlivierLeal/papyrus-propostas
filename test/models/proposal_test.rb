@@ -159,8 +159,30 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal [ "01", "Ajuste de escopo", Date.current.strftime("%d/%m/%Y") ], rows[1]
   end
 
-  test "docx_numero_proposta prefixes the record id with PTC padded to 5 digits" do
+  test "docx_numero_proposta combines prefix + 2-digit creation year + record id" do
     proposal = proposals(:priced_proposal)
-    assert_equal "PTC#{proposal.id.to_s.rjust(5, '0')}", proposal.docx_numero_proposta
+    year = proposal.created_at.strftime("%y")
+
+    assert_equal "PTC#{year}#{proposal.id}", proposal.docx_numero_proposta
+    assert_equal "PTC#{year}#{proposal.id}", proposal.docx_numero_proposta("combined")
+    assert_equal "PT#{year}#{proposal.id}", proposal.docx_numero_proposta("tecnica")
+    assert_equal "PC#{year}#{proposal.id}", proposal.docx_numero_proposta("comercial")
+  end
+
+  test "docx_filename follows the real Papyrus naming pattern (número_cliente_RevNN.docx)" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+
+    assert_equal "#{proposal.docx_numero_proposta('tecnica')}_#{proposal.conversation.client_name}_Rev00.docx",
+      proposal.docx_filename("tecnica")
+  end
+
+  test "docx_filename sanitizes filesystem-unsafe characters from the client name" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    proposal.conversation.update!(client_name: "Cliente/Teste: \"Especial\"")
+
+    assert_equal "#{proposal.docx_numero_proposta('combined')}_Cliente-Teste- -Especial-_Rev00.docx",
+      proposal.docx_filename("combined")
   end
 end

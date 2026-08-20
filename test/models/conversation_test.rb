@@ -124,11 +124,27 @@ class ConversationTest < ActiveSupport::TestCase
     end
   end
 
-  test "refresh_proposal_state_snapshot! does nothing without a proposal" do
+  test "refresh_proposal_state_snapshot! without a proposal tells the AI the proposal doesn't exist yet, not to fake calling the tool" do
+    # Achado num caso real: sem essa mensagem, a IA não tinha como saber que a proposta ainda não
+    # existe (GenerateProposalDocumentTool nem está registrada nesse ponto) e inventava que tinha
+    # chamado a ferramenta de geração — ver RespondToMessageJob.
     conversation = conversations(:reviewing_conversation)
-    assert_no_difference -> { conversation.messages.count } do
-      conversation.refresh_proposal_state_snapshot!
-    end
+
+    conversation.refresh_proposal_state_snapshot!
+
+    marker = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%").last
+    assert marker.present?
+    assert_includes marker.content, "AINDA NÃO FOI CRIADA"
+  end
+
+  test "refresh_proposal_state_snapshot! replaces the previous marker instead of accumulating, with or without a proposal" do
+    conversation = conversations(:reviewing_conversation)
+
+    conversation.refresh_proposal_state_snapshot!
+    conversation.refresh_proposal_state_snapshot!
+
+    markers = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%")
+    assert_equal 1, markers.count
   end
 
   test "refresh_proposal_state_snapshot! creates a single hidden marker reflecting the pricing state" do

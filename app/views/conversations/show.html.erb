@@ -6,7 +6,12 @@
       </svg>
     <% end %>
     <div>
-      <h1 class="font-display text-2xl font-bold text-base-content leading-tight"><%= @conversation.client_name %></h1>
+      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">
+        <%= @conversation.client_name %>
+        <% if @conversation.proposal.present? %>
+          <span class="text-base-content/50 font-normal"><%= @conversation.proposal.docx_numero_proposta %></span>
+        <% end %>
+      </h1>
       <p class="text-sm text-base-content/60"><%= @conversation.study_type&.name || "Tipo de estudo: aguardando identificação da IA" %></p>
     </div>
     <span class="badge badge-soft ml-auto <%= @conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
@@ -17,8 +22,8 @@
   <%= turbo_stream_from @conversation %>
 
   <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-      <div class="lg:col-span-1 flex flex-col gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:h-[80vh]">
+      <div class="lg:col-span-1 flex flex-col gap-4 lg:overflow-y-auto lg:min-h-0 lg:pr-1">
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
           <h2 class="font-semibold text-base-content mb-4">Tipo de estudo</h2>
 
@@ -101,7 +106,7 @@
         <% end %>
       </div>
 
-      <div class="lg:col-span-3 bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh]"
+      <div class="lg:col-span-3 bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh] lg:h-full lg:min-h-0"
            data-controller="chat-scroll">
         <h2 class="font-semibold text-base-content p-6 pb-4 shrink-0 border-b border-base-300">Conversa</h2>
 

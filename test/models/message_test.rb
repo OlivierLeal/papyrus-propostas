@@ -30,4 +30,50 @@ class MessageTest < ActiveSupport::TestCase
 
     assert_equal [ "tr.pdf" ], llm_message.content.attachments.map(&:filename)
   end
+
+  # Achado num caso real em produção: a Anthropic recusa qualquer request com mais de 5
+  # documentos no total, e o ruby_llm reenvia o histórico inteiro em toda chamada (Chat#to_llm) —
+  # sem isso, uma conversa com TR + vários complementares quebra pra sempre depois do 5º
+  # documento analisado, inclusive o resumo e o chat normal.
+  test "to_llm content excludes attachments from any user message that isn't the most recent one" do
+    conversation = conversations(:reviewing_conversation)
+    setup_message = messages(:reviewing_setup_message)
+    setup_message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    later_instruction = conversation.messages.create!(role: "user", content: "instrução interna", internal: true)
+    later_instruction.attachments.attach(
+      io: StringIO.new("conteúdo do complementar"), filename: "comp.pdf", content_type: "application/pdf",
+      metadata: { kind: "complementary" }
+    )
+
+    # Sem anexo nenhum sobrando, RubyLLM::Message#content simplifica pra String pura em vez de um
+    # RubyLLM::Content (ver ruby_llm/message.rb) — é assim que confirmamos que nada foi enviado.
+    assert_equal "Arquivos enviados para análise — TR: tr.pdf.", setup_message.to_llm.content
+    assert_equal [ "comp.pdf" ], later_instruction.to_llm.content.attachments.map(&:filename)
+  end
+
+  test "to_llm content keeps the attachment on the most recent user message even when it's the original setup message" do
+    message = messages(:reviewing_setup_message)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+
+    assert_equal [ "tr.pdf" ], message.to_llm.content.attachments.map(&:filename)
+  end
+
+  test "stale attachments stay fully downloadable — only what's sent to the AI changes" do
+    conversation = conversations(:reviewing_conversation)
+    setup_message = messages(:reviewing_setup_message)
+    setup_message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+    conversation.messages.create!(role: "user", content: "instrução interna", internal: true)
+      .attachments.attach(io: StringIO.new("x"), filename: "comp.pdf", content_type: "application/pdf")
+
+    assert_not_instance_of RubyLLM::Content, setup_message.to_llm.content # nada enviado pra IA
+    assert setup_message.reload.attachments.attached?
+    assert_equal "tr.pdf", setup_message.attachments.first.filename.to_s
+  end
 end

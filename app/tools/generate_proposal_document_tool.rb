@@ -55,30 +55,34 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # sugerida pela IA já existe nesse ponto (Proposal#build_with_ai_suggested_team!), então o
     # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa.
     if @proposal.status == "draft"
+      technical_filename = @proposal.docx_filename("tecnica")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images,
-        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "" }
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
       )
-      attach!(files[:technical], "proposta_tecnica.docx", "tecnica", description)
-      { success: true, version: @proposal.version, filenames: %w[proposta_tecnica.docx],
-        message: "Gerado o arquivo proposta_tecnica.docx (versão #{@proposal.version}) — só a parte técnica, sem " \
+      attach!(files[:technical], technical_filename, "tecnica", description)
+      { success: true, version: @proposal.version, filenames: [ technical_filename ],
+        message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
           "Precificação." }.to_json
     elsif @proposal.document_split == "separated"
+      technical_filename = @proposal.docx_filename("tecnica")
+      commercial_filename = @proposal.docx_filename("comercial")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images,
-        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "" },
-        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "" }
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") },
+        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("comercial") }
       )
-      attach!(files[:technical], "proposta_tecnica.docx", "tecnica", description)
-      attach!(files[:commercial], "proposta_comercial.docx", "comercial", description)
-      { success: true, version: @proposal.version, filenames: %w[proposta_tecnica.docx proposta_comercial.docx],
-        message: "Gerados 2 arquivos: proposta_tecnica.docx e proposta_comercial.docx (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
+      attach!(files[:technical], technical_filename, "tecnica", description)
+      attach!(files[:commercial], commercial_filename, "comercial", description)
+      { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename ],
+        message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
     else
+      combined_filename = @proposal.docx_filename("combined")
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images)
-      attach!(bytes, "proposta_tecnica_comercial.docx", "combined", description)
-      { success: true, version: @proposal.version, filenames: %w[proposta_tecnica_comercial.docx],
-        message: "Gerado o arquivo proposta_tecnica_comercial.docx (versão #{@proposal.version}), disponível na Tela de Precificação." }.to_json
+      attach!(bytes, combined_filename, "combined", description)
+      { success: true, version: @proposal.version, filenames: [ combined_filename ],
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação." }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -101,7 +105,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       seguranca = @proposal.team_slot_for_docx(role_hint: "segurança")
 
       {
-        "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta,
+        "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("combined"),
         "REVISAO_ATUAL" => format("%02d", @proposal.version - 1),
         "TITULO_LINHA2" => "TÉCNICA E",
         "TITULO_LINHA3" => "COMERCIAL",
