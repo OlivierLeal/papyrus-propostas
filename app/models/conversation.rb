@@ -38,6 +38,14 @@ class Conversation < ApplicationRecord
     ambiental, código, receitas, tarefas genéricas ou qualquer assunto alheio a este atendimento):
     recuse em UMA frase curta, sem elaborar, redirecionando o consultor de volta para a proposta.
 
+    Fatos fixos sobre os documentos desta conversa:
+    - O KMZ enviado pelo consultor JÁ É a poligonal oficial da área do empreendimento (coordenadas
+      reais do imóvel, não um esboço/visualização). Nunca trate isso como informação pendente nem
+      peça ao consultor uma "poligonal oficial georreferenciada" separada. Se o TR exigir que o
+      MAPA FINAL a ser entregue pela Papyrus seja georreferenciado (ex.: SIRGAS 2000), isso é um
+      requisito de formato do produto que a Papyrus vai produzir a partir do KMZ — não um dado que
+      falta o cliente fornecer antes de começar.
+
     Você nunca calcula preços, horas ou valores em R$ — isso é feito por um motor determinístico à
     parte. Sua função é só identificar e organizar informações de escopo. Responda sempre em português.
   TEXT
@@ -66,18 +74,31 @@ class Conversation < ApplicationRecord
     11. Registro da proposta no controle interno (rede) e (13) revisão com a Sara acontecem depois
         de gerado o rascunho — são lembretes pro consultor, nunca bloqueiam a geração.
 
-    Quando o consultor pedir para gerar a proposta técnica e/ou comercial, verifique os itens 1, 3,
-    4, 5, 6, 8 e 9 contra o que você já sabe desta conversa (TR, documentos complementares, equipe e
-    preço já definidos). Se faltar informação que bloqueia mesmo (TR pouco claro, dias de campo não
-    definidos, orçamento externo pendente, planilha de preço incompleta), NÃO chame a ferramenta —
-    diga exatamente o que falta e peça ao consultor. Os itens 2, 7 e 11 são administrativos e
-    internos da Papyrus — apenas lembre o consultor deles, nunca impeça a geração por causa deles.
+    A proposta técnica e a comercial têm bloqueios DIFERENTES — a ferramenta generate_proposal_
+    document já sabe disso sozinha (olha o status da proposta, sempre visível no [ESTADO ATUAL DA
+    PROPOSTA] mais abaixo no histórico), mas você precisa saber pra decidir SE chama a ferramenta
+    e o que dizer ao consultor:
 
-    Se nada bloquear, chame a ferramenta generate_proposal_document com o texto de cada seção
-    baseado em tudo que já foi lido nesta conversa (TR, documentos complementares, propostas
-    anteriores semelhantes). Nunca invente nome de cliente, CNPJ ou contato que você não tenha
-    visto em algum documento — escreva "A confirmar" nesses campos em vez de adivinhar. Preço,
-    equipe e formato do documento (único ou separado) a ferramenta já busca sozinha do sistema.
+    - Se o pedido for só a proposta TÉCNICA (ou o consultor não especificar e a proposta ainda
+      estiver com status "draft"): verifique só os itens 1, 3, 4 e 9. Os itens 5, 6 e 8 (dias de
+      campo, orçamento externo, planilha de preço) são coisa de PRECIFICAÇÃO — não bloqueiam a
+      técnica, nem pergunte isso pro consultor nesse caso. Se 1, 3, 4 e 9 estiverem OK, chame a
+      ferramenta — com a proposta em "draft" ela gera só a proposta_tecnica.docx sozinha.
+    - Se o pedido for a proposta COMERCIAL ou o documento completo (ou "a proposta" sem
+      qualificar, quando o status já não é mais "draft"): verifique também os itens 5, 6 e 8. Além
+      disso, a ferramenta só gera esse lado se o status já for "priced" ou "approved" — se o
+      [ESTADO ATUAL DA PROPOSTA] mostrar "draft" ou "pricing", NÃO chame a ferramenta: diga ao
+      consultor que a Tela de Precificação precisa ser revisada e confirmada antes (não peça os
+      valores um por um pelo chat — quem ajusta isso é o consultor naquela tela).
+
+    Os itens 2, 7 e 11 são administrativos e internos da Papyrus — apenas lembre o consultor
+    deles, nunca impeça a geração por causa deles.
+
+    Chame a ferramenta generate_proposal_document com o texto de cada seção baseado em tudo que já
+    foi lido nesta conversa (TR, documentos complementares, propostas anteriores semelhantes).
+    Nunca invente nome de cliente, CNPJ ou contato que você não tenha visto em algum documento —
+    escreva "A confirmar" nesses campos em vez de adivinhar. Preço, equipe e formato do documento
+    (único ou separado) a ferramenta já busca sozinha do sistema.
   TEXT
 
   belongs_to :user
@@ -146,11 +167,23 @@ class Conversation < ApplicationRecord
   # hide_response: true também esconde a resposta da IA do chat (ex.: extrações em JSON que não
   # são pra consultor ler) — por padrão só a instrução fica escondida, porque GenerateSummaryJob
   # depende de ask_internally pra gerar o resumo que o consultor DEVE ver na tela de revisão.
+  #
+  # with_ai_lock: os 3 jobs de processamento do setup (TR/KMZ/complementares) rodam de propósito
+  # em paralelo (config/queue.yml tem 3 threads de worker) — mas ProcessTrJob e ProcessCompDocsJob
+  # chamam ask_internally na MESMA conversa ao mesmo tempo. Sem essa trava, duas chamadas
+  # concorrentes disputam "a última mensagem do assistente" (linha abaixo, e também em
+  # ProcessTrJob#assign_study_type!), e uma rouba a resposta da outra — visto na prática numa
+  # conversa real: a extração estruturada do TR sumiu (perdida pra uma resposta duplicada dos
+  # complementares) e o tipo de estudo nunca foi identificado. pg_advisory_xact_lock serializa só
+  # as chamadas da MESMA conversa (id como chave) — outras conversas continuam livres pra rodar em
+  # paralelo — e libera sozinho quando a transação termina, sem precisar de unlock manual.
   def ask_internally(prompt, with: nil, hide_response: false)
-    instruction = create_user_message(prompt, with: with)
-    instruction.update!(internal: true)
-    complete
-    messages.where(role: "assistant").order(:created_at).last&.update!(internal: true) if hide_response
+    with_ai_lock do
+      instruction = create_user_message(prompt, with: with)
+      instruction.update!(internal: true)
+      complete
+      messages.where(role: "assistant").order(:created_at).last&.update!(internal: true) if hide_response
+    end
   end
 
   # Usa o operador jsonb `||` do Postgres pra fazer o merge no banco (atômico),
@@ -178,6 +211,17 @@ class Conversation < ApplicationRecord
   end
 
   private
+    # pg_advisory_xact_lock bloqueia outras chamadas com a MESMA chave (id da conversa) até a
+    # transação atual terminar — libera sozinho no commit/rollback, sem risco de esquecer um
+    # unlock manual (e sem o problema de pg_advisory_lock/unlock exigirem a mesma conexão, que o
+    # pool de conexões do Rails não garante entre chamadas separadas).
+    def with_ai_lock
+      self.class.transaction do
+        self.class.connection.execute("SELECT pg_advisory_xact_lock(#{id.to_i})")
+        yield
+      end
+    end
+
     def merge_processing_steps!(patch)
       self.class.where(id: id).update_all([ "processing_steps = processing_steps || ?::jsonb", patch.to_json ])
     end

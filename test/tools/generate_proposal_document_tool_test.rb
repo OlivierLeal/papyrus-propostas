@@ -22,15 +22,36 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     }
   end
 
-  test "refuses to generate when the proposal is still a draft" do
-    @proposal.update!(status: "draft")
+  test "generates only the technical docx when the proposal is still a draft (pricing not approved yet)" do
+    @proposal.update!(status: "draft", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(proposal: @proposal)
 
     result = JSON.parse(tool.execute(**@args))
 
-    assert result["error"].present?
-    assert_not @proposal.generated_documents.attached?
-    assert_equal 0, @proposal.reload.version # não consome número de versão quando recusa
+    assert result["success"]
+    assert_equal [ "proposta_tecnica.docx" ], result["filenames"]
+    assert_equal 1, @proposal.generated_documents.count
+    document = @proposal.generated_documents.first
+    assert_equal "proposta_tecnica.docx", document.filename.to_s
+    assert_equal "tecnica", document.blob.metadata["kind"]
+
+    xml = document_xml(document)
+    assert_includes xml, "Obter a Licença Prévia junto ao INEMA." # texto técnico preenchido normalmente
+    assert_not_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO" # seção comercial não existe nesse arquivo
+  end
+
+  test "still refuses nothing and always increments version, even across the draft -> priced transition" do
+    @proposal.update!(status: "draft", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(proposal: @proposal)
+    tool.execute(**@args) # versão 1, só técnica
+
+    @proposal.update!(status: "priced")
+    result = JSON.parse(tool.execute(**@args)) # versão 2, documento completo
+
+    assert result["success"]
+    assert_equal 2, result["version"]
+    assert_equal [ "proposta_tecnica_comercial.docx" ], result["filenames"]
+    assert_equal 2, @proposal.generated_documents.count
   end
 
   test "attaches a single combined docx when document_split is combined" do

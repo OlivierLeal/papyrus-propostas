@@ -1,14 +1,24 @@
-# Ferramenta que a IA chama quando o consultor pede pra gerar a Proposta Técnica e Comercial.
+# Ferramenta que a IA chama quando o consultor pede pra gerar a Proposta Técnica e/ou Comercial.
 # Só o TEXTO (prosa) vem da IA — preço, equipe, formato do documento (único ou separado) vêm
 # direto do banco (ProjectPricing/ProposalProfessional), nunca da IA. Ver CLAUDE.md seção 8/9.
+#
+# A proposta técnica pode ser gerada antes da precificação estar aprovada (proposal.status ==
+# "draft") — a equipe/horas sugeridas pela IA na criação da proposta já bastam pro texto técnico,
+# que não mostra valores. A comercial (ou o documento combinado) exige status "priced"/"approved"
+# (Tela de Precificação confirmada pelo consultor), porque mostra números que ainda não foram
+# revisados. Ver #execute.
 class GenerateProposalDocumentTool < RubyLLM::Tool
   description <<~DESC
-    Gera o arquivo .docx da Proposta Técnica e Comercial preenchido, usando o texto que você
-    escrever pra cada seção (baseado no TR, nos documentos complementares e em propostas
-    anteriores semelhantes já analisados nesta conversa) e os dados de preço/equipe que já
-    existem no sistema. Só chame depois de confirmar que não falta nenhuma informação que
-    bloqueia a proposta (ver passo a passo interno). Nomes/CNPJ que você não tiver certeza,
-    escreva "A confirmar" em vez de inventar.
+    Gera o(s) arquivo(s) .docx da proposta preenchidos, usando o texto que você escrever pra
+    cada seção (baseado no TR, nos documentos complementares e em propostas anteriores
+    semelhantes já analisados nesta conversa) e os dados de preço/equipe que já existem no
+    sistema. Enquanto a proposta ainda está em "draft" (preço não aprovado na Tela de
+    Precificação), esta ferramenta só gera a proposta_tecnica.docx — sem tabela de preço nem
+    cronograma de desembolso, que ainda não foram revisados pelo consultor; a comercial (ou o
+    documento combinado) só fica disponível depois que o status virar "priced"/"approved". Só
+    chame depois de confirmar que não falta nenhuma informação que bloqueia a proposta (ver
+    passo a passo interno). Nomes/CNPJ que você não tiver certeza, escreva "A confirmar" em vez
+    de inventar.
   DESC
 
   param :nome_cliente, desc: "Razão social do cliente/contratante"
@@ -32,8 +42,6 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   def execute(**args)
-    return { error: "A precificação ainda não está completa — não é possível gerar o documento agora." }.to_json unless @proposal.status.in?(%w[priced approved])
-
     @proposal.increment!(:version)
     description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
 
@@ -42,7 +50,21 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
 
-    if @proposal.document_split == "separated"
+    # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
+    # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
+    # sugerida pela IA já existe nesse ponto (Proposal#build_with_ai_suggested_team!), então o
+    # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa.
+    if @proposal.status == "draft"
+      files = filler.fill_split(
+        placeholders: placeholders, tables: tables, images: images,
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "" }
+      )
+      attach!(files[:technical], "proposta_tecnica.docx", "tecnica", description)
+      { success: true, version: @proposal.version, filenames: %w[proposta_tecnica.docx],
+        message: "Gerado o arquivo proposta_tecnica.docx (versão #{@proposal.version}) — só a parte técnica, sem " \
+          "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
+          "Precificação." }.to_json
+    elsif @proposal.document_split == "separated"
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "" },
