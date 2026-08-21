@@ -25,18 +25,24 @@ module Rag
       def indexable = documents.select(&:indexable?)
     end
 
-    def initialize(path:, limit: nil, classify: true, ocr: false)
+    def initialize(path:, limit: nil, classify: true, ocr: false, &progress)
       @path = path
       @limit = limit
       @classify = classify
       @ocr = ocr
+      # Um acervo real leva dezenas de minutos (o OCR domina). Sem sinal de progresso não há
+      # como distinguir "trabalhando" de "travado" numa execução dessas.
+      @progress = progress
     end
 
     def call
       jobs = Inventory.new(@path).call
       jobs = jobs.first(@limit) if @limit
 
-      jobs.map { |job| process_job(job) }
+      jobs.each_with_index.map do |job, index|
+        @progress&.call(index + 1, jobs.size, job)
+        process_job(job)
+      end
     end
 
     private

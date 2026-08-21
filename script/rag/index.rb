@@ -21,13 +21,21 @@ end.parse!(ARGV)
 abort("Informe --path com a pasta do acervo.") if options[:path].blank?
 
 puts "Lendo #{options[:path]}#{' (com OCR)' if options[:ocr]}..."
-jobs = Rag::Ingestion.new(path: options[:path], classify: options[:classify], ocr: options[:ocr]).call
+started = Time.current
+
+jobs = Rag::Ingestion.new(path: options[:path], classify: options[:classify], ocr: options[:ocr]) do |n, total, job|
+  puts format("[%2d/%d] %-52s %3d arquivos  (%s decorridos)",
+    n, total, job.name.truncate(52), job.items.size,
+    ActiveSupport::Duration.build((Time.current - started).round).inspect)
+  $stdout.flush
+end.call
 abort("Nenhum documento encontrado.") if jobs.empty?
 
 puts "#{jobs.size} jobs, #{jobs.sum { |job| job.documents.size }} documentos. Indexando#{' e embedando' if options[:embed]}..."
 result = Rag::Indexer.new(embed: options[:embed]).call(jobs)
 
-puts "\n#{result}"
+puts format("\nProcessado em %s", ActiveSupport::Duration.build((Time.current - started).round).inspect)
+puts result.to_s
 puts "\n--- Índice ---"
 puts "  #{HistoricalProposal.count} documentos | #{HistoricalProposalChunk.count} chunks | " \
      "#{HistoricalProposalChunk.embedded.count} com embedding"
