@@ -31,3 +31,30 @@ module AiStubHelper
     Conversation.define_method(:complete, original_method)
   end
 end
+
+# O pipeline de RAG (Rag::DocumentClassifier) roda offline, fora de qualquer Conversation, e
+# por isso chama RubyLLM.chat direto — redefinir Conversation#complete não intercepta esse
+# caminho. Mesma técnica, um nível acima.
+module RagAiStubHelper
+  def stub_rag_chat(response)
+    with_stubbed_chat(->(*) { FakeChat.new(response) }) { yield }
+  end
+
+  def stub_rag_chat_error(error_class = RubyLLM::Error)
+    with_stubbed_chat(->(*) { raise error_class, "erro simulado em teste" }) { yield }
+  end
+
+  private
+
+  def with_stubbed_chat(behavior)
+    original = RubyLLM.method(:chat)
+    RubyLLM.define_singleton_method(:chat) { |*args, **kwargs| behavior.call(*args, **kwargs) }
+    yield
+  ensure
+    RubyLLM.define_singleton_method(:chat, original)
+  end
+
+  FakeChat = Struct.new(:response) do
+    def ask(_prompt) = Struct.new(:content).new(response)
+  end
+end
