@@ -1,0 +1,14 @@
+<%# Mensagem do consultor e indicador de "digitando" num broadcast SÓ.
+
+    Antes eram dois broadcast_append_to seguidos: o servidor mandava na ordem certa, mas como
+    viravam duas mensagens de WebSocket independentes, o Turbo às vezes aplicava a segunda
+    primeiro e o indicador aparecia ACIMA da mensagem recém-enviada (sumia com F5, porque aí a
+    página vinha inteira do servidor). Num único broadcast os dois streams são processados na
+    ordem em que estão aqui. %>
+<%= turbo_stream.append "messages" do %>
+  <%= render "conversations/message", message: message %>
+<% end %>
+
+<%= turbo_stream.append "messages" do %>
+  <%= render "conversations/typing_indicator" %>
+<% end %>
