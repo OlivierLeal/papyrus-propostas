@@ -207,9 +207,48 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 
 1. ~~Motor de precificação determinístico (seção 5)~~ — **implementado**: `Proposal`/`ProjectPricing`/`ProposalProfessional`, com sugestão de equipe pela IA restrita ao menu de `study_templates` e Tela de Precificação editável.
 2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado.
-3. **RAG com `pgvector`** — duas fontes distintas, com timing diferente:
-   - **Acervo histórico da Papyrus (fora do sistema)** — a Papyrus tem um volume grande de propostas reais de anos anteriores (despadronizadas, pré-sistema). **Isso já entra em escopo agora** (fase 2, depois do gerador de DOCX da seção 8): ingestão desses arquivos, geração de embeddings, busca por similaridade alimentando o Prompt 2 (Geração de Proposta) com trechos de propostas parecidas.
-   - **Propostas aprovadas dentro do sistema** — continua adiado: só entrega valor depois que existir volume real de propostas aprovadas *pelo próprio sistema* pra indexar; hoje é zero. Quando chegar a hora, reaproveita a mesma infraestrutura de embeddings montada para o acervo histórico.
+3. ~~**RAG com `pgvector`** (acervo histórico da Papyrus)~~ — **implementado** (fase 1):
+   - Pipeline em `app/services/rag/` + entrypoints em `script/rag/`. O acervo é uma pasta por
+     **job** (`25001_Petrobras_Cetaceos`), e dentro dela convivem papéis diferentes: a proposta
+     que a Papyrus escreveu, o TR e os anexos do cliente, minutas contratuais, planilhas de
+     custo e revisões velhas. `Rag::DocumentClassifier` separa por papel com **1 chamada de IA
+     por job**, restrita a um menu fechado (`ROLES`), usando a estrutura de pastas apenas como
+     sinal — no acervo real ela é inconsistente (`Docs Papyrus` × `Doc´s Papyrus`).
+   - **Só `proposta_papyrus` e `planilha_papyrus` são "voz da Papyrus"** (o que ensina a IA a
+     escrever). O documento do cliente costuma ser maior que a proposta; misturados no mesmo
+     índice, o RAG ensinaria a IA a imitar o cliente. `tr_papyrus` (TR que a Papyrus escreve
+     para subcontratar) fica indexado mas fora da voz — é outra estrutura de documento.
+   - Extração: PDF via `pdftotext`, DOCX via Nokogiri (títulos vêm do **estilo** do parágrafo,
+     porque a numeração do Word é automática e não está no texto), `.doc` via LibreOffice, e
+     **OCR** (`pdftoppm` + `tesseract`, com cache por SHA256) para os PDFs rasterizados, que são
+     boa parte do acervo. Chunking por seção, com teto de 1800 caracteres — acima disso o
+     `cohere.embed-multilingual-v3` trunca sem avisar.
+   - Embeddings no **Bedrock sa-east-1** (`Rag::Embedder`, SigV4 na mão: o `ruby_llm` não tem
+     provider de embedding para Bedrock). O `embed-v4` só roda em perfil `global`, que faz
+     roteamento cross-region — como o acervo tem cliente, CNPJ e preço, o dado fica no Brasil.
+   - Uso pela IA, em duas frentes:
+     - **Proativa**: `GenerateSummaryJob` roda `Rag::SimilarJobFinder` sobre o que foi extraído
+       do TR e informa no resumo quais projetos anteriores se parecem com este ("25001 ·
+       Petrobras · Cetáceos — 71%"). É o caso real do consultor: mesmo serviço, outra área — a
+       proposta antiga é o melhor ponto de partida, e não adianta ela ficar no acervo se
+       ninguém for buscá-la. Cumpre os itens 4 e 9 do passo a passo interno.
+       O score pondera a similaridade média dos melhores trechos pela COBERTURA: um job que
+       casa em objetivo, escopo e equipe é parecido de verdade; um que casa num parágrafo é
+       coincidência e não deve ser sugerido.
+     - **Sob demanda**: ferramenta `SearchHistoricalArchiveTool` registrada em
+       `RespondToMessageJob`, com o parâmetro `fonte` escolhendo entre o que a Papyrus escreveu
+       e o que veio do cliente. Não é injeção automática de contexto: despejar propostas
+       inteiras em toda conversa gastaria contexto com material que talvez não seja usado.
+   - **Citação é obrigatória**: cada trecho devolvido pela ferramenta traz o campo `referencia`
+     já montado ("acervo Papyrus: projeto 25001 — Petrobras (4. ESCOPO, 2025)"), e as instruções
+     exigem citar sempre que o acervo for usado. Informação do acervo apresentada sem fonte é
+     indistinguível de invenção, e o consultor precisa poder conferir.
+   - Conferência antes de indexar: `bin/rails runner script/rag/report.rb --path PASTA --ocr`
+     gera um HTML navegável com todos os trechos, sem tocar no banco nem gerar embedding.
+   - **Propostas aprovadas dentro do sistema** — continua adiado: só entrega valor depois que
+     existir volume real de propostas aprovadas *pelo próprio sistema* pra indexar; hoje é
+     zero. Quando chegar a hora, reaproveita a mesma infraestrutura.
+
 4. **Memória por cliente** (preferências, equipe recorrente, condicionantes) com score de confiança — a parte mais especulativa e cara do estudo; precisa de volume de uso real para ter o que aprender. Fica para depois do RAG estar validado.
 
 **Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
@@ -227,4 +266,8 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 - IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
 - Views HTML+ERB são validadas pela gem `herb` (`bin/herb lint`, configurada em `.herb.yml`, rodando também no `bin/ci` e no workflow do GitHub Actions). O linter em si é o pacote npm `@herb-tools/linter`, fixado no `package.json` na mesma versão da gem — ao atualizar uma, atualizar a outra e o campo `version:` do `.herb.yml`.
 - Anexos de conversa (TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
+- RAG do acervo (seção 11.1): rodar `script/rag/report.rb` e revisar o HTML ANTES de
+  `script/rag/index.rb` — indexar é a única etapa que custa dinheiro. A ingestão é idempotente
+  por SHA256 + `Rag::Indexer::PIPELINE_VERSION`; suba a versão ao mudar extração ou chunking de
+  forma que altere os trechos, senão o que já está indexado não é refeito.
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.

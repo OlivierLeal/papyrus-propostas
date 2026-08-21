@@ -10,7 +10,14 @@ class ProcessCompDocsJob < ApplicationJob
     conversation.mark_step!("comp_docs", "running")
 
     attachments.each do |attachment|
-      conversation.ask_internally(prompt_for(attachment), with: attachment, hide_response: true)
+      # Mesmo teto de tamanho do TR — um complementar pesado (planta, relatório escaneado)
+      # não pode derrubar a análise dos demais.
+      prepared = AttachmentPreparer.new(attachment).call
+      conversation.ask_internally(
+        [ prompt_for(attachment), prepared.inline_text ].compact_blank.join("\n\n"),
+        with: prepared.attachments,
+        hide_response: true
+      )
     end
 
     conversation.mark_step!("comp_docs", "done")

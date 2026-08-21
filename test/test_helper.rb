@@ -27,6 +27,7 @@ module ActiveSupport
 
     include ActiveJob::TestHelper
     include AiStubHelper
+    include RagAiStubHelper
 
     # Add more helper methods to be used by all tests here...
   end

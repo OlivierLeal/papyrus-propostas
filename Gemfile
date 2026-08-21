@@ -54,6 +54,9 @@ gem "rgeo-proj4", ">= 5.0"
 # Reads/writes zip files — usado para descompactar KMZ (KML zipado). [https://github.com/rubyzip/rubyzip]
 gem "rubyzip", require: "zip"
 
+# Busca por similaridade em vetores (pgvector) para o RAG do acervo histórico. [https://github.com/ankane/neighbor]
+gem "neighbor"
+
 # Unified interface to LLM providers (Claude, OpenAI, Gemini...) with Rails ActiveRecord integration. [https://github.com/crmne/ruby_llm]
 gem "ruby_llm"
 

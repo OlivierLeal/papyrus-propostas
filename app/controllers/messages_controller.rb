@@ -17,8 +17,8 @@ class MessagesController < ApplicationController
       # Sem isso, quem manda a mensagem só a vê porque a página inteira recarrega — outras abas
       # (ou outro consultor olhando a mesma proposta) nunca recebem essa mensagem via WebSocket,
       # só a resposta da IA depois (que o RespondToMessageJob transmite).
-      @conversation.broadcast_append_to @conversation, target: "messages", partial: "conversations/message", locals: { message: message }
-      @conversation.broadcast_append_to @conversation, target: "messages", partial: "conversations/typing_indicator"
+      @conversation.broadcast_render_to @conversation,
+        partial: "conversations/user_message_broadcast", locals: { message: message }
 
       RespondToMessageJob.perform_later(@conversation.id)
     end
