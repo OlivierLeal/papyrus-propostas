@@ -43,7 +43,11 @@ class AttachmentPreparer
 
   def section_for(attachment)
     text = extract(attachment)
-    return nil if text.blank?
+
+    # Falhar em silêncio aqui é pior do que não ter o arquivo: sem anexo E sem aviso, a IA
+    # analisa o TR que não recebeu e responde com confiança sobre um documento que nunca viu.
+    # Acontece de verdade em produção se faltar poppler-utils (PDF) ou libreoffice (.doc).
+    return unreadable_notice(attachment) if text.blank?
 
     <<~TEXT
       --- CONTEÚDO DO ARQUIVO "#{attachment.filename}" (texto extraído; o arquivo original é
@@ -51,6 +55,14 @@ class AttachmentPreparer
       #{text.truncate(MAX_TEXT_CHARS)}
       --- FIM DE "#{attachment.filename}" ---
     TEXT
+  end
+
+  def unreadable_notice(attachment)
+    Rails.logger.error("[AttachmentPreparer] #{attachment.filename} não pôde ser lido e ficará fora do prompt")
+
+    "--- O arquivo \"#{attachment.filename}\" foi enviado pelo consultor mas o sistema não " \
+    "conseguiu extrair o conteúdo dele. NÃO invente o que ele diz: avise o consultor de que " \
+    "esse arquivo não pôde ser lido e peça outra versão (PDF ou DOCX). ---"
   end
 
   # O Rag::TextExtractor trabalha sobre um caminho no disco, então o blob é materializado num

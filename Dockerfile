@@ -22,7 +22,9 @@ RUN apt-get update -qq && \
     libvips \
     postgresql-client \
     libproj25 \
-    proj-bin && \
+    proj-bin \
+    poppler-utils \
+    libreoffice-writer-nogui && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
