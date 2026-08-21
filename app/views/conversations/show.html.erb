@@ -86,7 +86,33 @@
             <h2 class="font-semibold text-base-content mb-4">Área do KMZ</h2>
 
             <% if @conversation.geospatial_result.area_image.attached? %>
-              <%= image_tag @conversation.geospatial_result.area_image, alt: "Mapa da área de estudo", class: "w-full rounded-field border border-base-300 mb-3" %>
+              <div class="relative group mb-3" data-controller="image-viewer">
+                <button type="button" class="block w-full cursor-zoom-in" data-action="image-viewer#open"
+                        title="Ampliar mapa da área de estudo">
+                  <%= image_tag @conversation.geospatial_result.area_image, alt: "Mapa da área de estudo",
+                        class: "w-full rounded-field border border-base-300" %>
+                </button>
+
+                <span class="btn btn-sm btn-square absolute top-2 right-2 pointer-events-none
+                             bg-base-100/80 border-base-300 opacity-70 group-hover:opacity-100 transition-opacity"
+                      aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+                    <path fill-rule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06L5.44 6.5H3.75a.75.75 0 0 0 0 1.5h3.5A.75.75 0 0 0 8 7.25v-3.5a.75.75 0 0 0-1.5 0v1.69L3.28 2.22ZM13.5 3.75a.75.75 0 0 0-1.5 0v3.5c0 .414.336.75.75.75h3.5a.75.75 0 0 0 0-1.5h-1.69l3.22-3.22a.75.75 0 0 0-1.06-1.06L13.5 5.44V3.75ZM3.75 12a.75.75 0 0 0 0 1.5h1.69l-3.22 3.22a.75.75 0 1 0 1.06 1.06l3.22-3.22v1.69a.75.75 0 0 0 1.5 0v-3.5a.75.75 0 0 0-.75-.75h-3.5ZM12 12.75a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-1.69l3.22 3.22a.75.75 0 1 1-1.06 1.06l-3.22-3.22v1.69a.75.75 0 0 1-1.5 0v-3.5Z" clip-rule="evenodd" />
+                  </svg>
+                </span>
+
+                <dialog class="modal" data-image-viewer-target="dialog" data-action="click->image-viewer#closeOnBackdrop">
+                  <div class="modal-box max-w-[95vw] w-fit p-2">
+                    <%= image_tag @conversation.geospatial_result.area_image, alt: "Mapa da área de estudo",
+                          class: "max-h-[85vh] w-auto max-w-full rounded-field" %>
+                    <p class="text-sm text-base-content/70 px-2 pt-2"><%= @conversation.geospatial_result.summary_text %></p>
+                  </div>
+
+                  <form method="dialog" class="modal-backdrop">
+                    <button>Fechar</button>
+                  </form>
+                </dialog>
+              </div>
             <% end %>
 
             <p class="text-sm text-base-content/70"><%= @conversation.geospatial_result.summary_text %></p>
