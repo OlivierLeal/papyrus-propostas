@@ -10,10 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_19_152416) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_21_123860) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
+  enable_extension "vector"
 
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
@@ -75,6 +76,52 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_19_152416) do
     t.datetime "updated_at", null: false
     t.string "watershed"
     t.index ["conversation_id"], name: "index_geospatial_results_on_conversation_id", unique: true
+  end
+
+  create_table "historical_proposal_chunks", force: :cascade do |t|
+    t.boolean "contains_pricing", default: false, null: false
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.datetime "embedded_at"
+    t.vector "embedding", limit: 1024
+    t.string "embedding_model"
+    t.bigint "historical_proposal_id", null: false
+    t.integer "position", null: false
+    t.string "section_number"
+    t.string "section_title"
+    t.boolean "sensitive", default: false, null: false
+    t.string "sensitivity_reasons", default: [], array: true
+    t.integer "token_count", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["embedding"], name: "index_hp_chunks_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
+    t.index ["historical_proposal_id", "position"], name: "index_hp_chunks_on_proposal_and_position", unique: true
+  end
+
+  create_table "historical_proposals", force: :cascade do |t|
+    t.string "chunker_version", null: false
+    t.string "client_name"
+    t.datetime "created_at", null: false
+    t.text "error_message"
+    t.string "filename", null: false
+    t.string "job_name", null: false
+    t.string "job_number"
+    t.integer "page_count", default: 0, null: false
+    t.jsonb "pricing_data"
+    t.string "relative_path", null: false
+    t.integer "revision"
+    t.string "role", null: false
+    t.string "role_source", null: false
+    t.string "source_path", null: false
+    t.string "source_sha256", null: false
+    t.string "spreadsheet_path"
+    t.string "status", null: false
+    t.string "subject"
+    t.boolean "superseded", default: false, null: false
+    t.datetime "updated_at", null: false
+    t.integer "year"
+    t.index ["job_number"], name: "index_historical_proposals_on_job_number"
+    t.index ["role", "superseded"], name: "index_historical_proposals_on_role_and_superseded"
+    t.index ["source_sha256"], name: "index_historical_proposals_on_source_sha256", unique: true
   end
 
   create_table "logistics_configs", force: :cascade do |t|
@@ -388,6 +435,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_19_152416) do
   add_foreign_key "conversations", "study_types"
   add_foreign_key "conversations", "users"
   add_foreign_key "geospatial_results", "conversations"
+  add_foreign_key "historical_proposal_chunks", "historical_proposals"
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"
