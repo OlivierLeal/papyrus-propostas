@@ -7,7 +7,17 @@ class ProcessTrJob < ApplicationJob
     return conversation.mark_step!("tr", "skipped") if attachments.empty?
 
     conversation.mark_step!("tr", "running")
-    conversation.ask_internally(prompt, with: attachments, hide_response: true)
+
+    # TR em Word/PDF com fotos passa dos 4,5 MB que o provider aceita por documento; o
+    # AttachmentPreparer converte esses em texto para a análise não falhar por peso de imagem.
+    prepared = AttachmentPreparer.new(attachments).call
+    Rails.logger.info("[ProcessTrJob] anexos convertidos para texto: #{prepared.converted.join(', ')}") if prepared.converted?
+
+    conversation.ask_internally(
+      [ prompt, prepared.inline_text ].compact_blank.join("\n\n"),
+      with: prepared.attachments,
+      hide_response: true
+    )
     assign_study_type!(conversation)
     conversation.mark_step!("tr", "done")
   rescue StandardError => e
