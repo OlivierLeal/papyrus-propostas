@@ -95,7 +95,10 @@ class SearchHistoricalArchiveTool < RubyLLM::Tool
   def reference_for(proposal, hit)
     projeto = [ proposal.job_number, proposal.client_name ].compact_blank.join(" — ")
     detalhe = [ hit.section.presence, proposal.year ].compact_blank.join(", ")
+    # "acervo" = documento histórico assinado; "proposta gerada" = saiu deste sistema e foi
+    # aprovada aqui. A distinção precisa chegar ao consultor junto com o trecho.
+    fonte = proposal.origin == "sistema" ? "proposta gerada no sistema" : "acervo Papyrus"
 
-    "acervo Papyrus: projeto #{projeto}#{" (#{detalhe})" if detalhe.present?}"
+    "#{fonte}: projeto #{projeto}#{" (#{detalhe})" if detalhe.present?}"
   end
 end

@@ -45,6 +45,9 @@ class ProposalsController < ApplicationController
     if editable?
       @proposal.update!(status: "approved")
       @conversation.update!(status: "completed")
+      # A partir daqui a proposta é documento revisado por humano, então pode virar referência
+      # para as próximas (ver IndexApprovedProposalJob).
+      IndexApprovedProposalJob.perform_later(@proposal.id)
       redirect_to conversation_proposal_path(@conversation), notice: "Preço aprovado."
     else
       redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."

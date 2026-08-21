@@ -1,0 +1,36 @@
+<%# Card de uma informação que a IA propôs guardar para propostas futuras. Enquanto pendente,
+    ela NÃO é consultável — só vira conhecimento quando o consultor aprova aqui. %>
+<div id="<%= dom_id(note) %>" class="flex flex-col gap-3">
+  <div class="flex items-start gap-2">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0 mt-0.5 opacity-70">
+      <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM1.49 15.326a.78.78 0 0 1-.358-.442 3 3 0 0 1 4.308-3.516 6.484 6.484 0 0 0-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 0 1-2.07-.655ZM16.44 15.98a4.97 4.97 0 0 0 2.07-.654.78.78 0 0 0 .357-.442 3 3 0 0 0-4.308-3.517 6.484 6.484 0 0 1 1.907 3.96 2.32 2.32 0 0 1-.026.654ZM18 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM5.304 16.19a.844.844 0 0 1-.277-.71 5 5 0 0 1 9.947 0 .843.843 0 0 1-.277.71A6.975 6.975 0 0 1 10 18a6.974 6.974 0 0 1-4.696-1.81Z" />
+    </svg>
+    <div class="flex flex-col gap-1 min-w-0">
+      <span class="text-xs uppercase tracking-wide opacity-70"><%= note.category_label %></span>
+      <p class="text-sm"><%= note.content %></p>
+      <% if note.context.present? %>
+        <p class="text-xs opacity-60"><%= note.context %></p>
+      <% end %>
+    </div>
+  </div>
+
+  <% if note.pending? %>
+    <div class="flex items-center gap-2">
+      <%= button_to "Guardar para próximas propostas",
+            approve_conversation_knowledge_note_path(note.conversation, note),
+            class: "btn btn-xs btn-primary" %>
+      <%= button_to "Descartar",
+            reject_conversation_knowledge_note_path(note.conversation, note),
+            class: "btn btn-xs btn-ghost" %>
+    </div>
+  <% elsif note.approved? %>
+    <p class="text-xs text-success flex items-center gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0">
+        <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+      </svg>
+      Guardado — vai aparecer em propostas futuras
+    </p>
+  <% else %>
+    <p class="text-xs opacity-60">Descartado.</p>
+  <% end %>
+</div>

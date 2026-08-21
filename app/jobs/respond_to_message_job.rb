@@ -13,6 +13,7 @@ class RespondToMessageJob < ApplicationJob
     # indexado — sem isso a IA "descobre" uma ferramenta que sempre volta vazia e passa a
     # mencionar buscas que não trouxeram nada.
     conversation.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
+    conversation.with_tool(RememberForFutureProposalsTool.new(conversation: conversation))
     conversation.complete
 
     message = conversation.messages.where(role: "assistant", internal: false).order(:created_at).last

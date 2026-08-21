@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_21_123860) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_21_184604) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -100,11 +100,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_21_123860) do
   create_table "historical_proposals", force: :cascade do |t|
     t.string "chunker_version", null: false
     t.string "client_name"
+    t.bigint "conversation_id"
     t.datetime "created_at", null: false
     t.text "error_message"
     t.string "filename", null: false
     t.string "job_name", null: false
     t.string "job_number"
+    t.string "origin", default: "acervo", null: false
     t.integer "page_count", default: 0, null: false
     t.jsonb "pricing_data"
     t.string "relative_path", null: false
@@ -119,9 +121,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_21_123860) do
     t.boolean "superseded", default: false, null: false
     t.datetime "updated_at", null: false
     t.integer "year"
+    t.index ["conversation_id"], name: "index_historical_proposals_on_conversation_id"
     t.index ["job_number"], name: "index_historical_proposals_on_job_number"
+    t.index ["origin"], name: "index_historical_proposals_on_origin"
     t.index ["role", "superseded"], name: "index_historical_proposals_on_role_and_superseded"
     t.index ["source_sha256"], name: "index_historical_proposals_on_source_sha256", unique: true
+  end
+
+  create_table "knowledge_notes", force: :cascade do |t|
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
+    t.string "category", null: false
+    t.string "client_name"
+    t.text "content", null: false
+    t.text "context"
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "embedded_at"
+    t.vector "embedding", limit: 1024
+    t.string "embedding_model"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "index_knowledge_notes_on_approved_by_id"
+    t.index ["category"], name: "index_knowledge_notes_on_category"
+    t.index ["conversation_id"], name: "index_knowledge_notes_on_conversation_id"
+    t.index ["embedding"], name: "index_knowledge_notes_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
+    t.index ["status", "client_name"], name: "index_knowledge_notes_on_status_and_client_name"
   end
 
   create_table "logistics_configs", force: :cascade do |t|
@@ -436,6 +461,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_21_123860) do
   add_foreign_key "conversations", "users"
   add_foreign_key "geospatial_results", "conversations"
   add_foreign_key "historical_proposal_chunks", "historical_proposals"
+  add_foreign_key "historical_proposals", "conversations"
+  add_foreign_key "knowledge_notes", "conversations"
+  add_foreign_key "knowledge_notes", "users", column: "approved_by_id"
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"

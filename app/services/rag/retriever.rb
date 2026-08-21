@@ -42,6 +42,21 @@ module Rag
         .filter_map { |chunk| build_hit(chunk) }
     end
 
+    # Busca nas notas de conhecimento aprovadas (KnowledgeNote) — memória do que foi aprendido
+    # dentro do sistema, separada do acervo de documentos justamente para a origem nunca se
+    # perder de vista.
+    def notes(query, limit: DEFAULT_LIMIT, client_name: nil)
+      vector = @embedder.embed_query(query)
+
+      scope = KnowledgeNote.searchable
+      scope = scope.where(client_name: client_name) if client_name.present?
+
+      scope
+        .nearest_neighbors(:embedding, vector, distance: "cosine")
+        .limit(limit)
+        .select { |note| note.neighbor_distance && note.neighbor_distance <= MAX_DISTANCE }
+    end
+
     private
 
     def build_hit(chunk)

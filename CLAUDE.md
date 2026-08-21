@@ -249,7 +249,25 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
      existir volume real de propostas aprovadas *pelo próprio sistema* pra indexar; hoje é
      zero. Quando chegar a hora, reaproveita a mesma infraestrutura.
 
-4. **Memória por cliente** (preferências, equipe recorrente, condicionantes) com score de confiança — a parte mais especulativa e cara do estudo; precisa de volume de uso real para ter o que aprender. Fica para depois do RAG estar validado.
+4. ~~**Memória por cliente**~~ — **implementado** (`KnowledgeNote`), com a curadoria como
+   parte do desenho, não como refinamento futuro:
+   - A IA PROPÕE via `RememberForFutureProposalsTool` (categorias fechadas: preferência do
+     cliente, decisão de escopo, condicionante de órgão, correção do consultor). A nota nasce
+     `pending` e **não é recuperável**; quem promove a conhecimento é o consultor, clicando no
+     card do chat (`KnowledgeNotesController#approve`).
+   - **Por que a curadoria não é opcional:** o acervo vale porque tudo nele foi escrito e
+     assinado por gente. Deixar a IA gravar direto o que "achou interessante" faria a
+     inferência dela voltar meses depois citada como "memória da Papyrus" — indistinguível de
+     um fato verificado. É o mesmo princípio da seção 1 aplicado a conhecimento em vez de preço.
+   - Aprovar e embedar são atômicos: nota aprovada sem vetor é inencontrável, o que na prática
+     equivale a não ter sido aprovada. Se o embedding falhar, ela continua pendente.
+   - Uso: `GenerateSummaryJob` traz as notas aprovadas do cliente no resumo de toda proposta
+     nova dele; a citação (`KnowledgeNote#reference`) diz "memória da Papyrus", nunca "acervo".
+   - **Proposta gerada pelo sistema** entra no acervo em `IndexApprovedProposalJob`, disparado
+     por `proposals#approve` — só depois de aprovada, quando já passou por revisão humana.
+     Fica com `origin: "sistema"` (o acervo em disco é `origin: "acervo"`), e a ferramenta de
+     busca cita "proposta gerada no sistema" em vez de "acervo Papyrus". Indexar rascunho faria
+     o RAG ensinar a IA a repetir o que o consultor descartou.
 
 **Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
 

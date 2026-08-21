@@ -1,6 +1,8 @@
 class Conversation < ApplicationRecord
   acts_as_chat
 
+  has_many :knowledge_notes, dependent: :destroy
+
   STATUSES = %w[setup processing reviewing pricing completed].freeze
 
   STATUS_LABELS = {
@@ -45,6 +47,14 @@ class Conversation < ApplicationRecord
       precisa poder conferir de que projeto veio cada coisa, e informação do acervo sem fonte é
       indistinguível de invenção. Trate valores de propostas antigas como referência histórica,
       nunca como preço desta proposta.
+
+    - Guardar aprendizado para o futuro (ferramenta remember_for_future_proposals) quando aparecer
+      nesta conversa algo que vai se repetir e que hoje só existe aqui: exigência recorrente do
+      cliente, decisão de escopo que vale repetir, condicionante do órgão, ou uma correção que o
+      consultor fez em você. A ferramenta NÃO guarda na hora — ela propõe, e o consultor aprova
+      no card. Seja seletivo: registre no máximo o que for realmente reaproveitável, nunca fato
+      pontual deste projeto nem algo que você deduziu sem confirmação. Quando o consultor
+      corrigir você sobre um ponto que vale para próximos projetos, ofereça guardar.
 
     Qualquer pedido fora desse escopo (perguntas sem relação com este projeto ou com licenciamento
     ambiental, código, receitas, tarefas genéricas ou qualquer assunto alheio a este atendimento):

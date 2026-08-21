@@ -25,6 +25,8 @@ class GenerateSummaryJob < ApplicationJob
         #{geospatial_summary(conversation)}
 
         #{similar_jobs_summary(conversation)}
+
+        #{client_memory_summary(conversation)}
       TEXT
     end
 
@@ -54,6 +56,23 @@ class GenerateSummaryJob < ApplicationJob
       # Acervo é um reforço, não um pré-requisito: falha aqui não pode impedir o resumo.
       Rails.logger.warn("[GenerateSummaryJob] busca de similares falhou: #{e.class} #{e.message}")
       ""
+    end
+
+    # O que a Papyrus já aprendeu sobre ESTE cliente em propostas anteriores — aprovado por um
+    # consultor, não inferido pela IA (ver KnowledgeNote). Entra sempre que houver, porque uma
+    # exigência recorrente do cliente muda o escopo antes mesmo de a proposta começar.
+    def client_memory_summary(conversation)
+      notes = KnowledgeNote.approved.where(client_name: conversation.client_name)
+        .where.not(conversation_id: conversation.id)
+        .order(approved_at: :desc).limit(10)
+      return "" if notes.empty?
+
+      <<~TEXT
+        O que a Papyrus já registrou sobre este cliente em projetos anteriores:
+        #{notes.map { |note| "- [#{note.category_label}] #{note.content}" }.join("\n")}
+
+        Considere isso ao montar o resumo e diga ao consultor que veio da memória do sistema.
+      TEXT
     end
 
     def format_match(match)

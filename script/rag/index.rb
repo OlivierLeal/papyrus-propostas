@@ -35,7 +35,7 @@ puts "#{jobs.size} jobs, #{jobs.sum { |job| job.documents.size }} documentos. In
 result = Rag::Indexer.new(embed: options[:embed]).call(jobs)
 
 puts format("\nProcessado em %s", ActiveSupport::Duration.build((Time.current - started).round).inspect)
-puts result.to_s
+puts result
 puts "\n--- Índice ---"
 puts "  #{HistoricalProposal.count} documentos | #{HistoricalProposalChunk.count} chunks | " \
      "#{HistoricalProposalChunk.embedded.count} com embedding"

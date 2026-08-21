@@ -40,7 +40,10 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
       Conversation.define_method(:with_tool, original_method)
     end
 
-    assert_equal [ GenerateProposalDocumentTool ], with_tool_calls # reviewing_conversation não tem proposal ainda
+    # reviewing_conversation não tem proposal ainda, por isso a de custo externo fica de fora.
+    # A de memória (RememberForFutureProposalsTool) vale em qualquer conversa: o consultor pode
+    # corrigir a IA sobre algo reaproveitável a qualquer momento.
+    assert_equal [ GenerateProposalDocumentTool, RememberForFutureProposalsTool ], with_tool_calls
   end
 
   test "registers both the document-generation and external-cost tools when there is a proposal" do

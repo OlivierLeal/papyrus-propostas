@@ -58,3 +58,17 @@ module RagAiStubHelper
     def ask(_prompt) = Struct.new(:content).new(response)
   end
 end
+
+# Embeddings custam dinheiro e dependem de rede: nenhum teste pode chamar o Bedrock de verdade.
+module EmbedderStubHelper
+  def stub_embedder
+    original = Rag::Embedder.instance_method(:embed_documents)
+    Rag::Embedder.define_method(:embed_documents) do |texts|
+      Array(texts).map { Array.new(Rag::Embedder::DIMENSIONS) { 0.01 } }
+    end
+
+    yield
+  ensure
+    Rag::Embedder.define_method(:embed_documents, original)
+  end
+end

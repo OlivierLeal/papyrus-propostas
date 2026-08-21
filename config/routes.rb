@@ -6,6 +6,13 @@ Rails.application.routes.draw do
   resources :conversations, only: %i[index new create show update] do
     resources :messages, only: :create
 
+    resources :knowledge_notes, only: [] do
+      member do
+        post :approve
+        post :reject
+      end
+    end
+
     resource :proposal, only: %i[show create update] do
       post :approve
       post :add_external_cost

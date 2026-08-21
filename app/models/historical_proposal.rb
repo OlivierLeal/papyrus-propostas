@@ -6,6 +6,9 @@
 # Rag::DocumentClassifier.
 class HistoricalProposal < ApplicationRecord
   has_many :chunks, class_name: "HistoricalProposalChunk", dependent: :delete_all
+  # Presente só quando a proposta saiu deste sistema (origin "sistema") — o acervo em disco
+  # não tem conversa de origem.
+  belongs_to :conversation, optional: true
 
   validates :source_sha256, presence: true, uniqueness: true
   validates :role, inclusion: { in: Rag::DocumentClassifier::ROLES.keys }
@@ -15,6 +18,8 @@ class HistoricalProposal < ApplicationRecord
   # o cliente — no job da Petrobras o documento do cliente é 3x maior que a proposta.
   scope :voice_of_papyrus, -> { where(role: Rag::DocumentClassifier::VOICE_OF_PAPYRUS) }
   scope :current, -> { where(superseded: false) }
+  # Documento histórico escrito por gente, distinto do que este sistema gerou.
+  scope :from_archive, -> { where(origin: "acervo") }
 
   def voice_of_papyrus? = Rag::DocumentClassifier::VOICE_OF_PAPYRUS.include?(role)
 
