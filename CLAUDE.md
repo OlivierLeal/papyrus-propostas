@@ -228,13 +228,51 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
      roteamento cross-region — como o acervo tem cliente, CNPJ e preço, o dado fica no Brasil.
    - Uso pela IA, em duas frentes:
      - **Proativa**: `GenerateSummaryJob` roda `Rag::SimilarJobFinder` sobre o que foi extraído
-       do TR e informa no resumo quais projetos anteriores se parecem com este ("25001 ·
-       Petrobras · Cetáceos — 71%"). É o caso real do consultor: mesmo serviço, outra área — a
-       proposta antiga é o melhor ponto de partida, e não adianta ela ficar no acervo se
-       ninguém for buscá-la. Cumpre os itens 4 e 9 do passo a passo interno.
-       O score pondera a similaridade média dos melhores trechos pela COBERTURA: um job que
-       casa em objetivo, escopo e equipe é parecido de verdade; um que casa num parágrafo é
-       coincidência e não deve ser sugerido.
+       do TR e informa no resumo quais projetos anteriores se parecem com este ("25051 ·
+       Petrobras · Diagnóstico Quilombola — referência direta"). É o caso real do consultor:
+       mesmo serviço, outra área — a proposta antiga é o melhor ponto de partida, e não adianta
+       ela ficar no acervo se ninguém for buscá-la. Cumpre os itens 4 e 9 do passo a passo
+       interno.
+
+       **Calibragem (o score bruto de similaridade não serve).** Num acervo de domínio único o
+       cosseno entre dois textos quaisquer já parte alto: medido neste acervo, uma receita de
+       bolo tira 0,51, uma frase sobre migração de PostgreSQL tira 0,60 e a frase vazia
+       "serviços de consultoria ambiental para licenciamento" tira 0,68 — contra o corte de 0,60
+       que existia. Numa proposta de BESS para a Rio Energy o sistema anunciou "73% semelhante"
+       a um job de execução de PBA, sendo que dois dos três trechos que geraram o número eram a
+       CAPA da proposta antiga (que traz o nome do cliente) e o acervo não tem projeto de BESS
+       nenhum. Quatro peças corrigem isso:
+       1. **Descritor de serviço** (`GenerateSummaryJob::SEARCH_FIELDS`): a consulta é montada
+          campo a campo, com orçamento por campo, só com o que descreve o SERVIÇO. Cliente,
+          contato, prazo e nome de arquivo ficam de fora — cliente é faceta de filtro, nunca
+          semântica. `ProcessTrJob` passou a extrair um campo `empreendimento` (tecnologia e
+          porte) justamente para alimentar isto.
+       2. **`Rag::BoilerplateDetector`**: marca o trecho que aparece em ≥20% dos outros jobs
+          (obrigações, validade, prazo, condições de pagamento) — é IDF aplicado a trecho. Fica
+          fora da comparação entre jobs, mas continua recuperável na busca direta. Roda no fim
+          de `script/rag/index.rb`, ou avulso por `script/rag/boilerplate.rb`; não custa IA.
+          O Preâmbulo NÃO é marcado de propósito: ele carrega o "Ref.: Proposta Técnica para
+          ...", às vezes a melhor descrição do job.
+       3. **`Rag::CorpusFloor`**: o piso é a similaridade da consulta com o CENTROIDE do acervo
+          (`avg(embedding)` do pgvector, sem tabela nova). Descontá-lo devolve o que sobra de
+          específico. Quando nenhum trecho supera o piso, a consulta está mais perto da média do
+          acervo do que de qualquer documento dele.
+       4. **Domínio da cabeça do ranking**: quando existe projeto parecido de verdade, ele ocupa
+          quase todos os primeiros lugares; quando não existe, a cabeça se espalha. Os cortes
+          (`MIN_DOMINANCE`, `MIN_STRENGTH`) foram medidos contra oito consultas de resposta
+          conhecida — a tabela está no comentário do `SimilarJobFinder` e deve ser refeita ao
+          mudar chunking, modelo de embedding ou acervo.
+
+       Duas consequências de interface: o resumo passa a poder dizer **"nenhum projeto anterior
+       semelhante"** (antes o corte garantia três sugestões sempre, então o consultor não
+       distinguia achado de coincidência), e **não exibe mais porcentagem** — só "referência
+       direta" ou "aproveitável em parte", porque a faixa útil inteira cabe entre 0,68 e 0,75 e
+       o número comunicava uma precisão inexistente.
+
+       Ainda **não implementado**: ranquear também por facetas determinísticas (mesmo órgão,
+       mesmo enquadramento, mesma tecnologia) extraídas dos jobs do acervo, e mostrar esses
+       motivos no lugar do rótulo. Depende de uma passada de classificação sobre o acervo
+       (1 chamada de IA por job) e de uma coluna nova.
      - **Sob demanda**: ferramenta `SearchHistoricalArchiveTool` registrada em
        `RespondToMessageJob`, com o parâmetro `fonte` escolhendo entre o que a Papyrus escreveu
        e o que veio do cliente. Não é injeção automática de contexto: despejar propostas
@@ -288,4 +326,9 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
   `script/rag/index.rb` — indexar é a única etapa que custa dinheiro. A ingestão é idempotente
   por SHA256 + `Rag::Indexer::PIPELINE_VERSION`; suba a versão ao mudar extração ou chunking de
   forma que altere os trechos, senão o que já está indexado não é refeito.
+- Limiar de similaridade nunca sai de intuição — é medido. O acervo é de domínio único, então o
+  cosseno cru quase não discrimina (ver seção 11.1, "Calibragem"). Ao mexer em recuperação,
+  rodar as consultas de controle da tabela em `Rag::SimilarJobFinder`: quatro que devem achar um
+  job específico e quatro que não devem achar nada — inclusive uma fora do domínio e uma frase
+  genérica do próprio domínio, que é a que engana.
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.

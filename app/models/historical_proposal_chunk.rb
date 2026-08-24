@@ -18,5 +18,10 @@ class HistoricalProposalChunk < ApplicationRecord
   # mas pode ser excluído da recuperação quando o uso não justificar — CLAUDE.md, LGPD.
   scope :without_sensitive, -> { where(sensitive: false) }
 
+  # Texto de modelo repetido em quase toda proposta (obrigações, validade, prazo, condições de
+  # pagamento). Continua recuperável numa busca direta, mas fica fora da comparação entre jobs —
+  # ver Rag::BoilerplateDetector.
+  scope :without_boilerplate, -> { where(boilerplate: false) }
+
   scope :indexable, -> { joins(:historical_proposal).merge(HistoricalProposal.current) }
 end

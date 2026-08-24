@@ -36,6 +36,14 @@ result = Rag::Indexer.new(embed: options[:embed]).call(jobs)
 
 puts format("\nProcessado em %s", ActiveSupport::Duration.build((Time.current - started).round).inspect)
 puts result
+
+# Precisa rodar DEPOIS dos embeddings e sobre o acervo inteiro: o critério é "este trecho se
+# repete em quantos outros jobs", então documento novo pode transformar em formulário um trecho
+# que antes parecia específico. Não custa chamada de IA — é só comparação de vetores no banco.
+if options[:embed]
+  puts "\nMarcando trechos repetidos entre jobs..."
+  puts "  #{Rag::BoilerplateDetector.new.call}"
+end
 puts "\n--- Índice ---"
 puts "  #{HistoricalProposal.count} documentos | #{HistoricalProposalChunk.count} chunks | " \
      "#{HistoricalProposalChunk.embedded.count} com embedding"

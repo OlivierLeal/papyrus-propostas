@@ -42,7 +42,7 @@ class GenerateSummaryJob < ApplicationJob
     # não seja usado.
     def similar_jobs_summary(conversation)
       matches = Rag::SimilarJobFinder.new.call(search_context(conversation))
-      return "" if matches.empty?
+      return nothing_similar_notice if matches.empty?
 
       <<~TEXT
         Projetos semelhantes que a Papyrus já executou (encontrados no acervo histórico):
@@ -75,16 +75,79 @@ class GenerateSummaryJob < ApplicationJob
       TEXT
     end
 
+    # Sem porcentagem de propósito: neste acervo a faixa útil inteira cabe entre 0,68 e 0,75 de
+    # similaridade, e uma frase vazia sobre consultoria ambiental já vale 0,68 — o número
+    # comunicava uma precisão que não existe. Ver Rag::SimilarJobFinder.
     def format_match(match)
-      "- #{match.label}#{" (#{match.year})" if match.year} — similaridade #{(match.score * 100).round}%" \
+      "- #{match.label}#{" (#{match.year})" if match.year} — #{match.confidence_label}" \
       "#{"; seções aproveitáveis: #{match.sections.join(', ')}" if match.sections.any?}"
+    end
+
+    # "Não achei" é resposta, e é a que faltava: com o corte antigo o acervo sempre devolvia três
+    # sugestões, então o consultor não tinha como distinguir achado de coincidência.
+    def nothing_similar_notice
+      <<~TEXT
+        Busca no acervo histórico da Papyrus: nenhum projeto anterior semelhante o bastante para
+        servir de modelo.
+
+        Diga isso ao consultor em um tópico próprio, sem rodeios e sem sugerir projeto nenhum.
+        Não significa que o acervo esteja vazio — significa que este serviço não tem precedente
+        próximo lá dentro, e que a proposta será estruturada do zero.
+      TEXT
     end
 
     # O que define "parecido" é o serviço, não o texto inteiro do TR: tipo de estudo,
     # empreendimento e escopo. Truncado porque o modelo de embedding corta em 512 tokens.
+    # DESCRITOR DE SERVIÇO. O que define "parecido" é o serviço prestado, e mais nada.
+    #
+    # A versão anterior concatenava nome do cliente + o JSON extraído inteiro e cortava em 1500
+    # caracteres. Isso embedava telefone, e-mail, prazo de manifestação de interesse e nome de
+    # arquivo — vocabulário de CARTA, que puxa a recuperação para a capa das propostas antigas —
+    # e o truncamento cego comia justamente as condicionantes e as ressalvas, que são o que
+    # define escopo. O nome do cliente era o pior item: sozinho, "Rio Energy" já recupera a capa
+    # da proposta endereçada à Rio Energy, e foi isso que fez um job sem relação virar o mais
+    # parecido numa proposta de BESS.
+    #
+    # Cliente NÃO entra: é faceta de filtro, nunca semântica. Cada campo tem orçamento próprio,
+    # para nenhum deles comer o espaço dos outros.
+    SEARCH_FIELDS = {
+      "tipo_licenca" => 120,
+      "tipo_estudo" => 160,
+      "orgao_ambiental" => 60,
+      "municipios" => 120,
+      "empreendimento" => 300,
+      "diagnosticos" => 300,
+      "condicionantes" => 500,
+      "ressalvas" => 400
+    }.freeze
+
+    # O "resumo" do documento complementar NÃO entra como empreendimento: costuma ser a carta de
+    # encaminhamento ("Encaminhamento via Fulana da solicitação de Beltrano..."), exatamente o
+    # vocabulário que puxava a recuperação para a capa das propostas antigas. Quem descreve o
+    # empreendimento é o campo próprio que o ProcessTrJob passou a extrair.
+    FIELD_ALIASES = { "tipo_estudo_codigo" => "tipo_estudo" }.freeze
+
     def search_context(conversation)
-      [ conversation.client_name, conversation.study_type&.name, extracted_data_summary(conversation) ]
-        .compact_blank.join("\n").truncate(1500)
+      fields = extracted_fields(conversation)
+      fields["tipo_estudo"] = conversation.study_type.name if conversation.study_type
+
+      SEARCH_FIELDS.filter_map do |field, budget|
+        value = Array(fields[field]).map(&:to_s).compact_blank.join("; ")
+        "#{field.tr('_', ' ')}: #{value.truncate(budget)}" if value.present?
+      end.join("\n")
+    end
+
+    def extracted_fields(conversation)
+      conversation.messages.where(role: "assistant")
+        .filter_map { |message| AiJsonResponse.parse(message.content) }
+        .each_with_object({}) do |hash, merged|
+          hash.each do |key, value|
+            field = FIELD_ALIASES.fetch(key, key)
+            next unless SEARCH_FIELDS.key?(field)
+
+            merged[field] = Array(merged[field]).concat(Array(value)).compact_blank.uniq
+          end
+        end
     end
 
     # Determinístico (KmzGeometryExtractor) — só informa o que já foi calculado, a IA não

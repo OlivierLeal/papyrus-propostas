@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_24_122407) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_24_143856) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -81,6 +81,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_24_122407) do
   end
 
   create_table "historical_proposal_chunks", force: :cascade do |t|
+    t.boolean "boilerplate", default: false, null: false
     t.boolean "contains_pricing", default: false, null: false
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -95,6 +96,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_24_122407) do
     t.string "sensitivity_reasons", default: [], array: true
     t.integer "token_count", default: 0, null: false
     t.datetime "updated_at", null: false
+    t.index ["boilerplate"], name: "index_historical_proposal_chunks_on_boilerplate"
     t.index ["embedding"], name: "index_hp_chunks_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
     t.index ["historical_proposal_id", "position"], name: "index_hp_chunks_on_proposal_and_position", unique: true
   end

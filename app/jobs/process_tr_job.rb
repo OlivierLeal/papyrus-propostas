@@ -52,10 +52,17 @@ class ProcessTrJob < ApplicationJob
           "tipo_estudo_codigo": "...",
           "orgao_ambiental": "...",
           "municipios": ["..."],
+          "empreendimento": "...",
           "diagnosticos": ["..."],
           "condicionantes": ["..."],
           "ressalvas": ["..."]
         }
+
+        Em "empreendimento", descreva O QUE está sendo licenciado em uma ou duas frases: tipo de
+        empreendimento, tecnologia e porte (ex.: "usina fotovoltaica de 200 MW", "sistema de
+        armazenamento de energia em baterias associado a complexo eólico", "linha de transmissão
+        de 230 kV com 40 km"). É por esse campo que o sistema procura projetos semelhantes no
+        acervo, então descreva o empreendimento — nunca o cliente, o contato ou o prazo.
 
         Tipos de estudo cadastrados no sistema (responda "tipo_estudo_codigo" com o código exato de
         UM destes, nunca invente um tipo novo; se o TR não deixar claro qual se aplica, use ""):

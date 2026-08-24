@@ -24,16 +24,25 @@ module Rag
 
     # roles: restringe a papéis (default: só a voz da Papyrus, ver comentário da classe).
     # include_sensitive: por padrão, trechos com dado identificável ficam fora (LGPD).
+    # include_boilerplate: o texto de modelo da proposta (obrigações, validade, prazo) continua
+    #   recuperável por padrão — o consultor às vezes quer justamente a cláusula padrão. Quem
+    #   compara JOBS passa false, porque texto igual em todo lugar não distingue projeto nenhum.
     def call(query, roles: DocumentClassifier::VOICE_OF_PAPYRUS, limit: DEFAULT_LIMIT,
-             include_sensitive: false, client_name: nil)
-      vector = @embedder.embed_query(query)
+             include_sensitive: false, include_boilerplate: true, client_name: nil)
+      hits_for(@embedder.embed_query(query), roles:, limit:, include_sensitive:, include_boilerplate:, client_name:)
+    end
 
+    # Mesma busca, com o vetor já pronto — quem precisa do vetor para outra coisa (o piso do
+    # acervo, em Rag::SimilarJobFinder) não deve pagar um segundo embedding da mesma consulta.
+    def hits_for(vector, roles: DocumentClassifier::VOICE_OF_PAPYRUS, limit: DEFAULT_LIMIT,
+                 include_sensitive: false, include_boilerplate: true, client_name: nil)
       # O filtro usa o nome real da tabela (plural) porque `indexable` entra por joins; um
       # `includes` aqui criaria o alias singular e as duas referências brigariam no SQL.
       scope = HistoricalProposalChunk.embedded.indexable
       scope = scope.where(historical_proposals: { role: roles }) if roles.present?
       scope = scope.where(historical_proposals: { client_name: client_name }) if client_name.present?
       scope = scope.without_sensitive unless include_sensitive
+      scope = scope.without_boilerplate unless include_boilerplate
 
       scope
         .nearest_neighbors(:embedding, vector, distance: "cosine")
