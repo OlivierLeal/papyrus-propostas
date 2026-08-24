@@ -40,4 +40,30 @@ class GeospatialResultTest < ActiveSupport::TestCase
     assert_equal "Linha do KMZ", GeospatialResult.new(conversation: conversation, geometry_type: "line").area_label
     assert_equal "Pontos do KMZ", GeospatialResult.new(conversation: conversation, geometry_type: "point").area_label
   end
+
+  test "area_image_src returns nil when there is no image attached" do
+    result = GeospatialResult.create!(conversation: conversations(:reviewing_conversation), geometry_type: "polygon")
+
+    assert_nil result.area_image_src
+  end
+
+  test "area_image_src serves the Mapbox PNG through Active Storage" do
+    result = GeospatialResult.create!(conversation: conversations(:reviewing_conversation), geometry_type: "polygon")
+    result.area_image.attach(io: StringIO.new("png-bytes"), filename: "mapa.png", content_type: "image/png")
+
+    assert_equal result.area_image, result.area_image_src
+  end
+
+  # O Active Storage serve image/svg+xml como application/octet-stream com disposition attachment,
+  # e a <img> não renderiza nada — o croqui de reserva precisa ir embutido.
+  test "area_image_src embeds the SVG sketch as a data URI instead of an Active Storage URL" do
+    svg = %(<svg xmlns="http://www.w3.org/2000/svg"></svg>)
+    result = GeospatialResult.create!(conversation: conversations(:reviewing_conversation), geometry_type: "polygon")
+    result.area_image.attach(io: StringIO.new(svg), filename: "croqui.svg", content_type: "image/svg+xml")
+
+    src = result.area_image_src
+
+    assert src.start_with?("data:image/svg+xml;base64,")
+    assert_equal svg, Base64.decode64(src.delete_prefix("data:image/svg+xml;base64,"))
+  end
 end

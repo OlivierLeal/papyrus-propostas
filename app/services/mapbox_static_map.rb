@@ -11,6 +11,20 @@ class MapboxStaticMap
   STROKE_COLOR = "#0284c7".freeze
   FILL_COLOR = "#0ea5e9".freeze
 
+  # A Static Images API recusa a requisição com 414 acima deste tamanho de URL, e o overlay
+  # GeoJSON vai inteiro dentro dela. Um KMZ real chega com centenas de vértices em precisão de
+  # ponto flutuante cheia — a poligonal do BESS Serra da Babilônia, com 172 pontos, gerava 8.677
+  # caracteres e voltava 414, caindo silenciosamente pro croqui SVG.
+  MAX_URL_LENGTH = 8192
+
+  # ~11 cm no equador. Muito além do que 800x600 pixels conseguem mostrar, e corta a URL quase
+  # pela metade (os mesmos 172 pontos passam a caber em 5.939 caracteres).
+  COORD_PRECISION = 6
+
+  # Se nem arredondado couber, ralear os vértices: um contorno com menos detalhe é melhor que
+  # nenhum mapa. Acima disso a forma começa a distorcer e é melhor devolver nil.
+  MAX_STRIDE = 8
+
   def self.available?
     ENV["MAPBOX_API_KEY"].present?
   end
@@ -22,9 +36,19 @@ class MapboxStaticMap
   def fetch
     return nil unless self.class.available?
 
-    uri = URI(url)
-    response = Net::HTTP.get_response(uri)
-    return nil unless response.is_a?(Net::HTTPSuccess)
+    target = url
+    if target.nil?
+      Rails.logger.error("MapboxStaticMap: geometria não cabe na URL nem com os vértices raleados")
+      return nil
+    end
+
+    response = Net::HTTP.get_response(URI(target))
+    unless response.is_a?(Net::HTTPSuccess)
+      # Sem isto o 414 não deixava rastro nenhum: fetch devolvia nil, o ProcessKmzJob caía pro
+      # croqui e o log ficava limpo.
+      Rails.logger.error("MapboxStaticMap: HTTP #{response.code} (URL com #{target.length} caracteres)")
+      return nil
+    end
 
     response.body
   rescue StandardError => e
@@ -36,31 +60,51 @@ class MapboxStaticMap
     # Sem o sufixo de formato, a Static Images API devolve JPEG por padrão (confirmado num teste
     # manual — o resto do pipeline, do ProcessKmzJob ao GenerateProposalDocumentTool, assume PNG
     # pelo content_type pra decidir se embute a imagem no .docx).
+    #
+    # Vai raleando os vértices até a URL caber em MAX_URL_LENGTH; nil quando nem no limite couber.
     def url
-      "https://api.mapbox.com/styles/v1/#{STYLE}/static/geojson(#{encoded_geojson})/auto/#{WIDTH}x#{HEIGHT}.png?access_token=#{ENV['MAPBOX_API_KEY']}"
+      (1..MAX_STRIDE).each do |stride|
+        candidate = "https://api.mapbox.com/styles/v1/#{STYLE}/static/geojson(#{encoded_geojson(stride)})" \
+                    "/auto/#{WIDTH}x#{HEIGHT}.png?access_token=#{ENV['MAPBOX_API_KEY']}"
+        return candidate if candidate.length <= MAX_URL_LENGTH
+      end
+
+      nil
     end
 
-    def encoded_geojson
-      geojson = { type: "Feature", geometry: geojson_geometry, properties: geojson_properties }
+    def encoded_geojson(stride)
+      geojson = { type: "Feature", geometry: geojson_geometry(stride), properties: geojson_properties }
       ERB::Util.url_encode(geojson.to_json)
     end
 
     # KmzGeometryExtractor pode entregar Polygon (área), LineString/MultiLineString (linha de
     # transmissão, corredor) ou Point/MultiPoint (torre de medição, ponto de amostragem) —
     # dispatch pelo tipo real da geometria RGeo, sem assumir mais que é sempre um polígono.
-    def geojson_geometry
+    def geojson_geometry(stride)
       case @geometry
       when RGeo::Feature::Polygon
-        { type: "Polygon", coordinates: [ @geometry.exterior_ring.points.map { |p| [ p.x, p.y ] } ] }
+        { type: "Polygon", coordinates: [ trimmed(@geometry.exterior_ring.points, stride) ] }
       when RGeo::Feature::MultiLineString
-        { type: "MultiLineString", coordinates: @geometry.map { |line| line.points.map { |p| [ p.x, p.y ] } } }
+        { type: "MultiLineString", coordinates: @geometry.map { |line| trimmed(line.points, stride) } }
       when RGeo::Feature::LineString
-        { type: "LineString", coordinates: @geometry.points.map { |p| [ p.x, p.y ] } }
+        { type: "LineString", coordinates: trimmed(@geometry.points, stride) }
       when RGeo::Feature::MultiPoint
-        { type: "MultiPoint", coordinates: @geometry.map { |point| [ point.x, point.y ] } }
+        { type: "MultiPoint", coordinates: @geometry.map { |point| rounded(point) } }
       else
-        { type: "Point", coordinates: [ @geometry.x, @geometry.y ] }
+        { type: "Point", coordinates: rounded(@geometry) }
       end
+    end
+
+    # Mantém 1 vértice a cada `stride` e sempre o último — num anel de polígono o último ponto
+    # repete o primeiro, e é ele que fecha a figura; perdê-lo geraria um anel aberto.
+    def trimmed(points, stride)
+      kept = stride > 1 ? points.each_slice(stride).map(&:first) : points.to_a
+      kept << points.last unless kept.last.equals?(points.last)
+      kept.map { |point| rounded(point) }
+    end
+
+    def rounded(point)
+      [ point.x.round(COORD_PRECISION), point.y.round(COORD_PRECISION) ]
     end
 
     # simplestyle-spec — a Static Images API já sabe desenhar essas propriedades por cima do

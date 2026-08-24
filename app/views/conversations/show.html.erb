@@ -89,7 +89,7 @@
               <div class="relative group mb-3" data-controller="image-viewer">
                 <button type="button" class="block w-full cursor-zoom-in" data-action="image-viewer#open"
                         title="Ampliar mapa da área de estudo">
-                  <%= image_tag @conversation.geospatial_result.area_image, alt: "Mapa da área de estudo",
+                  <%= image_tag @conversation.geospatial_result.area_image_src, alt: "Mapa da área de estudo",
                         class: "w-full rounded-field border border-base-300" %>
                 </button>
 
@@ -103,7 +103,7 @@
 
                 <dialog class="modal" data-image-viewer-target="dialog" data-action="click->image-viewer#closeOnBackdrop">
                   <div class="modal-box max-w-[95vw] w-fit p-2">
-                    <%= image_tag @conversation.geospatial_result.area_image, alt: "Mapa da área de estudo",
+                    <%= image_tag @conversation.geospatial_result.area_image_src, alt: "Mapa da área de estudo",
                           class: "max-h-[85vh] w-auto max-w-full rounded-field" %>
                     <p class="text-sm text-base-content/70 px-2 pt-2"><%= @conversation.geospatial_result.summary_text %></p>
                   </div>

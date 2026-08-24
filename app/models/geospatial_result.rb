@@ -8,6 +8,19 @@ class GeospatialResult < ApplicationRecord
 
   AREA_LABELS = { "polygon" => "Área do KMZ", "line" => "Linha do KMZ", "point" => "Pontos do KMZ" }.freeze
 
+  # O que vai no src da <img>. PNG do Mapbox segue pela URL normal do Active Storage; o croqui
+  # SVG precisa ir embutido, porque o Active Storage serve image/svg+xml como
+  # application/octet-stream com Content-Disposition: attachment (defesa contra <script> dentro
+  # de SVG enviado por usuário) e nesse formato a <img> não renderiza nada — era por isso que o
+  # card aparecia vazio quando a chamada ao Mapbox falhava. O croqui é gerado pelo
+  # AreaSketchRenderer, não vem de upload, e data URI também não executa script.
+  def area_image_src
+    return nil unless area_image.attached?
+    return area_image unless area_image.content_type == "image/svg+xml"
+
+    "data:image/svg+xml;base64,#{Base64.strict_encode64(area_image.download)}"
+  end
+
   # Título do card na tela de revisão (conversations/show.html.erb) — "Área do KMZ" só fazia
   # sentido pra polígono; linha/ponto usam o rótulo certo pro tipo de geometria.
   def area_label

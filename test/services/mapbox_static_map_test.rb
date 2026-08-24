@@ -71,6 +71,28 @@ class MapboxStaticMapTest < ActiveSupport::TestCase
     assert_equal "#0284c7", captured_uri.dig("properties", "marker-color")
   end
 
+  # Caso real: a poligonal do BESS Serra da Babilônia (172 vértices em precisão cheia) montava uma
+  # URL de 8.677 caracteres, a Static Images API respondia 414 e o mapa sumia sem deixar rastro.
+  test "fetch keeps the URL under the API limit for a dense polygon, rounding and thinning vertices" do
+    captured_uri = nil
+    fake_response = fake_success_response("bytes")
+    original = Net::HTTP.method(:get_response)
+    Net::HTTP.define_singleton_method(:get_response) do |uri, *|
+      captured_uri = uri
+      fake_response
+    end
+
+    with_env("MAPBOX_API_KEY", "token123") { MapboxStaticMap.new(dense_polygon(400)).fetch }
+
+    assert_operator captured_uri.to_s.length, :<=, MapboxStaticMap::MAX_URL_LENGTH
+
+    ring = JSON.parse(CGI.unescape(captured_uri.to_s[/geojson\((.+?)\)\/auto/, 1])).dig("geometry", "coordinates", 0)
+    assert_equal ring.first, ring.last, "o anel precisa continuar fechado depois de ralear"
+    assert ring.flatten.none? { |coord| coord.to_s.split(".").last.length > MapboxStaticMap::COORD_PRECISION }
+  ensure
+    Net::HTTP.define_singleton_method(:get_response, original)
+  end
+
   test "fetch returns nil without raising when the response isn't a success" do
     original = Net::HTTP.method(:get_response)
     Net::HTTP.define_singleton_method(:get_response) { |*| Net::HTTPNotFound.new("1.1", "404", "Not Found") }
@@ -94,6 +116,18 @@ class MapboxStaticMapTest < ActiveSupport::TestCase
   end
 
   private
+    # Anel fechado com muitos vértices em precisão de ponto flutuante cheia, como sai de um KMZ real.
+    def dense_polygon(vertices)
+      points = Array.new(vertices) do |i|
+        angle = 2 * Math::PI * i / vertices
+        KmzGeometryExtractor::FACTORY.point(
+          -40.29 + (0.01 * Math.cos(angle)), -14.84 + (0.01 * Math.sin(angle))
+        )
+      end
+
+      KmzGeometryExtractor::FACTORY.polygon(KmzGeometryExtractor::FACTORY.linear_ring(points + [ points.first ]))
+    end
+
     def build_geojson_for(geometry)
       fake_response = fake_success_response("bytes")
       captured_uri = nil
