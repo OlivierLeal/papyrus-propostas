@@ -66,7 +66,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # sugerida pela IA já existe nesse ponto (Proposal#build_with_ai_suggested_team!), então o
     # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa.
     if @proposal.status == "draft"
-      technical_filename = @proposal.docx_filename("tecnica")
+      technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
@@ -77,8 +77,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
           "Precificação." }.to_json
     elsif @proposal.document_split == "separated"
-      technical_filename = @proposal.docx_filename("tecnica")
-      commercial_filename = @proposal.docx_filename("comercial")
+      technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
+      commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") },
@@ -89,7 +89,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
     else
-      combined_filename = @proposal.docx_filename("combined")
+      combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images)
       attach!(bytes, combined_filename, "combined", description)
       { success: true, version: @proposal.version, filenames: [ combined_filename ],

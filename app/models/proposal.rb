@@ -13,19 +13,27 @@ class Proposal < ApplicationRecord
   # GenerateProposalDocumentTool#execute — cada arquivo gerado usa o prefixo do que ele é).
   DOCX_NUMERO_PREFIXES = { "combined" => "PTC", "tecnica" => "PT", "comercial" => "PC" }.freeze
 
-  # Número da proposta = prefixo do tipo de arquivo + ano de criação (2 dígitos) + id da tabela
-  # (ver passo a passo interno, item 11) — automático, não é a IA que decide nem precisa de
-  # confirmação com a Charlene antes de gerar o rascunho. Mesmo id em toda revisão/variante da
-  # mesma proposta — só o prefixo muda entre técnica/comercial/combinado.
+  # Número da proposta = prefixo do tipo de arquivo + ano de criação (2 dígitos) + id da tabela,
+  # preenchido com zero à esquerda até 3 dígitos (ver passo a passo interno, item 1 — exemplo real
+  # deles: PTC21089) — automático, não é a IA que decide nem precisa de confirmação com a Charlene
+  # antes de gerar o rascunho. Mesmo id em toda revisão/variante da mesma proposta — só o prefixo
+  # muda entre técnica/comercial/combinado.
   def docx_numero_proposta(kind = "combined")
-    "#{DOCX_NUMERO_PREFIXES.fetch(kind, "PTC")}#{created_at.strftime("%y")}#{id}"
+    "#{DOCX_NUMERO_PREFIXES.fetch(kind, "PTC")}#{created_at.strftime("%y")}#{id.to_s.rjust(3, "0")}"
   end
 
-  # Nome de arquivo no padrão real já usado pela Papyrus (ex.:
-  # PTC25108_Girassol_Pedras do Litoral_Rev00.docx) — número + cliente + revisão atual.
-  def docx_filename(kind)
-    cliente = conversation.client_name.to_s.gsub(%r{[/\\:*?"<>|]}, "-")
-    "#{docx_numero_proposta(kind)}_#{cliente}_Rev#{format("%02d", version - 1)}.docx"
+  # Nome de arquivo no padrão real da Papyrus (passo a passo interno, item 1 — exemplo deles:
+  # PTC21089_Rural e CIA Eng e Geotec_IF_Prado_BA_Rev.00.docx): número + cliente + escopo (tipo de
+  # estudo + município/UF, quando a IA já os identificou) + revisão atual. municipio/estado vêm de
+  # fora (só existem como texto solto que a IA extraiu na hora de gerar — ver
+  # GenerateProposalDocumentTool) porque hoje não são persistidos em nenhuma coluna própria.
+  def docx_filename(kind, municipio: nil, estado: nil)
+    cliente = sanitize_for_filename(conversation.client_name)
+    escopo = [ conversation.study_type&.name, sanitize_for_filename(municipio), estado.presence&.upcase ]
+      .compact_blank.join("_")
+    revisao = format("%02d", version - 1)
+
+    "#{docx_numero_proposta(kind)}_#{cliente}#{"_#{escopo}" if escopo.present?}_Rev.#{revisao}.docx"
   end
 
   # Nome/qualificação da Equipe Técnica no DOCX vêm de dados reais do sistema (proposal_
@@ -116,6 +124,10 @@ class Proposal < ApplicationRecord
   end
 
   private
+    def sanitize_for_filename(text)
+      text.to_s.gsub(%r{[/\\:*?"<>|]}, "-").presence
+    end
+
     def format_currency(value)
       ActionController::Base.helpers.number_to_currency(value, unit: "", separator: ",", delimiter: ".").strip
     end

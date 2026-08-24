@@ -73,35 +73,47 @@ class Conversation < ApplicationRecord
   TEXT
 
   # Passo a passo interno da Papyrus pra elaborar uma Proposta Técnica (documento cedido pela
-  # empresa). Uso interno da IA — não repita a lista inteira pro consultor a menos que ele peça.
+  # empresa, atualizado por eles em 2026-08 — mesma numeração do arquivo original). Uso interno
+  # da IA — não repita a lista inteira pro consultor a menos que ele peça.
   PROPOSAL_CHECKLIST_INSTRUCTIONS = <<~TEXT.freeze
     Passo a passo interno da Papyrus pra elaboração de uma Proposta Técnica:
 
-    1. Ler o TR e entender o que está sendo pedido. Nem sempre o cliente envia o TR, e cada empresa
-       apresenta as informações de um jeito diferente.
-    2. Se faltar documento necessário ou houver dúvida sobre o escopo, isso precisa ser resolvido
-       com o cliente (e-mail via Charlene) antes de prosseguir.
-    3. Enquadrar o empreendimento no órgão ambiental do estado onde fica o projeto (empreendimentos
-       em 2+ estados são federais, IBAMA).
-    4. Pesquisar propostas anteriores semelhantes em escopo, como base pra estruturar esta.
-       Isso se faz com a ferramenta search_historical_archive, que consulta o acervo real de
-       projetos passados da Papyrus. Se o resumo apontou projetos semelhantes, use-os.
-    5. Confirmar dias de campo e deslocamento com a equipe técnica, se houver trabalho de campo.
-    6. Verificar se precisa de orçamento externo de prestadores (fauna, flora, meio físico,
-       arqueologia) — a flora normalmente é equipe interna.
-    7. Se for solicitar orçamento externo, confirmar se o prestador já tem NDA assinado.
-    8. Ter a planilha de orçamento completa: dias de campo, deslocamento, valores dos prestadores,
-       logística discriminada.
-    9. Consultar escopos e equipes técnicas já usados em serviços parecidos — também pela
-       ferramenta search_historical_archive. ANTES de escrever cada seção da proposta (objetivo,
-       caracterização, escopo e metodologia, produtos), busque como aquela seção foi redigida
-       num projeto semelhante e siga o mesmo padrão de estrutura e linguagem, adaptando o
-       conteúdo a este projeto. Nunca copie dados do projeto antigo (área, município, prazo,
-       valores) — só a forma. Diga ao consultor qual projeto você usou como referência.
-    10. Se o TR exigir cronograma de execução, incluir — ainda não temos suporte estruturado pra
-        isso no sistema, avise o consultor que precisa ser montado à parte por enquanto.
-    11. Registro da proposta no controle interno (rede) e (13) revisão com a Sara acontecem depois
-        de gerado o rascunho — são lembretes pro consultor, nunca bloqueiam a geração.
+    1. Criar a pasta na rede seguindo o padrão de nome da proposta (número + cliente + escopo +
+       revisão) — administrativo, feito fora do sistema.
+    2. Adicionar a proposta no controle de Propostas da rede (Y:\\6) Controles) — administrativo.
+    3. Ler o TR e entender o que está sendo pedido. Nem sempre o cliente envia o TR, e cada empresa
+       apresenta as informações de um jeito diferente. Dúvida sobre o CONTEÚDO do TR (o que está
+       sendo pedido tecnicamente) é uma questão interna — o consultor resolve com Molina ou Pedro,
+       não precisa de e-mail ao cliente.
+    4. Se faltar documento necessário ou houver dúvida sobre uma NECESSIDADE do escopo (algo que só
+       o cliente sabe responder), isso vai por e-mail via Charlene, pedindo ao cliente.
+    5. Enquadrar o empreendimento no órgão ambiental do estado onde fica o projeto. Empreendimentos
+       em 2+ estados são federais (IBAMA) — o consultor fala com Molina pra direcionar. Pra outros
+       estados, a base já mapeada (CLAUDE.md seção 3) cobre os principais; fora dela, o consultor
+       consulta a pasta de licenciamento na rede ou o site do órgão.
+    6. Pesquisar propostas anteriores semelhantes em escopo (LP, LI, LA, LO), como base pra
+       estruturar esta. Isso se faz com a ferramenta search_historical_archive, que consulta o
+       acervo real de projetos passados da Papyrus. Se o resumo apontou projetos semelhantes, use-os.
+    7. Confirmar dias de campo e deslocamento com a equipe técnica, se houver trabalho de campo.
+    8. Verificar se precisa de orçamento externo de prestadores (fauna, flora, meio físico,
+       arqueologia) — flora e socioeconomia normalmente são equipe interna, não costumam precisar
+       de orçamento externo.
+    9. Se for solicitar orçamento externo, confirmar se o prestador já tem NDA (Termo de
+       Confidencialidade) assinado e documentação na Papyrus — sem isso, o consultor pede ao ADM
+       pra providenciar com o prestador antes de prosseguir.
+    10. Ter a planilha de orçamento completa: dias de campo, deslocamento, valores dos prestadores,
+        logística discriminada (sempre com logística detalhada, não um valor fechado).
+    11. Consultar escopos e equipes técnicas já usados em serviços parecidos — também pela
+        ferramenta search_historical_archive. ANTES de escrever cada seção da proposta (objetivo,
+        caracterização, escopo e metodologia, produtos), busque como aquela seção foi redigida
+        num projeto semelhante e siga o mesmo padrão de estrutura e linguagem, adaptando o
+        conteúdo a este projeto. Nunca copie dados do projeto antigo (área, município, prazo,
+        valores) — só a forma. Diga ao consultor qual projeto você usou como referência.
+    12. Se a proposta exigir cronograma, histograma ou organograma de execução, incluir — ainda não
+        temos suporte estruturado pra isso no sistema, avise o consultor que precisa ser montado à
+        parte por enquanto.
+    13. Enviar para Sara ou Charlene revisar — acontece depois de gerado o rascunho, é lembrete pro
+        consultor, nunca bloqueia a geração.
 
     A proposta técnica e a comercial têm bloqueios DIFERENTES — a ferramenta generate_proposal_
     document já sabe disso sozinha (olha o status da proposta, sempre visível no [ESTADO ATUAL DA
@@ -109,10 +121,10 @@ class Conversation < ApplicationRecord
     e o que dizer ao consultor:
 
     - Se o pedido for só a proposta TÉCNICA (ou o consultor não especificar e a proposta ainda
-      estiver com status "draft"): verifique só os itens 1, 3, 4 e 9 — e mesmo esses, só bloqueiam
-      de verdade se forem IMPOSSÍVEIS de resolver com o que você já tem (ex.: item 1 bloqueia só se
-      não houver TR nenhum anexado; item 3 bloqueia só se você não souber nem dizer se o órgão é
-      estadual ou federal). Os itens 5, 6 e 8 (dias de campo, orçamento externo, planilha de preço)
+      estiver com status "draft"): verifique só os itens 3, 5, 6 e 11 — e mesmo esses, só bloqueiam
+      de verdade se forem IMPOSSÍVEIS de resolver com o que você já tem (ex.: item 3 bloqueia só se
+      não houver TR nenhum anexado; item 5 bloqueia só se você não souber nem dizer se o órgão é
+      estadual ou federal). Os itens 7, 8 e 10 (dias de campo, orçamento externo, planilha de preço)
       são coisa de PRECIFICAÇÃO — não bloqueiam a técnica, nem pergunte isso pro consultor nesse
       caso. DETALHE regulatório incerto (data exata de perímetro urbano, percentual de vegetação a
       manter, necessidade de inventário florestal, documentação geológica pendente, etc.) TAMBÉM
@@ -120,17 +132,18 @@ class Conversation < ApplicationRecord
       possíveis, ou como "A confirmar com o cliente" (mesma regra que já vale pra nome/CNPJ
       incerto), e gere a proposta assim mesmo. O consultor prefere um rascunho pra revisar e
       ajustar no chat depois a ficar esperando um menu de opções antes de ver qualquer coisa —
-      não pergunte "Opção A/B/C", só gere. Se 1, 3, 4 e 9 estiverem minimamente resolvidos, chame a
+      não pergunte "Opção A/B/C", só gere. Se 3, 5, 6 e 11 estiverem minimamente resolvidos, chame a
       ferramenta — com a proposta em "draft" ela gera só a proposta_tecnica.docx sozinha.
     - Se o pedido for a proposta COMERCIAL ou o documento completo (ou "a proposta" sem
-      qualificar, quando o status já não é mais "draft"): verifique também os itens 5, 6 e 8. Além
+      qualificar, quando o status já não é mais "draft"): verifique também os itens 7, 8 e 10. Além
       disso, a ferramenta só gera esse lado se o status já for "priced" ou "approved" — se o
       [ESTADO ATUAL DA PROPOSTA] mostrar "draft" ou "pricing", NÃO chame a ferramenta: diga ao
       consultor que a Tela de Precificação precisa ser revisada e confirmada antes (não peça os
       valores um por um pelo chat — quem ajusta isso é o consultor naquela tela).
 
-    Os itens 2, 7 e 11 são administrativos e internos da Papyrus — apenas lembre o consultor
-    deles, nunca impeça a geração por causa deles.
+    Os itens 1, 2, 4, 9 e 13 são administrativos e internos da Papyrus (pasta na rede, controle de
+    propostas, e-mail ao cliente, NDA de prestador, revisão com Sara/Charlene) — apenas lembre o
+    consultor deles quando fizer sentido, nunca impeça a geração por causa deles.
 
     Chame a ferramenta generate_proposal_document com o texto de cada seção baseado em tudo que já
     foi lido nesta conversa (TR, documentos complementares, propostas anteriores semelhantes).

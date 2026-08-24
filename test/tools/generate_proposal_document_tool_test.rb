@@ -29,10 +29,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     result = JSON.parse(tool.execute(**@args))
 
     assert result["success"]
-    assert_equal [ @proposal.docx_filename("tecnica") ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("tecnica", municipio: @args[:municipios], estado: @args[:estado]) ], result["filenames"]
     assert_equal 1, @proposal.generated_documents.count
     document = @proposal.generated_documents.first
-    assert_equal @proposal.docx_filename("tecnica"), document.filename.to_s
+    assert_equal @proposal.docx_filename("tecnica", municipio: @args[:municipios], estado: @args[:estado]), document.filename.to_s
     assert_equal "tecnica", document.blob.metadata["kind"]
 
     xml = document_xml(document)
@@ -50,7 +50,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert result["success"]
     assert_equal 2, result["version"]
-    assert_equal [ @proposal.docx_filename("combined") ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("combined", municipio: @args[:municipios], estado: @args[:estado]) ], result["filenames"]
     assert_equal 2, @proposal.generated_documents.count
   end
 
@@ -63,7 +63,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert result["success"]
     assert_equal 1, result["version"]
     assert_equal 1, @proposal.generated_documents.count
-    assert_equal @proposal.docx_filename("combined"), @proposal.generated_documents.first.filename.to_s
+    assert_equal @proposal.docx_filename("combined", municipio: @args[:municipios], estado: @args[:estado]), @proposal.generated_documents.first.filename.to_s
     assert_equal "combined", @proposal.generated_documents.first.blob.metadata["kind"]
   end
 
@@ -151,6 +151,15 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert_includes commercial_xml, "<w:t>COMERCIAL</w:t>"
     assert_not_includes commercial_xml, "<w:t>TÉCNICA</w:t>"
+  end
+
+  test "the generated filename includes the escopo segment (tipo de estudo + município/UF vindos dos args da IA)" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_includes result["filenames"].first, "_RAP_Vitória da Conquista_BA_Rev."
   end
 
   test "the proposal number uses the right prefix per variant: PTC combined, PT/PC when separated" do

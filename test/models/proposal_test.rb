@@ -169,20 +169,39 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "PC#{year}#{proposal.id}", proposal.docx_numero_proposta("comercial")
   end
 
-  test "docx_filename follows the real Papyrus naming pattern (número_cliente_RevNN.docx)" do
+  test "docx_numero_proposta pads the record id with leading zeros up to 3 digits (passo a passo interno, item 1)" do
+    proposal = proposals(:priced_proposal)
+    year = proposal.created_at.strftime("%y")
+    proposal.define_singleton_method(:id) { 7 }
+
+    assert_equal "PTC#{year}007", proposal.docx_numero_proposta("combined")
+  end
+
+  test "docx_filename follows the real Papyrus naming pattern with an escopo segment (tipo de estudo + município/UF)" do
     proposal = proposals(:priced_proposal)
     proposal.update!(version: 1)
 
-    assert_equal "#{proposal.docx_numero_proposta('tecnica')}_#{proposal.conversation.client_name}_Rev00.docx",
-      proposal.docx_filename("tecnica")
+    expected = "#{proposal.docx_numero_proposta('tecnica')}_#{proposal.conversation.client_name}_RAP_Vitória da Conquista_BA_Rev.00.docx"
+    assert_equal expected, proposal.docx_filename("tecnica", municipio: "Vitória da Conquista", estado: "ba")
   end
 
-  test "docx_filename sanitizes filesystem-unsafe characters from the client name" do
+  test "docx_filename falls back to just the tipo de estudo when município/UF aren't known yet" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+
+    expected = "#{proposal.docx_numero_proposta('combined')}_#{proposal.conversation.client_name}_RAP_Rev.00.docx"
+    assert_equal expected, proposal.docx_filename("combined")
+  end
+
+  test "docx_filename sanitizes filesystem-unsafe characters from client name and município" do
     proposal = proposals(:priced_proposal)
     proposal.update!(version: 1)
     proposal.conversation.update!(client_name: "Cliente/Teste: \"Especial\"")
 
-    assert_equal "#{proposal.docx_numero_proposta('combined')}_Cliente-Teste- -Especial-_Rev00.docx",
-      proposal.docx_filename("combined")
+    filename = proposal.docx_filename("combined", municipio: "Município/Teste", estado: "ba")
+
+    assert_includes filename, "Cliente-Teste- -Especial-"
+    assert_includes filename, "Município-Teste"
+    assert_includes filename, "_BA_"
   end
 end
