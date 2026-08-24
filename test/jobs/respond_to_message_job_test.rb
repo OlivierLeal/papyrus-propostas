@@ -80,4 +80,21 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
 
     assert_includes turbo_streams.second.to_s, "limite de requisições"
   end
+
+
+  # O documento que o consultor anexa no chat precisa chegar ao modelo NA MESMA rodada em que ele
+  # escreve. Este teste fixa a ordem das operações do job: o snapshot do estado é gravado antes de
+  # chamar a IA, e não pode roubar da mensagem do consultor a vez de carregar o anexo.
+  test "o documento anexado pelo consultor continua indo para a IA depois do snapshot do estado" do
+    conversation = conversations(:reviewing_conversation)
+    mensagem = conversation.messages.create!(role: "user", content: "segue o projeto básico, analise")
+    mensagem.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "projeto_basico.pdf",
+      content_type: "application/pdf", metadata: { kind: "complementary" }
+    )
+
+    stub_ai_complete("analisado") { RespondToMessageJob.perform_now(conversation.id) }
+
+    assert_equal [ "projeto_basico.pdf" ], mensagem.reload.to_llm.content.attachments.map(&:filename)
+  end
 end

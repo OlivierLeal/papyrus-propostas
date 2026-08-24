@@ -293,6 +293,15 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
         .map { |node| node.text.strip }
     end
 
+    # Linhas de dados do Quadro 6-1 (produtos) — a tabela de índice 1 no modelo.
+    def product_rows(document)
+      ns = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }
+      tabela = Nokogiri::XML(document_xml(document)).xpath("//w:tbl", ns)[1]
+      tabela.xpath(".//w:tr", ns)[1..].map do |linha|
+        linha.xpath(".//w:tc", ns).map { |celula| celula.xpath(".//w:t", ns).map(&:text).join.strip }
+      end
+    end
+
     def zip_entry_names(document)
       Zip::File.open(ActiveStorage::Blob.service.path_for(document.blob.key)) { |zip| zip.entries.map(&:name) }
     end
@@ -348,5 +357,56 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args.merge(nome_arquivo: "padrão"))
 
     assert_nil @proposal.reload.docx_filename_override
+  end
+
+
+  # ITENS NÃO PREVISTOS. Toda proposta validada pela Papyrus fecha o escopo com o que ela NÃO
+  # cobre; nas geradas pelo sistema essa lista simplesmente não existia.
+  test "o escopo termina com os itens não previstos e a ressalva de proposta complementar" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(itens_nao_previstos: [ "Execução dos planos e programas ambientais", "Regularização fundiária" ]))
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "Itens não previstos"
+    assert_includes xml, "Execução dos planos e programas ambientais"
+    assert_includes xml, "Regularização fundiária"
+    assert_includes xml, "serão objeto de proposta complementar"
+  end
+
+  # A ressalva é proteção comercial: não pode depender de a IA lembrar de mandá-la.
+  test "a ressalva de proposta complementar sai mesmo quando a IA não lista nenhum item" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    assert_includes document_xml(@proposal.generated_documents.first), "serão objeto de proposta complementar"
+  end
+
+  test "o formato de cada produto vem da IA, com padrão quando ela não informa" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(produtos: [ "Inventário Florestal | Word e PDF", "Certificado LP | PDF", "Mapa temático" ]))
+
+    linhas = product_rows(@proposal.generated_documents.first)
+    assert_includes linhas, [ "Inventário Florestal", "Word e PDF" ]
+    assert_includes linhas, [ "Certificado LP", "PDF" ]
+    assert_includes linhas, [ "Mapa temático", "Digital (PDF)" ]
+  end
+
+  # A Papyrus separa os produtos por fase do licenciamento (LP / LI-ASV-AMF), com uma linha de
+  # agrupamento sem formato.
+  test "um produto terminado em dois-pontos vira linha de agrupamento por fase" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(produtos: [ "Licença Prévia (LP):", "Estudo de Médio Impacto (EMI) | Word e PDF" ]))
+
+    linhas = product_rows(@proposal.generated_documents.first)
+    assert_equal [ "Licença Prévia (LP):", "" ], linhas.first
+    assert_equal [ "Estudo de Médio Impacto (EMI)", "Word e PDF" ], linhas.second
   end
 end

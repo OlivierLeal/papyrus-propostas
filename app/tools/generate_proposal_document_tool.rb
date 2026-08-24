@@ -39,7 +39,19 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :nome_documento_tr, desc: "Nome do documento de TR usado como base do escopo"
   param :escopo_e_metodologia, desc: "Texto da seção 'Escopo e Metodologia', descrevendo como o serviço será executado"
   param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
-  param :produtos, type: "array", desc: "Lista dos produtos/entregáveis a serem entregues (ex.: \"EIA - Estudo de Impacto Ambiental\")"
+  param :produtos, type: "array",
+    desc: "Lista dos produtos/entregáveis. Cada item pode trazer o formato depois de uma barra vertical " \
+          "(ex.: \"Estudo Ambiental para Atividades de Médio Impacto (EMI) | Word e PDF\"); sem a barra, " \
+          "o sistema usa \"Digital (PDF)\". Um item terminado em dois-pontos e sem formato vira uma linha de " \
+          "AGRUPAMENTO no quadro (ex.: \"Licença Prévia (LP):\") — use isso para separar os produtos por fase " \
+          "do licenciamento quando a proposta tiver mais de uma fase, como a Papyrus faz."
+
+  param :itens_nao_previstos, type: "array", required: false,
+    desc: "O que esta proposta NÃO cobre, um item por linha (ex.: \"Execução dos planos e programas ambientais\", " \
+          "\"Regularização fundiária\", \"Tratativas junto a INCRA ou FUNAI\"). Toda proposta da Papyrus fecha o " \
+          "escopo com essa lista — é o que impede o cliente de cobrar depois um serviço que não foi orçado. " \
+          "Liste o que for específico deste projeto; a frase padrão sobre proposta complementar o sistema " \
+          "acrescenta sozinho."
   param :nome_arquivo,
     desc: "SÓ quando o consultor disser como o arquivo deve se chamar (ex.: \"o arquivo tem que se chamar " \
           "PTC26002_PMM_LU_Simões Filho_BA\"). Copie o nome exatamente como ele escreveu, sem inventar, sem " \
@@ -153,7 +165,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "OBJETIVO_SERVICOS" => args[:objetivo_dos_servicos],
         "CARACTERIZACAO_EMPREENDIMENTO" => args[:caracterizacao_do_empreendimento],
         "NOME_DOCUMENTO_TR" => args[:nome_documento_tr],
-        "ESCOPO_METODOLOGIA" => args[:escopo_e_metodologia],
+        "ESCOPO_METODOLOGIA" => escopo_com_itens_nao_previstos(args),
         "PRAZO_EXECUCAO" => args[:prazo_de_execucao],
         "EQUIPE_LIDER_PROJETO_NOME" => lider[0],
         "EQUIPE_LIDER_PROJETO_QUALIFICACAO" => lider[1],
@@ -166,8 +178,34 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # Os índices são a POSIÇÃO da tabela no modelo, não um id: 0 = sumário de revisões,
     # 1 = produtos, 2 = equipe técnica (preenchida por placeholder, não por linha), 3 = desembolso.
     # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de existir.
+    # Frase de fechamento fixa: é a proteção comercial da Papyrus e aparece em toda proposta
+    # validada por eles. Não fica a cargo da IA lembrar dela.
+    RESSALVA_PROPOSTA_COMPLEMENTAR =
+      "Caso sejam solicitados serviços e estudos não contemplados nesta proposta, estes serão objeto de " \
+      "proposta complementar.".freeze
+
+    # O escopo escrito pela IA sempre termina com o que a proposta NÃO cobre. Vem como parâmetro
+    # próprio (e não embutido na prosa) porque era justamente o que sumia: nas propostas geradas
+    # até aqui essa lista simplesmente não existia, enquanto as escritas por gente sempre a têm.
+    def escopo_com_itens_nao_previstos(args)
+      itens = Array(args[:itens_nao_previstos]).map { |item| item.to_s.strip }.compact_blank
+      bloco = [ "Itens não previstos" ]
+      bloco.concat(itens.map { |item| "- #{item}" })
+      bloco << RESSALVA_PROPOSTA_COMPLEMENTAR
+
+      [ args[:escopo_e_metodologia], bloco.join("\n\n") ].compact_blank.join("\n\n")
+    end
+
+    # "Produto | Formato" vira linha normal; "Fase:" (sem formato) vira linha de agrupamento, do
+    # jeito que a Papyrus separa os produtos por fase do licenciamento.
     def build_tables(args, description)
-      produtos = Array(args[:produtos]).map { |nome| [ nome, "Digital (PDF)" ] }
+      produtos = Array(args[:produtos]).filter_map do |item|
+        nome, formato = item.to_s.split("|", 2).map(&:strip)
+        next if nome.blank?
+
+        agrupamento = formato.blank? && nome.end_with?(":")
+        [ nome, agrupamento ? "" : formato.presence || "Digital (PDF)" ]
+      end
 
       {
         0 => { rows: @proposal.docx_revision_rows(current_description: description) },

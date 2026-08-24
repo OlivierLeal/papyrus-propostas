@@ -57,10 +57,20 @@ class Message < ApplicationRecord
     end
 
     def stale_for_llm?
+      # O snapshot do estado da proposta fica FORA dessa conta. Ele também é uma mensagem de
+      # usuário, é escrito pelo sistema logo antes de chamar a IA (ver RespondToMessageJob) e
+      # portanto nasce sempre depois da mensagem do consultor — o que fazia a mensagem dele deixar
+      # de ser "a mais recente" e perder o anexo no caminho. Sintoma em uso: o consultor anexava um
+      # documento e escrevia junto, o arquivo aparecia na barra lateral, e a IA respondia como se
+      # só houvesse o texto.
+      #
       # reorder (não order): a associação messages já vem com order(created_at: :asc) padrão do
       # ruby_llm (ordem natural do chat) — .order só empilharia por cima em vez de substituir,
       # fazendo a query sempre devolver a mensagem mais ANTIGA como "mais recente" por engano.
-      latest_id = conversation.messages.where(role: "user").reorder(created_at: :desc, id: :desc).limit(1).pick(:id)
+      latest_id = conversation.messages
+        .where(role: "user")
+        .where("content IS NULL OR content NOT LIKE ?", "#{Conversation::PROPOSAL_STATE_MARKER}%")
+        .reorder(created_at: :desc, id: :desc).limit(1).pick(:id)
       id != latest_id
     end
 end

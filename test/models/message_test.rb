@@ -95,4 +95,32 @@ class MessageTest < ActiveSupport::TestCase
     assert setup_message.reload.attachments.attached?
     assert_equal "tr.pdf", setup_message.attachments.first.filename.to_s
   end
+
+
+  # REGRESSÃO (visto em uso): o consultor anexa um documento no chat e escreve junto, e a IA
+  # responde como se só houvesse o texto. O anexo chega ao banco e aparece na barra lateral, mas
+  # nunca é enviado ao modelo — porque RespondToMessageJob grava o snapshot do estado da proposta
+  # ANTES de chamar a IA, e esse snapshot é uma mensagem de usuário criada DEPOIS da do consultor.
+  # A dele deixa de ser "a mais recente" e perde o anexo na hora de montar o histórico.
+  test "to_llm keeps the attachment of the consultant's message even after the state snapshot is written" do
+    conversation = conversations(:reviewing_conversation)
+    mensagem = conversation.messages.create!(role: "user", content: "segue o projeto básico, analise")
+    mensagem.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: "projeto_basico.pdf",
+      content_type: "application/pdf", metadata: { kind: "complementary" }
+    )
+
+    conversation.refresh_proposal_state_snapshot!
+
+    assert_equal [ "projeto_basico.pdf" ], mensagem.reload.to_llm.content.attachments.map(&:filename)
+  end
+
+  # O snapshot em si nunca tem anexo, então ele não pode "roubar" a vez de ninguém.
+  test "the state snapshot never carries attachments of its own" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.refresh_proposal_state_snapshot!
+
+    snapshot = conversation.messages.where(role: "user", internal: true).last
+    assert_not snapshot.attachments.attached?
+  end
 end
