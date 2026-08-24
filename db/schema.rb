@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_21_184604) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_24_122407) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -65,11 +65,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_21_184604) do
     t.geography "centroid", limit: {:srid=>4326, :type=>"st_point", :geographic=>true}
     t.bigint "conversation_id", null: false
     t.datetime "created_at", null: false
+    t.geography "geometry", limit: {:srid=>4326, :type=>"geometry", :geographic=>true}
+    t.string "geometry_type", default: "polygon", null: false
+    t.decimal "length_km", precision: 14, scale: 4
     t.string "map_image_url"
     t.boolean "mata_atlantica"
     t.jsonb "municipalities", default: [], null: false
     t.decimal "perimeter_km", precision: 14, scale: 4
-    t.geography "polygon", limit: {:srid=>4326, :type=>"st_polygon", :geographic=>true}
     t.boolean "quilombo"
     t.boolean "terra_indigena"
     t.boolean "unidade_conservacao"

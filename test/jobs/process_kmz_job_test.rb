@@ -18,6 +18,21 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     </kml>
   KML
 
+  # Achado num KMZ real em produção: linha de transmissão sem nenhum polígono — antes disso
+  # existir, ProcessKmzJob marcava "failed" pra qualquer projeto que não fosse área poligonal.
+  LINE_KML = <<~KML.freeze
+    <?xml version="1.0" encoding="UTF-8"?>
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document>
+        <Placemark>
+          <LineString>
+            <coordinates>-40.30,-14.85,0 -40.29,-14.84,0 -40.28,-14.83,0</coordinates>
+          </LineString>
+        </Placemark>
+      </Document>
+    </kml>
+  KML
+
   setup do
     @conversation = conversations(:processing_conversation)
   end
@@ -62,7 +77,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     assert_equal "fake-png-bytes", result.area_image.download
   end
 
-  test "marks kmz as failed and does not raise when the KMZ has no polygon" do
+  test "marks kmz as failed and does not raise when the KMZ has no geometry at all" do
     @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz("isso não é um KML válido")
 
@@ -70,6 +85,22 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
 
     assert_equal "failed", @conversation.reload.processing_step_status("kmz")
     assert_nil @conversation.geospatial_result
+  end
+
+  test "processes a KMZ with only a LineString (no polygon), computing length instead of area" do
+    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    attach_kmz(LINE_KML)
+
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
+
+    @conversation.reload
+    assert_equal "done", @conversation.processing_step_status("kmz")
+
+    result = @conversation.geospatial_result
+    assert_equal "line", result.geometry_type
+    assert_nil result.area_ha
+    assert result.length_km.positive?
+    assert result.area_image.attached? # croqui de linha (<polyline>), não trava a proposta
   end
 
   test "triggers GenerateSummaryJob once tr and comp_docs are already resolved" do
