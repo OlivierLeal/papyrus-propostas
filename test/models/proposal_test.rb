@@ -1,6 +1,7 @@
 require "test_helper"
 
 class ProposalTest < ActiveSupport::TestCase
+  include ActionView::Helpers::NumberHelper
   setup do
     @conversation = conversations(:reviewing_conversation)
   end
@@ -133,26 +134,32 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "", qualification
   end
 
-  test "docx_price_rows lists every professional line plus logistics and external costs" do
+  # O modelo da Papyrus (revisão de 2026-08) deixou de trazer o quadro de preço aberto por linha:
+  # o que o cliente lê é o total na frase de abertura da seção 10.
+  test "docx_total_price comes from the pricing engine, formatted for the document" do
     proposal = proposals(:priced_proposal)
-    proposal.project_pricing.update!(external_costs: [ { "description" => "ART", "value" => 350 } ])
 
-    rows = proposal.docx_price_rows
-
-    descriptions = rows.map(&:first)
-    assert_includes descriptions, "Pedro Almeida — Coordenação geral"
-    assert_includes descriptions, "Beth Ferreira — Diagnóstico de fauna e flora"
-    assert_includes descriptions, "ART"
-    assert_includes descriptions, "Logística (deslocamento, hospedagem, alimentação)"
+    assert_equal number_to_currency(proposal.project_pricing.total_value, unit: "R$", separator: ",", delimiter: "."),
+                 proposal.docx_total_price
   end
 
-  test "docx_payment_schedule_rows mirrors the computed payment schedule" do
+  test "docx_payment_schedule_rows carries the milestone, the amount in R$ and the date" do
     proposal = proposals(:priced_proposal)
+    pricing = proposal.project_pricing
+    pricing.payment_dates = [ "2026-03-25" ]
+    pricing.save!
 
-    rows = proposal.docx_payment_schedule_rows
+    rows = proposal.reload.docx_payment_schedule_rows
 
     assert_equal 4, rows.size
-    assert_includes rows, [ "Assinatura do contrato", "30%" ]
+    assert_equal [ "Assinatura do contrato", "13.473,00", "25/03/2026" ], rows.first
+  end
+
+  # Parcela sem data combinada não pode virar data inventada nem quebrar a geração.
+  test "docx_payment_schedule_rows leaves the date blank when the consultant hasn't set one" do
+    rows = proposals(:priced_proposal).docx_payment_schedule_rows
+
+    assert_equal "", rows.first.last
   end
 
   test "docx_revision_rows has only the current row when nothing was generated before" do

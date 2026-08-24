@@ -56,21 +56,20 @@ class Proposal < ApplicationRecord
     [ professional.name, [ professional.role, professional.registration ].compact_blank.join(" — ") ]
   end
 
-  # Linhas do Quadro 10-1 (Preço) — direto de proposal_professionals + external_costs +
-  # logística, sem passar pela IA (CLAUDE.md seção 5: preço nunca é calculado ou descrito pela IA).
-  def docx_price_rows
-    pricing = project_pricing
-    rows = pricing.proposal_professionals.includes(:professional).map do |pp|
-      [ "#{pp.professional.name} — #{pp.deliverable_name}", format_currency(pp.subtotal) ]
-    end
-    rows += pricing.external_costs.map { |c| [ c["description"], format_currency(c["value"]) ] }
-    rows << [ "Logística (deslocamento, hospedagem, alimentação)", format_currency(pricing.logistics_total) ] if pricing.logistics_total.positive?
-    rows
+  # Preço total por extenso na frase de abertura da seção 10 — o modelo da Papyrus (revisão de
+  # 2026-08) deixou de trazer o quadro de preço aberto por profissional/entregável, então o valor
+  # que o cliente lê é este. Continua vindo do motor determinístico, nunca da IA.
+  def docx_total_price
+    "R$ #{format_currency(project_pricing.total_value)}"
   end
 
-  # Linhas do Quadro 10-2 (Desembolso) — direto do payment_schedule já calculado.
+  # Linhas do Quadro 10-1 (Desembolso) — marco, valor em R$ e data de cada parcela, direto do
+  # payment_schedule. A data é preenchida pelo consultor na Tela de Precificação; parcela sem
+  # data sai em branco no documento, para ele fechar no Word.
   def docx_payment_schedule_rows
-    project_pricing.payment_schedule_amounts.map { |item| [ item["label"], "#{item['percentage']}%" ] }
+    project_pricing.payment_schedule_amounts.map do |item|
+      [ item["label"], format_currency(item["amount"]), formatted_date(item["date"]) ]
+    end
   end
 
   # Linhas da tabela "Sumário de Revisões" (página 2 do modelo) — cada geração vira uma linha
@@ -126,6 +125,12 @@ class Proposal < ApplicationRecord
   private
     def sanitize_for_filename(text)
       text.to_s.gsub(%r{[/\\:*?"<>|]}, "-").presence
+    end
+
+    def formatted_date(value)
+      Date.parse(value.to_s).strftime("%d/%m/%Y")
+    rescue Date::Error, TypeError
+      ""
     end
 
     def format_currency(value)

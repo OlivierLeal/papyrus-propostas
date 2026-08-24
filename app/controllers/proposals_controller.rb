@@ -98,6 +98,7 @@ class ProposalsController < ApplicationController
     def pricing_params
       params.require(:project_pricing).permit(
         :bdi, :tax_multiplier, :distance_km, :logistics_days, :rental_per_day, :meal_per_day, :fuel_total,
+        payment_dates: [],
         proposal_professionals_attributes: %i[ id hours_office hours_field ]
       )
     end

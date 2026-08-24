@@ -160,6 +160,23 @@ Processo em duas etapas, com responsabilidades separadas (princípio mantido):
 
 O layout visual (fontes, cores, margens, logotipos, tabelas) vem pronto do modelo `.docx` da Papyrus — o código só substitui conteúdo, nunca redesenha layout. Isso garante consistência visual entre propostas independente do conteúdo gerado.
 
+**Revisão do modelo (2026-08, a partir do PTC26002_PMM_Rev01 trazido pela Papyrus):** a seção 10
+deixou de ter o quadro de preço aberto por profissional/entregável — o valor que o cliente lê é o
+total, escrito na frase de abertura (`{{PRECO_TOTAL}}`), e o único quadro é o de desembolso, agora
+com **N° | MARCO | R$ | DATA**. A data de cada parcela é digitada pelo consultor na Tela de
+Precificação e mora dentro do próprio `payment_schedule` (jsonb), junto do marco e do percentual;
+parcela sem data sai em branco no documento. Também nesta revisão: o quadro de produtos perdeu a
+coluna QUANT., a seção 9 (prazo) ganhou um segundo parágrafo, e as obrigações da CONTRATANTE
+perderam os itens de rádio comunicador e espaço físico/CATFA. O cálculo continua auditável linha a
+linha na Tela de Precificação — o que mudou é o que vai impresso para o cliente.
+
+**Ao editar o `.docx` do modelo:** os índices de `ProposalDocxFiller::TECHNICAL_SECTIONS`/
+`COMMERCIAL_SECTIONS` (posição dos filhos de `<w:body>`) e os índices das tabelas em
+`GenerateProposalDocumentTool#build_tables` (posição da tabela no documento) têm que ser
+remapeados junto — qualquer parágrafo ou tabela adicionado/removido antes da seção 10 desloca os
+dois. Editar sempre por substituição de string crua no XML, nunca `Nokogiri#to_xml` (ver a nota no
+topo de `ProposalDocxFiller`), e conferir a contagem de filhos de `<w:body>` antes e depois.
+
 **Técnica × Comercial separadas ou juntas:** a IA lê o TR e sinaliza se ele exige documentos/envelopes
 separados (comum em licitação pública). O consultor vê essa sugestão na Tela de Precificação/Aprovação
 e pode trocar antes de gerar. Conforme a escolha, o sistema gera 1 arquivo (`.docx` único) ou 2

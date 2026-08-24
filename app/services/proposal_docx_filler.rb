@@ -26,7 +26,10 @@ class ProposalDocxFiller
   # comercial.docx) — não são cálculo, foram mapeados inspecionando o XML do modelo. Se o modelo
   # for editado (parágrafo adicionado/removido antes da seção 10), esses números têm que ser
   # remapeados. 0..77 = capa + sumário de revisões + carta (compartilhado nos dois documentos);
-  # 79..167 = seções 1 a 9 (técnica); 168.. = seção 10 em diante (comercial).
+  # 79..166 = seções 1 a 9 (técnica); 167.. = seção 10 em diante (comercial).
+  #
+  # Remapeados na revisão de 2026-08 do modelo (203 filhos, era 206): a seção 10 perdeu o quadro
+  # de preço por linha e a seção 9 ganhou um parágrafo.
   #
   # ATENÇÃO ao editar o .docx do modelo diretamente (não os documentos gerados, o arquivo em si):
   # nunca salve via Nokogiri (`doc.to_xml`) — o Word não indenta o XML, e o `to_xml` do Nokogiri
@@ -36,8 +39,8 @@ class ProposalDocxFiller
   # o arquivo resultante não abre direto no Word/LibreOffice, só depois de reprocessado por este
   # próprio serviço) e confirme a contagem de filhos antes/depois bater.
   SHARED_FRONT_MATTER = (0..77)
-  TECHNICAL_SECTIONS = (79..167)
-  COMMERCIAL_SECTIONS = (168..9999)
+  TECHNICAL_SECTIONS = (79..166)
+  COMMERCIAL_SECTIONS = (167..9999)
 
   def initialize(template_path)
     @template_path = template_path

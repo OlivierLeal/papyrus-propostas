@@ -60,6 +60,22 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1.30, @proposal.project_pricing.reload.bdi
   end
 
+  # A data de cada parcela é decisão comercial do consultor, digitada na mesma tela do resto —
+  # de lá ela vai direto para o Quadro 10-1 do documento.
+  test "update stores the instalment dates typed on the pricing screen" do
+    patch conversation_proposal_path(@conversation), params: {
+      project_pricing: { bdi: "1.20", tax_multiplier: "1.25", distance_km: "0", logistics_days: "0",
+                          rental_per_day: "0", meal_per_day: "0", fuel_total: "0",
+                          payment_dates: [ "2026-03-25", "", "2026-05-25", "" ] },
+      proposal: { document_split: "combined" }
+    }
+
+    schedule = @proposal.project_pricing.reload.payment_schedule
+    assert_equal "2026-03-25", schedule[0]["date"]
+    assert_nil schedule[1]["date"]
+    assert_equal "2026-05-25", schedule[2]["date"]
+  end
+
   test "update rejects invalid pricing params and keeps the proposal editable" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "0", tax_multiplier: "1.25", distance_km: "1", logistics_days: "1",

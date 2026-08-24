@@ -136,18 +136,21 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "EQUIPE_LIDER_PROJETO_NOME" => lider[0],
         "EQUIPE_LIDER_PROJETO_QUALIFICACAO" => lider[1],
         "EQUIPE_SEG_TRABALHO_NOME" => seguranca[0],
-        "EQUIPE_SEG_TRABALHO_QUALIFICACAO" => seguranca[1]
+        "EQUIPE_SEG_TRABALHO_QUALIFICACAO" => seguranca[1],
+        "PRECO_TOTAL" => @proposal.docx_total_price
       }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }
     end
 
+    # Os índices são a POSIÇÃO da tabela no modelo, não um id: 0 = sumário de revisões,
+    # 1 = produtos, 2 = equipe técnica (preenchida por placeholder, não por linha), 3 = desembolso.
+    # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de existir.
     def build_tables(args, description)
-      produtos = Array(args[:produtos]).map { |nome| [ nome, "1", "Digital (PDF)" ] }
+      produtos = Array(args[:produtos]).map { |nome| [ nome, "Digital (PDF)" ] }
 
       {
         0 => { rows: @proposal.docx_revision_rows(current_description: description) },
         1 => { rows: produtos },
-        3 => { rows: @proposal.docx_price_rows, auto_number: true },
-        4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
+        3 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
     end
 

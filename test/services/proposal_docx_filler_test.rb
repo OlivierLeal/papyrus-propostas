@@ -13,10 +13,11 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
       "NOME_CLIENTE" => "Serra Verde Energias Renováveis S.A.",
       "OBJETIVO_SERVICOS" => "Elaborar o EIA/RIMA do Parque Eólico Serra Verde."
     }
+    # Índices são a posição da tabela no modelo: 0 = revisões, 1 = produtos, 2 = equipe,
+    # 3 = desembolso (o quadro de preço por linha saiu do modelo na revisão de 2026-08).
     @tables = {
-      1 => { rows: [ [ "EIA", "1", "Digital (PDF)" ], [ "RIMA", "1", "Digital (PDF)" ] ] },
-      3 => { rows: [ [ "Coordenação geral", "15.000,00" ], [ "Diagnóstico de fauna", "28.260,00" ] ], auto_number: true },
-      4 => { rows: [ [ "Assinatura do contrato", "30%" ] ], auto_number: true }
+      1 => { rows: [ [ "EIA", "Digital (PDF)" ], [ "RIMA", "Digital (PDF)" ] ] },
+      3 => { rows: [ [ "Assinatura do contrato", "13.473,00", "25/03/2026" ] ], auto_number: true }
     }
   end
 
@@ -59,11 +60,11 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
   end
 
   test "fill_table shrinks the table when there are fewer rows than the template molde" do
-    # Quadro 10-2 (Desembolso) tem 9 linhas moldadas; passamos só 1.
+    # Quadro 10-1 (Desembolso) tem 9 linhas moldadas; passamos só 1.
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
 
-    desembolso_table = doc.xpath("//w:tbl", NS)[4]
+    desembolso_table = doc.xpath("//w:tbl", NS)[3]
     data_rows = desembolso_table.xpath(".//w:tr", NS)[1..]
 
     assert_equal 1, data_rows.size
@@ -74,13 +75,14 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
 
-    preco_table = doc.xpath("//w:tbl", NS)[3]
-    row = preco_table.xpath(".//w:tr", NS)[1]
+    desembolso_table = doc.xpath("//w:tbl", NS)[3]
+    row = desembolso_table.xpath(".//w:tr", NS)[1]
     cells = cell_texts(row)
 
     assert_equal "1", cells[0]
-    assert_equal "Coordenação geral", cells[1]
-    assert_equal "15.000,00", cells[2]
+    assert_equal "Assinatura do contrato", cells[1]
+    assert_equal "13.473,00", cells[2]
+    assert_equal "25/03/2026", cells[3]
   end
 
   test "fill turns multi-paragraph placeholder text into separate justified paragraphs" do
@@ -147,6 +149,12 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     # Só a comercial tem o quadro de preço (seção 10).
     assert_includes commercial_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
     assert_not_includes technical_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
+
+    # A fronteira entre as duas é um índice fixo do corpo do modelo (TECHNICAL_SECTIONS), então
+    # ela precisa ser fixada nas duas pontas: a última seção técnica inteira fica na técnica.
+    assert_includes technical_xml, "PRAZO DE EXECUÇÃO"
+    assert_includes technical_xml, "O referido prazo poderá ter alterações"
+    assert_not_includes commercial_xml, "PRAZO DE EXECUÇÃO"
   end
 
   test "fill_split applies technical_overrides and commercial_overrides on top of the shared placeholders" do

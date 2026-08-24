@@ -40,4 +40,18 @@ class ProjectPricing < ApplicationRecord
       item.merge("amount" => (total_value * item["percentage"].to_f / 100).round(2))
     end
   end
+
+  # A data de cada parcela mora dentro do próprio payment_schedule (jsonb) — não é coluna nova,
+  # é mais um campo da mesma linha do cronograma, editado junto com o resto na Tela de
+  # Precificação. Recebe as datas na ORDEM das parcelas, que é como o form as envia.
+  def payment_dates=(dates)
+    dates = Array(dates)
+    self.payment_schedule = payment_schedule.each_with_index.map do |item, index|
+      item.merge("date" => dates[index].presence)
+    end
+  end
+
+  def payment_dates
+    payment_schedule.map { |item| item["date"] }
+  end
 end

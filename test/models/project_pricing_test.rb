@@ -59,4 +59,30 @@ class ProjectPricingTest < ActiveSupport::TestCase
 
     assert_not pricing.valid?
   end
+
+  # A data de cada parcela mora dentro do payment_schedule (jsonb), junto do marco e do
+  # percentual — não é coluna nova.
+  test "payment_dates= stores one date per instalment, in order, keeping the rest of the schedule" do
+    pricing = project_pricings(:priced_pricing)
+
+    pricing.payment_dates = [ "2026-03-25", "", "2026-05-25" ]
+    pricing.save!
+
+    schedule = pricing.reload.payment_schedule
+    assert_equal "2026-03-25", schedule[0]["date"]
+    assert_nil schedule[1]["date"]
+    assert_equal "2026-05-25", schedule[2]["date"]
+    assert_equal 30, schedule[0]["percentage"]
+    assert_equal "Assinatura do contrato", schedule[0]["label"]
+  end
+
+  test "payment_schedule_amounts carries the date alongside the computed amount" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.payment_dates = [ "2026-03-25" ]
+    pricing.save!
+
+    first = pricing.payment_schedule_amounts.first
+    assert_equal "2026-03-25", first["date"]
+    assert first["amount"].positive?
+  end
 end

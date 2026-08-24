@@ -133,6 +133,25 @@
         </div>
       </div>
 
+      <div class="mt-6">
+        <h3 class="font-semibold text-base-content text-sm mb-1">Cronograma de desembolso</h3>
+        <p class="text-xs text-base-content/50 mb-3">
+          A data de cada parcela vai para o Quadro 10-1 do documento. Parcela sem data sai em branco.
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <% pricing.payment_schedule_amounts.each_with_index do |item, index| %>
+            <div class="flex items-center gap-3 px-3 py-2 rounded-field bg-base-200/40">
+              <div class="min-w-0 flex-1">
+                <span class="text-sm text-base-content truncate block"><%= item["label"] %> (<%= item["percentage"] %>%)</span>
+                <span class="text-xs text-base-content/60"><%= number_to_currency(item["amount"], unit: "R$", separator: ",", delimiter: ".") %></span>
+              </div>
+              <%= date_field_tag "project_pricing[payment_dates][]", item["date"], disabled: !editable,
+                    class: "input input-bordered input-sm w-40" %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
       <div class="form-control mt-4 max-w-xs">
         <div class="label"><span class="label-text text-xs">Formato do documento final</span></div>
         <%= select_tag "proposal[document_split]",
@@ -215,7 +234,9 @@
     <ul class="flex flex-col gap-1 text-sm">
       <% pricing.payment_schedule_amounts.each do |item| %>
         <li class="flex justify-between">
-          <span class="text-base-content/60"><%= item["label"] %> (<%= item["percentage"] %>%)</span>
+          <span class="text-base-content/60">
+            <%= item["label"] %> (<%= item["percentage"] %>%)<%= " · #{Date.parse(item["date"]).strftime("%d/%m/%Y")}" if item["date"].present? %>
+          </span>
           <span class="text-base-content"><%= number_to_currency(item["amount"], unit: "R$", separator: ",", delimiter: ".") %></span>
         </li>
       <% end %>
