@@ -374,6 +374,7 @@ class Conversation < ApplicationRecord
         #{PROPOSAL_STATE_MARKER} (gerado pelo sistema, sempre reflete o estado real da Tela de
         Precificação — não pergunte isso ao consultor, apenas use como fato já resolvido):
         - Status da proposta: #{proposal.status}
+        - Nome do arquivo: #{proposal.docx_filename_override.presence&.then { |n| "definido pelo consultor (\"#{n}\") — a ferramenta já usa esse nome sozinha, não precisa reenviar" } || "padrão do sistema (número + cliente + escopo + revisão)"}
         - Formato do documento: #{proposal.document_split == "separated" ? "técnica e comercial separadas" : "documento único"}
         - Equipe e horas definidas:
         #{lines.presence || "  (nenhuma linha definida ainda)"}

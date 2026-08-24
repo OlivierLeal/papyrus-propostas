@@ -158,6 +158,22 @@ class ConversationTest < ActiveSupport::TestCase
     assert_includes markers.first.content, "Preço total calculado"
   end
 
+  # Sem isso a IA reenvia (ou pior, re-pergunta) o nome do arquivo a cada geração, mesmo o
+  # consultor já tendo dito uma vez.
+  test "refresh_proposal_state_snapshot! says whether the filename was dictated by the consultant" do
+    conversation = conversations(:priced_conversation)
+
+    conversation.refresh_proposal_state_snapshot!
+    assert_includes conversation.messages.where(role: "user", internal: true).last.content, "padrão do sistema"
+
+    conversation.proposal.update!(docx_filename_override: "PTC26002_PMM_LU")
+    conversation.refresh_proposal_state_snapshot!
+    marker = conversation.messages.where(role: "user", internal: true).last.content
+
+    assert_includes marker, "definido pelo consultor"
+    assert_includes marker, "PTC26002_PMM_LU"
+  end
+
   # O que a IA sabe sobre o projeto tem que caber num lugar só, reconstruído a cada turno — senão
   # ela cita achado que já foi superado ou ignora divergência que o consultor ainda não decidiu.
   test "refresh_proposal_state_snapshot! carries the findings with their citation codes" do

@@ -22,25 +22,26 @@ class ProposalDocxFiller
   IMAGE_WIDTH_EMU = 5486400
   IMAGE_HEIGHT_EMU = 4114800
 
-  # Índices dos filhos diretos de <w:body> no modelo atual (app/templates/docx/proposta_tecnica_
-  # comercial.docx) — não são cálculo, foram mapeados inspecionando o XML do modelo. Se o modelo
-  # for editado (parágrafo adicionado/removido antes da seção 10), esses números têm que ser
-  # remapeados. 0..77 = capa + sumário de revisões + carta (compartilhado nos dois documentos);
-  # 79..166 = seções 1 a 9 (técnica); 167.. = seção 10 em diante (comercial).
+  # A fronteira entre a parte técnica e a comercial é achada pelo TÍTULO da seção, nunca por
+  # índice fixo de filho de <w:body>.
   #
-  # Remapeados na revisão de 2026-08 do modelo (203 filhos, era 206): a seção 10 perdeu o quadro
-  # de preço por linha e a seção 9 ganhou um parágrafo.
+  # Índice fixo foi exatamente o que quebrou em produção (proposta PT26011, agosto/2026): o
+  # documento terminou no segundo item das obrigações da Papyrus, no meio da seção 7. O motivo é
+  # que o texto da IA vira parágrafos de VERDADE antes do corte (ver expand_into_paragraphs!) —
+  # um "escopo e metodologia" de 30 parágrafos deixa o corpo com dezenas de filhos a mais do que o
+  # modelo tinha, e todo índice mapeado no modelo aponta para outro lugar. O corte então cai onde
+  # calhar. Quanto mais a IA escreve, mais cedo o documento é cortado.
   #
-  # ATENÇÃO ao editar o .docx do modelo diretamente (não os documentos gerados, o arquivo em si):
-  # nunca salve via Nokogiri (`doc.to_xml`) — o Word não indenta o XML, e o `to_xml` do Nokogiri
-  # insere texto de indentação entre as tags, dobrando a contagem de filhos de <w:body> (visto na
-  # prática: 206 -> 413) e quebrando esses índices pra sempre. Edite com substituição de string
-  # crua no XML (via rubyzip, rodando dentro do ambiente Rails com `bin/rails runner` — fora dele
-  # o arquivo resultante não abre direto no Word/LibreOffice, só depois de reprocessado por este
-  # próprio serviço) e confirme a contagem de filhos antes/depois bater.
-  SHARED_FRONT_MATTER = (0..77)
-  TECHNICAL_SECTIONS = (79..166)
-  COMMERCIAL_SECTIONS = (167..9999)
+  # Pelo título isso não acontece: o parágrafo do título continua sendo o mesmo nó, esteja ele na
+  # posição que estiver.
+  FIRST_TECHNICAL_HEADING = "APRESENTAÇÃO"
+  FIRST_COMMERCIAL_HEADING = "PREÇO E CONDIÇÕES DE PAGAMENTO"
+
+  # O estilo só DESEMPATA (para um parágrafo escrito pela IA que por acaso repita o texto de um
+  # título não virar fronteira); quem identifica é o texto. O id do estilo não serve como
+  # requisito porque muda sozinho quando alguém reabre e salva o modelo: o mesmo arquivo já veio
+  # com "Ttulo1" (Word em português) e com "Heading1" depois de um salvamento.
+  HEADING_STYLES = /\A(?:heading|t[íi]tulo|ttulo)\s*1\z/i
 
   def initialize(template_path)
     @template_path = template_path
@@ -59,8 +60,8 @@ class ProposalDocxFiller
   # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
   def fill_split(placeholders:, tables: {}, images: {}, technical_overrides: {}, commercial_overrides: {})
     {
-      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, TECHNICAL_SECTIONS ]) },
-      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images) { |doc| trim_body!(doc, [ SHARED_FRONT_MATTER, COMMERCIAL_SECTIONS ]) }
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images) { |doc| trim_body!(doc, keep: :technical) },
+      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images) { |doc| trim_body!(doc, keep: :commercial) }
     }
   end
 
@@ -93,16 +94,39 @@ class ProposalDocxFiller
       end
     end
 
-    # Remove os filhos de <w:body> fora das faixas de índice indicadas — usado pra separar as
-    # seções técnicas das comerciais. <w:sectPr> (margens/tamanho de página) sempre fica, senão
-    # o documento resultante não abre.
-    def trim_body!(doc, keep_ranges)
+    # Separa as seções técnicas das comerciais. A capa e a carta de apresentação (tudo antes da
+    # seção 1) ficam nos dois documentos. <w:sectPr> (margens/tamanho de página) sempre fica,
+    # senão o documento resultante não abre.
+    #
+    # Roda DEPOIS de todo o preenchimento, sobre o corpo já com o texto da IA expandido — por isso
+    # as fronteiras são recalculadas aqui, no corpo real, e não herdadas do modelo.
+    def trim_body!(doc, keep:)
       body = doc.at_xpath("//w:body", NS)
-      keep_indices = keep_ranges.flat_map(&:to_a).to_set
+      children = body.children.to_a
 
-      body.children.each_with_index do |node, i|
+      technical_start = heading_index(children, FIRST_TECHNICAL_HEADING)
+      commercial_start = heading_index(children, FIRST_COMMERCIAL_HEADING)
+      section_range = keep == :technical ? (technical_start...commercial_start) : (commercial_start...children.size)
+      keep_indices = (0...technical_start).to_a.concat(section_range.to_a).to_set
+
+      children.each_with_index do |node, i|
         node.remove unless keep_indices.include?(i) || node.name == "sectPr"
       end
+    end
+
+    def heading_index(children, text)
+      candidates = children.each_index.select do |i|
+        children[i].name == "p" && children[i].xpath(".//w:t", NS).map(&:text).join.strip == text
+      end
+      # Sem a fronteira não dá pra separar técnica de comercial, e cortar por chute produziria
+      # justamente o documento truncado que este método existe para evitar.
+      raise "Título \"#{text}\" não encontrado no modelo — a separação técnica/comercial depende dele." if candidates.empty?
+
+      candidates.find { |i| heading_style?(children[i]) } || candidates.first
+    end
+
+    def heading_style?(node)
+      node.at_xpath(".//w:pPr/w:pStyle", NS)&.[]("w:val").to_s.match?(HEADING_STYLES)
     end
     # Troca o <w:r> do parágrafo que contém "{{TOKEN}}" por uma imagem embutida de verdade — 3
     # mudanças coordenadas no mesmo zip: arquivo novo em word/media/, relationship novo em
@@ -201,29 +225,43 @@ class ProposalDocxFiller
       existing_data_rows[rows_data.size..].to_a.each(&:remove) if rows_data.size < existing_data_rows.size
     end
 
-    # Célula com texto existente: reaproveita o primeiro run (mantém a formatação) e limpa os
-    # demais. Célula vazia (comum nas linhas-molde das tabelas): cria um run novo copiando o
-    # rPr do parágrafo, senão o texto entraria sem fonte/tamanho definidos.
+    # Célula com texto existente: reaproveita o run que tem o texto (mantém a formatação) e limpa
+    # os demais.
+    #
+    # Um run PODE não ter <w:t> nenhum — é como o Word grava a célula vazia da linha-molde depois
+    # que alguém reabre e salva o modelo (o run fica só com <w:rPr>). Assumir que o primeiro run
+    # tinha texto quebrou a geração inteira quando o modelo voltou re-salvo: NoMethodError em
+    # `content=` para nil, e o consultor via só "não consegui gerar o documento agora". Nesse caso
+    # o run é aproveitado assim mesmo (é ele que carrega a fonte da célula) e ganha o nó de texto
+    # que falta.
     def set_cell_text!(cell, text)
       runs = cell.xpath(".//w:r", NS)
+      with_text = runs.find { |run| run.at_xpath(".//w:t", NS) }
 
-      if runs.any?
-        runs.first.at_xpath(".//w:t", NS).content = text
-        runs[1..].to_a.each { |r| r.at_xpath(".//w:t", NS)&.content = "" }
+      if with_text
+        with_text.at_xpath(".//w:t", NS).content = text
+        (runs.to_a - [ with_text ]).each { |r| r.at_xpath(".//w:t", NS)&.content = "" }
         return
       end
 
+      return runs.first.add_child(text_node_for(cell.document, text)) if runs.any?
+
+      # Célula sem run nenhum: cria um copiando o rPr do parágrafo, senão o texto entraria sem
+      # fonte/tamanho definidos.
       paragraph = cell.at_xpath(".//w:p", NS)
       return unless paragraph
 
       run = Nokogiri::XML::Node.new("w:r", cell.document)
       rpr_template = paragraph.at_xpath(".//w:pPr/w:rPr", NS)
       run.add_child(rpr_template.dup) if rpr_template
-
-      text_node = Nokogiri::XML::Node.new("w:t", cell.document)
-      text_node["xml:space"] = "preserve"
-      text_node.content = text
-      run.add_child(text_node)
+      run.add_child(text_node_for(cell.document, text))
       paragraph.add_child(run)
+    end
+
+    def text_node_for(document, text)
+      node = Nokogiri::XML::Node.new("w:t", document)
+      node["xml:space"] = "preserve"
+      node.content = text
+      node
     end
 end

@@ -135,22 +135,22 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
     tool.execute(**@args)
 
-    combined_xml = document_xml(@proposal.generated_documents.first)
-    assert_includes combined_xml, "<w:t>TÉCNICA E</w:t>"
-    assert_includes combined_xml, "<w:t>COMERCIAL</w:t>"
+    combined_texts = document_texts(@proposal.generated_documents.first)
+    assert_includes combined_texts, "TÉCNICA E"
+    assert_includes combined_texts, "COMERCIAL"
 
     @proposal.update!(document_split: "separated")
     tool.execute(**@args)
     @proposal.reload
 
-    technical_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "tecnica" })
-    commercial_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "comercial" })
+    technical_texts = document_texts(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "tecnica" })
+    commercial_texts = document_texts(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "comercial" })
 
-    assert_includes technical_xml, "<w:t>TÉCNICA</w:t>"
-    assert_not_includes technical_xml, "<w:t>COMERCIAL</w:t>"
+    assert_includes technical_texts, "TÉCNICA"
+    assert_not_includes technical_texts, "COMERCIAL"
 
-    assert_includes commercial_xml, "<w:t>COMERCIAL</w:t>"
-    assert_not_includes commercial_xml, "<w:t>TÉCNICA</w:t>"
+    assert_includes commercial_texts, "COMERCIAL"
+    assert_not_includes commercial_texts, "TÉCNICA"
   end
 
   test "the generated filename includes the escopo segment (tipo de estudo + município/UF vindos dos args da IA)" do
@@ -284,7 +284,69 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       Zip::File.open(ActiveStorage::Blob.service.path_for(document.blob.key)) { |zip| zip.read("word/document.xml") }.force_encoding("UTF-8")
     end
 
+    # Texto de cada <w:t>, para comparar CONTEÚDO em vez de XML cru: o modelo é reaberto e salvo
+    # de tempos em tempos pela Papyrus, e o salvamento mexe na forma da tag (ex.: passa a gravar
+    # xml:space="preserve"), o que quebrava asserção feita em cima da string "<w:t>X</w:t>".
+    def document_texts(document)
+      Nokogiri::XML(document_xml(document))
+        .xpath("//w:t", "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+        .map { |node| node.text.strip }
+    end
+
     def zip_entry_names(document)
       Zip::File.open(ActiveStorage::Blob.service.path_for(document.blob.key)) { |zip| zip.entries.map(&:name) }
     end
+
+
+  # NOME DITADO PELO CONSULTOR. Ele já criou a pasta na rede e lançou a proposta no controle com
+  # um nome; o arquivo tem que sair com aquele nome, não com o que o sistema montaria.
+  test "uses the filename the consultant dictated in the chat" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args.merge(nome_arquivo: "PTC26002_PMM_LU_Simões Filho_BA")))
+
+    assert_equal [ "PTC26002_PMM_LU_Simões Filho_BA_Rev.00.docx" ], result["filenames"]
+    assert_equal "PTC26002_PMM_LU_Simões Filho_BA_Rev.00.docx", @proposal.generated_documents.first.filename.to_s
+  end
+
+  # "Comece a utilizar": ele disse o nome uma vez, não uma vez por geração.
+  test "keeps using the dictated name on the next generation, without being told again" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+    tool.execute(**@args.merge(nome_arquivo: "PTC26002_PMM_LU"))
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_equal [ "PTC26002_PMM_LU_Rev.01.docx" ], result["filenames"]
+  end
+
+  test "the dictated name distinguishes técnica from comercial when the proposal is split" do
+    @proposal.update!(status: "priced", document_split: "separated")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args.merge(nome_arquivo: "PTC26002_PMM_LU")))
+
+    assert_equal [ "PT26002_PMM_LU_Rev.00.docx", "PC26002_PMM_LU_Rev.00.docx" ], result["filenames"]
+  end
+
+  test "without a dictated name the system pattern is used, as before" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_equal [ @proposal.docx_filename("combined", municipio: @args[:municipios], estado: @args[:estado]) ],
+                 result["filenames"]
+    assert_nil @proposal.reload.docx_filename_override
+  end
+
+  test "\"padrão\" gives the naming back to the system" do
+    @proposal.update!(status: "priced", document_split: "combined", docx_filename_override: "PTC26002_PMM_LU")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(nome_arquivo: "padrão"))
+
+    assert_nil @proposal.reload.docx_filename_override
+  end
 end

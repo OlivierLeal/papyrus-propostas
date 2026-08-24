@@ -160,6 +160,15 @@ Processo em duas etapas, com responsabilidades separadas (princípio mantido):
 
 O layout visual (fontes, cores, margens, logotipos, tabelas) vem pronto do modelo `.docx` da Papyrus — o código só substitui conteúdo, nunca redesenha layout. Isso garante consistência visual entre propostas independente do conteúdo gerado.
 
+**Nome do arquivo:** por padrão o sistema monta o nome no padrão real da Papyrus (número da
+proposta + cliente + escopo + `_Rev.NN`, ver `Proposal#docx_filename`). Se o consultor DITAR o nome
+no chat ("o arquivo tem que se chamar PTC26002_PMM_LU_Simões Filho_BA") — o que acontece quando a
+pasta na rede e o controle de propostas já foram criados com aquele nome (itens 1 e 2 do passo a
+passo interno) — a IA passa `nome_arquivo` para a ferramenta e o nome fica gravado em
+`proposals.docx_filename_override`, valendo também para as versões seguintes. O sistema só
+acrescenta `_Rev.NN` (se ele já não tiver escrito uma) e troca o prefixo PTC/PT/PC quando a
+proposta sai em dois arquivos. "padrão" no chat devolve a nomeação ao sistema.
+
 **Revisão do modelo (2026-08, a partir do PTC26002_PMM_Rev01 trazido pela Papyrus):** a seção 10
 deixou de ter o quadro de preço aberto por profissional/entregável — o valor que o cliente lê é o
 total, escrito na frase de abertura (`{{PRECO_TOTAL}}`), e o único quadro é o de desembolso, agora
@@ -170,12 +179,24 @@ coluna QUANT., a seção 9 (prazo) ganhou um segundo parágrafo, e as obrigaçõ
 perderam os itens de rádio comunicador e espaço físico/CATFA. O cálculo continua auditável linha a
 linha na Tela de Precificação — o que mudou é o que vai impresso para o cliente.
 
-**Ao editar o `.docx` do modelo:** os índices de `ProposalDocxFiller::TECHNICAL_SECTIONS`/
-`COMMERCIAL_SECTIONS` (posição dos filhos de `<w:body>`) e os índices das tabelas em
-`GenerateProposalDocumentTool#build_tables` (posição da tabela no documento) têm que ser
-remapeados junto — qualquer parágrafo ou tabela adicionado/removido antes da seção 10 desloca os
-dois. Editar sempre por substituição de string crua no XML, nunca `Nokogiri#to_xml` (ver a nota no
-topo de `ProposalDocxFiller`), e conferir a contagem de filhos de `<w:body>` antes e depois.
+**Ao editar o `.docx` do modelo:** os índices das tabelas em
+`GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
+1 = produtos, 2 = equipe, 3 = desembolso) e têm que ser remapeados se alguma tabela for
+adicionada ou removida. A separação técnica × comercial **não** depende mais de índice: é feita
+pelo título da seção (`ProposalDocxFiller::FIRST_COMMERCIAL_HEADING`). Editar sempre por
+substituição de string crua no XML, nunca `Nokogiri#to_xml`.
+
+**Nunca cortar o documento por índice de filho de `<w:body>`** (foi assim até agosto/2026, e a
+proposta PT26011 saiu truncada no meio da seção 7 em produção): o texto que a IA escreve vira
+parágrafos de verdade ANTES do corte (`expand_into_paragraphs!`), então o corpo na hora de cortar
+tem dezenas de filhos a mais do que o modelo tinha — quanto mais a IA escreve, mais cedo o
+documento é cortado. Qualquer fronteira dentro do documento tem que ser localizada por conteúdo.
+
+**O modelo volta re-salvo de tempos em tempos** (a Papyrus abre no Word/LibreOffice para conferir),
+e o salvamento muda a forma do XML sem mudar o conteúdo: o estilo dos títulos já veio como
+`Ttulo1` e como `Heading1`, e as células vazias das linhas-molde passam a ter run sem `<w:t>`
+nenhum. Código que lê o modelo tem que tolerar as duas formas — e teste de geração compara TEXTO
+(`//w:t`), nunca a string do XML cru.
 
 **Técnica × Comercial separadas ou juntas:** a IA lê o TR e sinaliza se ele exige documentos/envelopes
 separados (comum em licitação pública). O consultor vê essa sugestão na Tela de Precificação/Aprovação

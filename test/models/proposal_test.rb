@@ -221,6 +221,46 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal expected, proposal.docx_filename("combined")
   end
 
+  # O consultor dita o nome no chat quando a pasta na rede e o controle de propostas já existem
+  # com aquele nome (itens 1 e 2 do passo a passo interno).
+  test "docx_filename uses the name the consultant dictated, adding only the revision" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(docx_filename_override: "PTC26002_PMM_LU_Simões Filho_BA", version: 1)
+
+    assert_equal "PTC26002_PMM_LU_Simões Filho_BA_Rev.00.docx", proposal.docx_filename("combined")
+  end
+
+  test "docx_filename respects a revision the consultant wrote himself instead of adding another" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(docx_filename_override: "PTC26002_PMM_Rev.03", version: 5)
+
+    assert_equal "PTC26002_PMM_Rev.03.docx", proposal.docx_filename("combined")
+  end
+
+  # Técnica e comercial não podem sair com o mesmo nome; trocar PTC/PT/PC é a convenção da Papyrus.
+  test "docx_filename swaps the proposal-number prefix to tell técnica from comercial" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(docx_filename_override: "PTC26002_PMM_LU", version: 1)
+
+    assert_equal "PT26002_PMM_LU_Rev.00.docx", proposal.docx_filename("tecnica")
+    assert_equal "PC26002_PMM_LU_Rev.00.docx", proposal.docx_filename("comercial")
+  end
+
+  test "docx_filename falls back to a suffix when the dictated name has no proposal number" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(docx_filename_override: "Proposta PMM galpões", version: 1)
+
+    assert_equal "Proposta PMM galpões_Tecnica_Rev.00.docx", proposal.docx_filename("tecnica")
+    assert_equal "Proposta PMM galpões_Rev.00.docx", proposal.docx_filename("combined")
+  end
+
+  test "docx_filename drops a .docx the consultant typed and keeps the name sanitized" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(docx_filename_override: "PTC26002_PMM/LU.docx", version: 1)
+
+    assert_equal "PTC26002_PMM-LU_Rev.00.docx", proposal.docx_filename("combined")
+  end
+
   test "docx_filename sanitizes filesystem-unsafe characters from client name and município" do
     proposal = proposals(:priced_proposal)
     proposal.update!(version: 1)

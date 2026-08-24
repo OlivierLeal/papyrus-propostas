@@ -40,6 +40,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :escopo_e_metodologia, desc: "Texto da seção 'Escopo e Metodologia', descrevendo como o serviço será executado"
   param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
   param :produtos, type: "array", desc: "Lista dos produtos/entregáveis a serem entregues (ex.: \"EIA - Estudo de Impacto Ambiental\")"
+  param :nome_arquivo,
+    desc: "SÓ quando o consultor disser como o arquivo deve se chamar (ex.: \"o arquivo tem que se chamar " \
+          "PTC26002_PMM_LU_Simões Filho_BA\"). Copie o nome exatamente como ele escreveu, sem inventar, sem " \
+          "completar e sem a extensão .docx — o sistema cuida da revisão (_Rev.NN) e de distinguir técnica de " \
+          "comercial. Se ele não falou nada sobre nome de arquivo, NÃO envie este parâmetro: o sistema usa o " \
+          "padrão da Papyrus. Envie \"padrão\" se ele pedir para voltar ao nome automático.",
+    required: false
+
   param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
@@ -53,6 +61,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     return { error: "Ainda não dá pra criar a proposta — falta o tipo de estudo ser identificado " \
       "(TR ainda em processamento) ou a revisão ser concluída." }.to_json if @proposal.nil?
 
+    apply_filename_override!(args[:nome_arquivo])
     @proposal.increment!(:version)
     description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
 
@@ -101,6 +110,19 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
+    # O consultor às vezes dita o nome do arquivo no chat ("tem que se chamar PTC26002_PMM..."),
+    # normalmente porque a pasta na rede e o controle de propostas já foram criados com aquele
+    # nome (itens 1 e 2 do passo a passo interno). A partir daí é esse o nome, inclusive nas
+    # versões seguintes — por isso fica gravado na proposta, e não só nesta geração.
+    RESET_WORDS = %w[padrao padrão default automatico automático].freeze
+
+    def apply_filename_override!(nome)
+      nome = nome.to_s.strip
+      return if nome.blank?
+
+      @proposal.update!(docx_filename_override: RESET_WORDS.include?(nome.downcase) ? nil : nome)
+    end
+
     # Só o mapa real da Mapbox (PNG) entra no .docx — o croqui SVG de reserva (quando a Mapbox
     # não está disponível) não tem como virar imagem embutida do Word sem conversão, então nesse
     # caso o placeholder cai no fluxo de texto normal e sai em branco (ver build_placeholders).

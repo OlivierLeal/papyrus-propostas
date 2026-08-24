@@ -271,4 +271,73 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
         Zip::File.open(tmp.path) { |zip| return zip.read(entry_name).force_encoding("UTF-8") }
       end
     end
+
+
+  # REGRESSÃO — proposta PT26011 (produção, agosto/2026): a técnica saiu terminando no segundo
+  # item das obrigações da Papyrus, no meio da seção 7. A causa não era o conteúdo: o texto da IA
+  # vira parágrafos de verdade ANTES do corte, e o corte usava índices mapeados no modelo vazio,
+  # então quanto mais a IA escrevia, mais cedo o documento era cortado.
+  test "fill_split keeps every technical section even when the AI text expands the body a lot" do
+    escopo = Array.new(60) { |i| "Parágrafo #{i + 1} do escopo e metodologia de execução do serviço." }.join("\n\n")
+
+    result = @filler.fill_split(
+      placeholders: @placeholders.merge("ESCOPO_METODOLOGIA" => escopo), tables: @tables
+    )
+    technical_xml = document_xml(result[:technical])
+
+    assert_includes technical_xml, "Parágrafo 60 do escopo"
+    # Tudo que vem DEPOIS do texto expandido tem que continuar no documento.
+    assert_includes technical_xml, "PRODUTOS A SEREM ENTREGUES"
+    assert_includes technical_xml, "RESPONSABILIDADES DAS PARTES"
+    assert_includes technical_xml, "Disponibilizar a Lista de stakeholders." # último item da seção 7
+    assert_includes technical_xml, "EQUIPE TÉCNICA"
+    assert_includes technical_xml, "PRAZO DE EXECUÇÃO"
+    # E a fronteira continua valendo: a parte comercial não vaza para a técnica.
+    assert_not_includes technical_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
+  end
+
+  test "fill_split keeps the commercial half whole under the same expansion" do
+    escopo = Array.new(60) { |i| "Parágrafo #{i + 1} do escopo." }.join("\n\n")
+
+    result = @filler.fill_split(
+      placeholders: @placeholders.merge("ESCOPO_METODOLOGIA" => escopo), tables: @tables
+    )
+    commercial_xml = document_xml(result[:commercial])
+
+    assert_includes commercial_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
+    assert_includes commercial_xml, "DADOS BANCÁRIOS"
+    assert_includes commercial_xml, "VALIDADE DA PROPOSTA"
+    assert_not_includes commercial_xml, "Parágrafo 1 do escopo"
+    assert_not_includes commercial_xml, "RESPONSABILIDADES DAS PARTES"
+  end
+
+  # O modelo é reaberto e salvo pela Papyrus de tempos em tempos, e o salvamento renomeia o estilo
+  # dos títulos (o mesmo arquivo já veio com "Ttulo1" e com "Heading1"). O corte não pode depender
+  # desse nome.
+  test "fill_split finds the section boundary even if the heading style was renamed by a re-save" do
+    renamed = Tempfile.create([ "modelo", ".docx" ], binmode: true)
+    FileUtils.cp(TEMPLATE_PATH, renamed.path)
+    Zip::File.open(renamed.path) do |zip|
+      xml = zip.read("word/document.xml").force_encoding("UTF-8").gsub("Heading1", "EstiloQualquer")
+      zip.get_output_stream("word/document.xml") { |f| f.write(xml) }
+    end
+
+    result = ProposalDocxFiller.new(renamed.path).fill_split(placeholders: @placeholders, tables: @tables)
+
+    assert_includes document_xml(result[:technical]), "PRAZO DE EXECUÇÃO"
+    assert_not_includes document_xml(result[:technical]), "PREÇO E CONDIÇÕES DE PAGAMENTO"
+  ensure
+    renamed&.close
+  end
+
+  # Modelo re-salvo grava a célula vazia da linha-molde como um run só com <w:rPr>, sem <w:t>.
+  # Assumir que o primeiro run tinha texto derrubava a geração inteira.
+  test "fill_table writes into a template cell whose run has no text node at all" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    doc = parsed_document(bytes)
+
+    desembolso_table = doc.xpath("//w:tbl", NS)[3]
+    assert_equal [ "1", "Assinatura do contrato", "13.473,00", "25/03/2026" ],
+                 cell_texts(desembolso_table.xpath(".//w:tr", NS)[1])
+  end
 end

@@ -27,13 +27,19 @@ class Proposal < ApplicationRecord
   # estudo + município/UF, quando a IA já os identificou) + revisão atual. municipio/estado vêm de
   # fora (só existem como texto solto que a IA extraiu na hora de gerar — ver
   # GenerateProposalDocumentTool) porque hoje não são persistidos em nenhuma coluna própria.
-  def docx_filename(kind, municipio: nil, estado: nil)
-    cliente = sanitize_for_filename(conversation.client_name)
-    escopo = [ conversation.study_type&.name, sanitize_for_filename(municipio), estado.presence&.upcase ]
-      .compact_blank.join("_")
-    revisao = format("%02d", version - 1)
+  # "Rev.00", "Rev 1", "rev.02" — qualquer forma de revisão que o consultor tenha escrito à mão
+  # no nome que ele ditou. Se ele escreveu uma, é a dele que vale.
+  REVISION_MARKER = /rev\.?\s*\d+/i
 
-    "#{docx_numero_proposta(kind)}_#{cliente}#{"_#{escopo}" if escopo.present?}_Rev.#{revisao}.docx"
+  # Prefixo do número da proposta no começo do nome (PTC26002_...), que é o que distingue
+  # técnica de comercial na convenção da Papyrus.
+  NUMBER_PREFIX = /\A(PTC|PT|PC)\d/i
+
+  def docx_filename(kind, municipio: nil, estado: nil)
+    base = docx_filename_override.presence ? custom_filename_base(kind) : standard_filename_base(kind, municipio, estado)
+    base += "_Rev.#{format("%02d", version - 1)}" unless base.match?(REVISION_MARKER)
+
+    "#{base}.docx"
   end
 
   # Nome/qualificação da Equipe Técnica no DOCX vêm de dados reais do sistema (proposal_
@@ -123,6 +129,26 @@ class Proposal < ApplicationRecord
   end
 
   private
+    def standard_filename_base(kind, municipio, estado)
+      cliente = sanitize_for_filename(conversation.client_name)
+      escopo = [ conversation.study_type&.name, sanitize_for_filename(municipio), estado.presence&.upcase ]
+        .compact_blank.join("_")
+
+      "#{docx_numero_proposta(kind)}_#{cliente}#{"_#{escopo}" if escopo.present?}"
+    end
+
+    # O consultor ditou o nome; o sistema só cuida do que distingue os DOIS arquivos quando a
+    # proposta sai separada em técnica e comercial — senão os dois sairiam com o mesmo nome.
+    # Quando o nome dele já começa pelo número da proposta, trocar PTC/PT/PC é a própria
+    # convenção da Papyrus; quando não começa, o sufixo é o jeito de não colidir.
+    def custom_filename_base(kind)
+      name = sanitize_for_filename(docx_filename_override).to_s.sub(/\.docx\z/i, "").strip
+      return name if kind == "combined"
+      return name.sub(/\A(PTC|PT|PC)/i, DOCX_NUMERO_PREFIXES.fetch(kind, "PTC")) if name.match?(NUMBER_PREFIX)
+
+      "#{name}_#{kind == "tecnica" ? "Tecnica" : "Comercial"}"
+    end
+
     def sanitize_for_filename(text)
       text.to_s.gsub(%r{[/\\:*?"<>|]}, "-").presence
     end
