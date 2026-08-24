@@ -2,7 +2,25 @@ class Message < ApplicationRecord
   acts_as_message chat: :conversation
   has_many_attached :attachments
 
+  # Resultado bruto de uma tool call (SearchHistoricalArchiveTool, GenerateProposalDocumentTool
+  # etc.) nasce com role "tool" e internal: false por padrão — sem isso, visto na prática em
+  # produção, o JSON cru da ferramenta (ex.: os trechos do acervo histórico, com referência/
+  # similaridade/origem) aparecia como uma bolha própria no chat pro consultor, porque cai no
+  # fallback genérico de conversations/_message.html.erb que renderiza qualquer Hash em <dl>. A
+  # mensagem continua no histórico normalmente (a IA precisa dela pra escrever a resposta final
+  # citando a referência) — só não aparece pro consultor, igual às instruções internas de
+  # ask_internally (ver Conversation).
+  #
+  # before_save (não before_create): o ruby_llm persiste em duas etapas —
+  # ChatMethods#persist_new_message insere a linha já com role: :assistant (placeholder vazio,
+  # antes de saber o role final) e só depois #persist_message_completion faz um UPDATE trocando
+  # pra role: :tool quando é o caso. Um before_create nunca veria o role final, só o placeholder.
+  before_save :hide_tool_result!
+
   private
+    def hide_tool_result!
+      self.internal = true if role == "tool"
+    end
     # O KMZ é geoespacial (RGeo/PostGIS), não é lido pela IA (ver CLAUDE.md seção 3). Sem esse
     # filtro, o ruby_llm reenvia TODOS os anexos do histórico em toda chamada — e como o Gemini
     # não suporta o mime type do KMZ, isso quebra qualquer .ask()/.complete() posterior, mesmo

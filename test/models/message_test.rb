@@ -1,6 +1,25 @@
 require "test_helper"
 
 class MessageTest < ActiveSupport::TestCase
+  # Achado num caso real em produção: o resultado bruto de uma tool call (ex.: SearchHistorical
+  # ArchiveTool) aparecia como uma bolha própria de JSON no chat, porque a mensagem role "tool"
+  # nasce internal: false por padrão e cai no fallback genérico de _message.html.erb.
+  test "a message with role tool is automatically hidden from the visible chat" do
+    conversation = conversations(:reviewing_conversation)
+    message = conversation.messages.create!(role: "tool", content: '{"resultados": []}')
+
+    assert message.internal?
+  end
+
+  test "a message with role user or assistant is not hidden just for existing" do
+    conversation = conversations(:reviewing_conversation)
+    user_message = conversation.messages.create!(role: "user", content: "oi")
+    assistant_message = conversation.messages.create!(role: "assistant", content: "olá")
+
+    assert_not user_message.internal?
+    assert_not assistant_message.internal?
+  end
+
   test "to_llm content excludes kmz attachments (geoespacial, a IA não lê)" do
     message = messages(:reviewing_setup_message)
     message.attachments.attach(

@@ -98,6 +98,26 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal "both", second_p.at_xpath(".//w:pPr/w:jc", NS)["w:val"]
   end
 
+  # Achado na prática: só o parágrafo de OBJETIVO_SERVICOS tinha w:jc="both" no modelo — os de
+  # CARACTERIZACAO_EMPREENDIMENTO e ESCOPO_METODOLOGIA saíam alinhados à esquerda, fora do padrão
+  # visual do resto do documento (corrigido direto no .docx do modelo).
+  test "fill justifies Caracterização do Empreendimento and Escopo e Metodologia, same as Objetivo dos Serviços" do
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge(
+        "CARACTERIZACAO_EMPREENDIMENTO" => "Texto de caracterização do empreendimento.",
+        "ESCOPO_METODOLOGIA" => "Texto de escopo e metodologia."
+      ),
+      tables: @tables
+    )
+    doc = parsed_document(bytes)
+
+    caracterizacao_p = doc.xpath("//w:p[.//w:t[contains(text(), 'Texto de caracterização')]]", NS).first
+    escopo_p = doc.xpath("//w:p[.//w:t[contains(text(), 'Texto de escopo e metodologia')]]", NS).first
+
+    assert_equal "both", caracterizacao_p&.at_xpath(".//w:pPr/w:jc", NS)&.[]("w:val")
+    assert_equal "both", escopo_p&.at_xpath(".//w:pPr/w:jc", NS)&.[]("w:val")
+  end
+
   test "fill_table also fills the SUMÁRIO DE REVISÕES table (index 0), same as any other table" do
     tables = @tables.merge(0 => { rows: [ [ "01", "Ajuste de escopo", "18/08/2026" ] ] })
     bytes = @filler.fill(placeholders: @placeholders, tables: tables)
