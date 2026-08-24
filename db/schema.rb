@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_24_143856) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_24_150002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -219,6 +219,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_24_143856) do
     t.string "specialties"
     t.datetime "updated_at", null: false
     t.index ["active"], name: "index_professionals_on_active"
+  end
+
+  create_table "project_conflict_findings", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "project_conflict_id", null: false
+    t.bigint "project_finding_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_conflict_id", "project_finding_id"], name: "index_conflict_findings_uniqueness", unique: true
+    t.index ["project_conflict_id"], name: "index_project_conflict_findings_on_project_conflict_id"
+    t.index ["project_finding_id"], name: "index_project_conflict_findings_on_project_finding_id"
+  end
+
+  create_table "project_conflicts", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.string "field", null: false
+    t.text "resolution_note"
+    t.datetime "resolved_at"
+    t.bigint "resolved_by_id"
+    t.string "status", default: "open", null: false
+    t.text "summary", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "status"], name: "index_project_conflicts_on_conversation_id_and_status"
+    t.index ["conversation_id"], name: "index_project_conflicts_on_conversation_id"
+    t.index ["resolved_by_id"], name: "index_project_conflicts_on_resolved_by_id"
+  end
+
+  create_table "project_findings", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.text "excerpt"
+    t.string "field", null: false
+    t.string "locator"
+    t.string "nature", default: "fato", null: false
+    t.bigint "source_blob_id"
+    t.string "source_kind", null: false
+    t.string "status", default: "active", null: false
+    t.bigint "superseded_by_id"
+    t.datetime "updated_at", null: false
+    t.text "value", null: false
+    t.index ["conversation_id", "field", "status"], name: "index_project_findings_on_conversation_id_and_field_and_status"
+    t.index ["conversation_id"], name: "index_project_findings_on_conversation_id"
+    t.index ["source_blob_id"], name: "index_project_findings_on_source_blob_id"
+    t.index ["superseded_by_id"], name: "index_project_findings_on_superseded_by_id"
   end
 
   create_table "project_pricings", force: :cascade do |t|
@@ -471,6 +515,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_24_143856) do
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"
+  add_foreign_key "project_conflict_findings", "project_conflicts"
+  add_foreign_key "project_conflict_findings", "project_findings"
+  add_foreign_key "project_conflicts", "conversations"
+  add_foreign_key "project_conflicts", "users", column: "resolved_by_id"
+  add_foreign_key "project_findings", "active_storage_blobs", column: "source_blob_id"
+  add_foreign_key "project_findings", "conversations"
+  add_foreign_key "project_findings", "project_findings", column: "superseded_by_id"
   add_foreign_key "project_pricings", "proposals"
   add_foreign_key "proposal_professionals", "professionals"
   add_foreign_key "proposal_professionals", "project_pricings"

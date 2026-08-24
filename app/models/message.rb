@@ -17,6 +17,19 @@ class Message < ApplicationRecord
   # pra role: :tool quando é o caso. Um before_create nunca veria o role final, só o placeholder.
   before_save :hide_tool_result!
 
+  # Códigos de citação que a IA escreveu neste texto ("[F12]"), resolvidos para os achados reais
+  # desta conversa. Código que não corresponde a nenhum achado ativo daqui não vira citação: uma
+  # marca inventada renderizada como se fosse fonte é pior que nenhuma fonte (ver
+  # ApplicationHelper#render_markdown).
+  CITATION_PATTERN = /\[F(\d+)\]/
+
+  def cited_findings
+    ids = content.to_s.scan(CITATION_PATTERN).flatten.map(&:to_i).uniq
+    return ProjectFinding.none if ids.empty?
+
+    conversation.project_findings.active.where(id: ids).includes(:source_blob)
+  end
+
   private
     def hide_tool_result!
       self.internal = true if role == "tool"

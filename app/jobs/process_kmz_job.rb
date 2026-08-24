@@ -17,6 +17,7 @@ class ProcessKmzJob < ApplicationJob
       length_km: result.length_km, centroid: result.centroid, geometry: result.geometry
     )
     attach_area_image!(geospatial_result, result)
+    record_findings!(conversation, attachment, result)
 
     conversation.mark_step!("kmz", "done")
   rescue StandardError => e
@@ -27,6 +28,22 @@ class ProcessKmzJob < ApplicationJob
   end
 
   private
+    # Área e perímetro medidos entram como achado igual a qualquer outro — com source_kind
+    # "sistema", que é a fonte mais forte depois da decisão do consultor (ver ProjectFinding).
+    # É o que permite o sistema perceber sozinho que o TR declara uma área e o polígono mede
+    # outra: sem isso, a medição ficava só no resumo e ninguém comparava com o documento.
+    def record_findings!(conversation, attachment, result)
+      { "area_ha" => result.area_ha, "perimetro_km" => result.perimeter_km }.each do |field, value|
+        next if value.blank? || value.to_f.zero?
+
+        conversation.project_findings.create!(
+          field: field, value: value.to_f.round(2).to_s, nature: "fato", source_kind: "sistema",
+          source_blob: attachment.blob,
+          excerpt: "Medido pelo sistema a partir da geometria do KMZ (#{attachment.filename})."
+        )
+      end
+    end
+
     # Mapa real (satélite + geometria, via Mapbox) quando disponível; croqui SVG local como
     # reserva automática se a chave não estiver configurada ou a chamada falhar por qualquer motivo.
     def attach_area_image!(geospatial_result, result)

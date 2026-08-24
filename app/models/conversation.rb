@@ -2,6 +2,10 @@ class Conversation < ApplicationRecord
   acts_as_chat
 
   has_many :knowledge_notes, dependent: :destroy
+  # O entendimento estruturado do projeto (o que foi lido, onde, e com que grau de certeza) e as
+  # divergências entre documentos — ver ProjectFinding e ProjectConflict.
+  has_many :project_findings, dependent: :destroy
+  has_many :project_conflicts, dependent: :destroy
 
   STATUSES = %w[setup processing reviewing pricing completed].freeze
 
@@ -55,6 +59,14 @@ class Conversation < ApplicationRecord
       no card. Seja seletivo: registre no máximo o que for realmente reaproveitável, nunca fato
       pontual deste projeto nem algo que você deduziu sem confirmação. Quando o consultor
       corrigir você sobre um ponto que vale para próximos projetos, ofereça guardar.
+
+    - Citar a origem do que você afirma sobre ESTE projeto. Tudo que foi extraído dos documentos
+      desta proposta está listado no bloco [ACHADOS DESTA PROPOSTA], mais abaixo no histórico, cada
+      item com um código entre colchetes (ex.: [F12]). Sempre que afirmar algo que veio de um
+      desses achados, escreva o código logo depois da afirmação — o sistema transforma o código
+      num link que mostra ao consultor o trecho e o documento de onde aquilo saiu. Use SÓ códigos
+      que estão na lista: código inventado não vira link nenhum e a afirmação fica sem fonte.
+      Não cite código para o que você deduziu ou sugeriu — deixe claro no texto que é dedução sua.
 
     Qualquer pedido fora desse escopo (perguntas sem relação com este projeto ou com licenciamento
     ambiental, código, receitas, tarefas genéricas ou qualquer assunto alheio a este atendimento):
@@ -211,7 +223,9 @@ class Conversation < ApplicationRecord
   # ainda no sistema).
   def refresh_proposal_state_snapshot!
     messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
-    snapshot = create_user_message(proposal.present? ? proposal_state_text : no_proposal_state_text)
+    text = [ proposal.present? ? proposal_state_text : no_proposal_state_text,
+             findings_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
+    snapshot = create_user_message(text)
     snapshot.update!(internal: true)
   end
 
@@ -298,6 +312,37 @@ class Conversation < ApplicationRecord
 
     def merge_processing_steps!(patch)
       self.class.where(id: id).update_all([ "processing_steps = processing_steps || ?::jsonb", patch.to_json ])
+    end
+
+    # O que foi extraído dos documentos desta proposta, com o código de citação de cada item.
+    # Sem o trecho de propósito: repeti-lo a cada turno custaria contexto para algo que só o
+    # consultor precisa ver, e ele vê ao clicar no código.
+    def findings_snapshot_text
+      findings = project_findings.active.includes(:source_blob).order(:field, :id)
+      return "" if findings.empty?
+
+      <<~TEXT
+        [ACHADOS DESTA PROPOSTA] (extraídos dos documentos por você mesmo, com a origem registrada;
+        cite o código entre colchetes ao afirmar qualquer um deles):
+        #{findings.map(&:to_context_line).join("\n")}
+      TEXT
+    end
+
+    # Divergência aberta não bloqueia nada — mas a IA precisa saber que existe, senão escolhe um
+    # dos valores por conta própria e o consultor nunca fica sabendo que havia dois.
+    def conflicts_snapshot_text
+      conflicts = project_conflicts.open.includes(findings: :source_blob)
+      return "" if conflicts.empty?
+
+      <<~TEXT
+        [DIVERGÊNCIAS ABERTAS ENTRE OS DOCUMENTOS] (o consultor ainda não decidiu qual valor vale):
+        #{conflicts.map(&:to_context_line).join("\n")}
+
+        NUNCA escolha um dos valores sozinho e nunca apresente um deles como se fosse o único.
+        Ao escrever qualquer seção que dependa de um desses pontos, trate a divergência como
+        ressalva no texto — cobrindo os dois cenários ou marcando "A confirmar com o cliente",
+        mesma regra que já vale para dado incerto. Isso NÃO impede gerar a proposta.
+      TEXT
     end
 
     def no_proposal_state_text

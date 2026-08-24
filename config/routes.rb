@@ -13,6 +13,13 @@ Rails.application.routes.draw do
       end
     end
 
+    resources :project_conflicts, only: [] do
+      member do
+        post :resolve
+        post :dismiss
+      end
+    end
+
     resource :proposal, only: %i[show create update] do
       post :approve
       post :add_external_cost

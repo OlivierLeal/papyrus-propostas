@@ -50,6 +50,27 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "combined", proposal.reload.document_split
   end
 
+  # A linha fora do cadastro continua fora da precificação, mas para de sumir em silêncio: ou
+  # falta cadastro, ou a IA inventou, e as duas coisas são informação para o consultor.
+  test "build_with_ai_suggested_team! sinaliza a linha que ficou fora do cadastro" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    ai_response = {
+      linhas: [
+        { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", hours_office: 60, hours_field: 0 },
+        { professional_id: 999_999, deliverable_name: "Arqueólogo sênior", hours_office: 100, hours_field: 100 }
+      ],
+      documentos_separados: false
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    flag = @conversation.project_findings.find_by(nature: "sugestao")
+    assert_includes flag.value, "fora do cadastro"
+    assert_includes flag.value, "Arqueólogo sênior"
+    assert_equal "sistema", flag.source_kind
+  end
+
   test "build_with_ai_suggested_team! sets document_split to separated when the AI flags it" do
     proposal = @conversation.create_proposal!(status: "draft")
 

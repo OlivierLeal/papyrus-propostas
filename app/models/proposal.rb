@@ -185,7 +185,11 @@ class Proposal < ApplicationRecord
       lines.each do |line|
         key = [ line["professional_id"].to_i, line["deliverable_name"].to_s.strip.downcase ]
         template = valid_templates[key]
-        next unless template
+        # A regra determinística continua: linha fora do cadastro NÃO entra na precificação. O que
+        # mudou é que ela para de sumir em silêncio — a IA ter sugerido um profissional ou
+        # entregável que não existe é informação para o consultor (ou falta cadastro, ou a IA
+        # inventou), não um detalhe de implementação.
+        next flag_out_of_catalog(line) unless template
 
         hours_office = line["hours_office"].to_f
         hours_field = line["hours_field"].to_f
@@ -198,6 +202,21 @@ class Proposal < ApplicationRecord
           hours_field: hours_field
         )
       end
+    end
+
+    def flag_out_of_catalog(line)
+      professional = Professional.find_by(id: line["professional_id"])
+      descricao = [ professional&.name || "profissional ##{line['professional_id']}",
+                    line["deliverable_name"].presence ].compact_blank.join(" — ")
+
+      conversation.project_findings.create!(
+        field: "outro", nature: "sugestao", source_kind: "sistema",
+        value: "sugestão de equipe fora do cadastro: #{descricao}",
+        excerpt: "A IA sugeriu esta linha para a equipe, mas ela não existe nos modelos de horas " \
+                 "cadastrados para o tipo de estudo. Não entrou na precificação."
+      )
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.warn("[Proposal] não consegui registrar sugestão fora do cadastro: #{e.message}")
     end
 
     def template_fallback_lines(templates)

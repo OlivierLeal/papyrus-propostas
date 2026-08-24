@@ -331,4 +331,70 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
   rodar as consultas de controle da tabela em `Rag::SimilarJobFinder`: quatro que devem achar um
   job específico e quatro que não devem achar nada — inclusive uma fora do domínio e uma frase
   genérica do próprio domínio, que é a que engana.
+- Achados e divergências (seção 13): informação sobre o projeto só entra no sistema como
+  `ProjectFinding`, com origem e natureza — nunca como JSON solto numa mensagem do assistente para
+  ser reparseado depois. Ao acrescentar um campo novo, acrescentá-lo ao menu `ProjectFinding::
+  FIELDS`, decidindo se ele é `comparable:` (entra na detecção de divergência) — lista acumulativa
+  nunca é. Decisão do consultor sobre divergência é sempre um achado novo, nunca um update no que
+  o documento disse.
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
+
+---
+
+## 13. Achados, evidência e divergências (base da arquitetura agêntica)
+
+A Papyrus trouxe um documento de arquitetura ("Inteligência Agêntica", 30 seções) propondo evoluir
+o sistema de IA+RAG para um agente que investiga, cruza fontes, critica as próprias conclusões e
+mantém rastreabilidade. **Implementada até agora a fundação** — seções 7, 8, 9, 13 e 16 daquele
+documento. O resto (crítica automática, investigação iterativa, aprendizado com correções, banco
+como fonte consultável) fica para depois, e depende desta base existir.
+
+### O problema que isso resolve
+
+O entendimento do projeto não existia como dado: era JSON solto dentro de mensagens do assistente,
+reparseado a cada uso. Servia para montar um resumo, mas não respondia "por que você concluiu
+isso?", e não havia como comparar o que dois documentos dizem sobre a mesma coisa.
+
+### `project_findings` — informação com origem
+
+Cada informação extraída do TR ou de um complementar vira uma linha: `field` (menu fechado em
+`ProjectFinding::FIELDS`), `value`, `nature` (`fato` | `inferencia` | `sugestao`), `source_kind`
+(`consultor` > `sistema` > `tr` > `complementar`, nessa ordem de autoridade), o blob do documento
+de origem, o `excerpt` (trecho literal, teto de 300 caracteres) e o `locator`.
+
+- A extração (`ProcessTrJob`, `ProcessCompDocsJob`) pede uma **lista de achados** em vez de um
+  hash de campos, e grava via `ProjectFindings::Recorder`. Continua **uma chamada de IA por
+  documento** — mudou o formato, não a quantidade.
+- Campo fora do menu vira `outro` (com o rótulo preservado no valor), nunca chave nova. Natureza
+  ilegível vira `inferencia`, nunca `fato`: na dúvida, tratar como dedução é o erro barato.
+- `ProcessKmzJob` grava área e perímetro medidos como achados `source_kind: "sistema"`, sem IA.
+- Quem consome: `ProcessTrJob#assign_study_type!`, `GenerateSummaryJob` (resumo e descritor de
+  serviço do RAG) e o snapshot que a IA lê a cada turno.
+
+### Citação inline (`[F12]`)
+
+Cada achado tem um código (`ProjectFinding#citation_code`). A IA recebe a lista no bloco
+`[ACHADOS DESTA PROPOSTA]` do snapshot (sem o trecho — ele custaria contexto a cada turno) e cita o
+código ao afirmar algo. `ApplicationHelper#render_markdown` troca o código por um chip que abre o
+trecho e o documento de origem, **depois** do sanitize. **Código sem achado correspondente é
+removido do texto**: marca inventada renderizada como fonte é pior que nenhuma fonte.
+
+### `project_conflicts` — divergência entre documentos
+
+`ProjectFindings::ConflictDetector` roda no `GenerateSummaryJob` (único ponto depois de TR, KMZ e
+complementares terminarem). A ordem das etapas é o que segura custo e precisão: só campo
+comparável, só entre fontes diferentes, igualdade textual e comparação numérica (tolerância de 2%)
+resolvem sem IA, e só o que sobra vai numa **única** chamada em lote para julgar se a diferença é
+de grafia ou de conteúdo. Veredito ilegível conta como equivalente.
+
+Divergência **sinaliza, não bloqueia**: vira card no chat, entra no resumo e no bloco
+`[DIVERGÊNCIAS ABERTAS]` do snapshot, com a instrução de escrever ressalva em vez de escolher um
+lado. Resolver (`ProjectConflictsController#resolve`) **cria um achado novo** com
+`source_kind: "consultor"` e marca os divergentes como `superseded` — a decisão humana vira dado,
+e o rastro da divergência não se perde.
+
+### Sugestão fora do cadastro
+
+`Proposal#apply_lines!` continua descartando linha de equipe que não existe em `study_templates`,
+mas agora registra um achado `sugestao` dizendo o que foi descartado — ou falta cadastro, ou a IA
+inventou, e as duas coisas são informação para o consultor.

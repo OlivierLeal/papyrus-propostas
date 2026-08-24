@@ -6,6 +6,12 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "summary" => "queued" })
   end
 
+  def record_finding!(field:, value:, source_kind: "tr", nature: "fato", excerpt: nil)
+    @conversation.project_findings.create!(
+      field: field, value: value, source_kind: source_kind, nature: nature, excerpt: excerpt
+    )
+  end
+
   test "asks the AI for a summary, marks summary done and moves status to reviewing" do
     stub_ai_complete("# RESUMO ESTRUTURADO\n\nTudo certo.") { GenerateSummaryJob.perform_now(@conversation.id) }
 
@@ -24,29 +30,52 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     assert_not reply.internal?
   end
 
-  test "includes parsed JSON findings from prior assistant messages in the prompt" do
-    @conversation.messages.create!(role: "assistant", content: '{"tipo_licenca": "LP", "diagnosticos": ["fauna", "flora"]}', internal: true)
-
-    sent_prompt = nil
-    stub_ai_complete("ok") do
-      GenerateSummaryJob.perform_now(@conversation.id)
-    end
-    # A instrução enviada é a última mensagem "user" internal antes da resposta.
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
-
-    assert_includes sent_prompt, "tipo_licenca: LP"
-    assert_includes sent_prompt, "diagnosticos: fauna; flora"
-  end
-
-  test "ignores prior assistant messages whose content isn't valid JSON" do
-    @conversation.messages.create!(role: "assistant", content: "isso não é json, é texto livre", internal: true)
-    @conversation.messages.create!(role: "assistant", content: '{"tipo_licenca": "LP"}', internal: true)
+  test "includes the recorded findings, with their citation codes, in the prompt" do
+    finding = record_finding!(field: "tipo_licenca", value: "LP")
 
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
     sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
 
-    assert_includes sent_prompt, "tipo_licenca: LP"
+    assert_includes sent_prompt, "Tipo de licença"
+    assert_includes sent_prompt, "[#{finding.citation_code}] Tipo de licença: LP"
+  end
+
+  # O resumo é montado a partir dos achados registrados, não do texto solto que a IA escreveu
+  # antes no chat — era daí que vinha a informação sem origem.
+  test "builds the summary from findings, not from free assistant text" do
+    @conversation.messages.create!(role: "assistant", content: "isso não é json, é texto livre", internal: true)
+    record_finding!(field: "tipo_licenca", value: "LP")
+
+    stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
+    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+
+    assert_includes sent_prompt, "Tipo de licença: LP"
     assert_not_includes sent_prompt, "isso não é json"
+  end
+
+  # O trecho fica FORA do prompt de propósito: ele é para o consultor conferir no chip, e repeti-lo
+  # a cada turno custaria contexto.
+  test "the prompt carries the citation code but not the excerpt" do
+    record_finding!(field: "orgao_ambiental", value: "INEMA", excerpt: "...protocolo junto ao INEMA, conforme...")
+
+    stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
+    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+
+    assert_not_includes sent_prompt, "protocolo junto ao INEMA"
+  end
+
+  test "opens a card in the chat for each divergence found between documents" do
+    record_finding!(field: "area_ha", value: "500", source_kind: "tr")
+    record_finding!(field: "area_ha", value: "620", source_kind: "sistema")
+
+    stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
+
+    conflict = @conversation.project_conflicts.sole
+    assert_equal "open", conflict.status
+    assert_includes @conversation.messages.map(&:content), { project_conflict_id: conflict.id }.to_json
+
+    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    assert_includes sent_prompt, "DIVERGÊNCIAS ENTRE OS DOCUMENTOS"
   end
 
   test "includes the geospatial summary in the prompt when a GeospatialResult exists" do
@@ -86,12 +115,15 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
   # vocabulário de carta que puxava a recuperação para a CAPA das propostas antigas.
   test "a busca no acervo usa só os campos que descrevem o serviço" do
     @conversation.update!(client_name: "Rio Energy", study_type: study_types(:eia_rima))
-    @conversation.messages.create!(role: "assistant", internal: true, content: {
-      tipo_licenca: "Licença Unificada (LU)", orgao_ambiental: "INEMA",
-      empreendimento: "sistema de armazenamento de energia em baterias (BESS)",
-      municipios: [ "Morro do Chapéu" ], diagnosticos: [ "fauna", "flora" ],
-      resumo: "Encaminhamento via Charlene Luz da solicitação de Guilherme Altino (Rio Energy)"
-    }.to_json)
+    record_finding!(field: "tipo_licenca", value: "Licença Unificada (LU)")
+    record_finding!(field: "orgao_ambiental", value: "INEMA")
+    record_finding!(field: "empreendimento", value: "sistema de armazenamento de energia em baterias (BESS)")
+    record_finding!(field: "municipios", value: "Morro do Chapéu")
+    record_finding!(field: "diagnosticos", value: "fauna")
+    record_finding!(field: "diagnosticos", value: "flora")
+    # O tipo do documento complementar (carta de encaminhamento) cai em "outro", que fica fora do
+    # descritor justamente por ser vocabulário de carta.
+    record_finding!(field: "outro", value: "Encaminhamento via Charlene Luz da solicitação de Guilherme Altino (Rio Energy)")
 
     context = GenerateSummaryJob.new.send(:search_context, @conversation.reload)
 
@@ -104,9 +136,8 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
   end
 
   test "cada campo do descritor tem orçamento próprio, em vez de um corte cego no fim" do
-    @conversation.messages.create!(role: "assistant", internal: true, content: {
-      empreendimento: "x" * 1000, ressalvas: [ "não há supressão de vegetação" ]
-    }.to_json)
+    record_finding!(field: "empreendimento", value: "x" * 1000)
+    record_finding!(field: "ressalvas", value: "não há supressão de vegetação")
 
     context = GenerateSummaryJob.new.send(:search_context, @conversation.reload)
 

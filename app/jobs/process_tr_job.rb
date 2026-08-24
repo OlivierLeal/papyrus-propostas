@@ -18,6 +18,7 @@ class ProcessTrJob < ApplicationJob
       with: prepared.attachments,
       hide_response: true
     )
+    record_findings!(conversation, attachments)
     assign_study_type!(conversation)
     conversation.mark_step!("tr", "done")
   rescue StandardError => e
@@ -40,23 +41,24 @@ class ProcessTrJob < ApplicationJob
     # nunca inventar um tipo de estudo novo.
     def prompt
       menu = StudyType.order(:name).map { |t| "- código: #{t.code} | #{t.name}" }.join("\n")
+      fields = ProjectFinding::FIELDS.map { |key, config| "- #{key}: #{config[:label]}" }.join("\n")
 
       <<~TEXT
         Você é um assistente que analisa Termos de Referência (TR) de licenciamento ambiental. Pode
         haver mais de um arquivo anexado (ex.: o TR principal e anexos/exhibits) — leia todos juntos,
-        como um só documento, e responda APENAS com um JSON válido (sem markdown, sem texto antes ou
-        depois), exatamente neste formato:
+        como um só documento.
 
-        {
-          "tipo_licenca": "...",
-          "tipo_estudo_codigo": "...",
-          "orgao_ambiental": "...",
-          "municipios": ["..."],
-          "empreendimento": "...",
-          "diagnosticos": ["..."],
-          "condicionantes": ["..."],
-          "ressalvas": ["..."]
-        }
+        Devolva o que você encontrou como uma LISTA DE ACHADOS. Cada achado é uma informação com a
+        prova de onde ela saiu: o campo, o valor, se aquilo está escrito no documento ou foi você
+        que deduziu, o trecho literal e onde ele está.
+
+        Campos disponíveis (use exatamente estas chaves; o que não couber em nenhuma delas use
+        "outro", com o nome do assunto no campo "valor"):
+        #{fields}
+
+        Para "tipo_estudo", o valor deve ser o CÓDIGO EXATO de um dos tipos cadastrados abaixo,
+        nunca um tipo inventado. Se o TR não deixar claro qual se aplica, não gere esse achado:
+        #{menu}
 
         Em "empreendimento", descreva O QUE está sendo licenciado em uma ou duas frases: tipo de
         empreendimento, tecnologia e porte (ex.: "usina fotovoltaica de 200 MW", "sistema de
@@ -64,24 +66,55 @@ class ProcessTrJob < ApplicationJob
         de 230 kV com 40 km"). É por esse campo que o sistema procura projetos semelhantes no
         acervo, então descreva o empreendimento — nunca o cliente, o contato ou o prazo.
 
-        Tipos de estudo cadastrados no sistema (responda "tipo_estudo_codigo" com o código exato de
-        UM destes, nunca invente um tipo novo; se o TR não deixar claro qual se aplica, use ""):
-        #{menu}
+        Campos de lista (diagnosticos, condicionantes, ressalvas, produtos, municipios) devem virar
+        UM ACHADO POR ITEM, cada um com o seu próprio trecho — não junte tudo num valor só.
 
-        Se alguma outra informação não estiver disponível no TR, use uma lista vazia ou string vazia — nunca invente.
+        "natureza" é uma de:
+        - "fato": está escrito no documento. Só use quando o trecho comprovar o valor.
+        - "inferencia": você concluiu juntando informações, mas o documento não diz isso com todas
+          as letras.
+        - "sugestao": recomendação sua, não uma informação do documento.
+
+        "trecho" deve ser texto COPIADO do documento, palavra por palavra, curto (até 300
+        caracteres). Nunca parafraseie nem invente um trecho: ele é mostrado ao consultor para ele
+        conferir. Achado de natureza "inferencia" ou "sugestao" pode vir sem trecho.
+
+        Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
+        neste formato:
+
+        {
+          "achados": [
+            {
+              "campo": "tipo_licenca",
+              "valor": "Licença Prévia",
+              "natureza": "fato",
+              "trecho": "...para obtenção da Licença Prévia junto ao órgão estadual...",
+              "local": "item 3.1"
+            }
+          ]
+        }
+
+        Se o TR não trouxer alguma informação, simplesmente não gere achado para ela — nunca invente.
       TEXT
+    end
+
+    # Grava os achados com o documento de origem. Vários anexos entram como um documento só para a
+    # IA (é assim que o TR é lido), então o blob registrado é o do arquivo principal — o trecho e o
+    # "local" continuam apontando onde conferir dentro dele.
+    def record_findings!(conversation, attachments)
+      reply = conversation.messages.where(role: "assistant").order(:created_at).last
+      return unless reply
+
+      ProjectFindings::Recorder.new(
+        conversation, source_kind: "tr", source_blob: attachments.first&.blob
+      ).call(AiJsonResponse.parse(reply.content))
     end
 
     def assign_study_type!(conversation)
       return if conversation.study_type_id.present?
 
-      reply = conversation.messages.where(role: "assistant").order(:created_at).last
-      return unless reply
-
-      parsed = AiJsonResponse.parse(reply.content)
-      return unless parsed
-
-      study_type = StudyType.find_by(code: parsed["tipo_estudo_codigo"])
+      codes = conversation.project_findings.active.where(field: "tipo_estudo").pluck(:value)
+      study_type = codes.filter_map { |code| StudyType.find_by(code: code.to_s.strip) }.first
       conversation.update!(study_type: study_type) if study_type
     end
 end

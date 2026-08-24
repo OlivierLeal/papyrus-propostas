@@ -34,6 +34,11 @@
             <% end %>
           </ul>
         </div>
+      <% elsif parsed_content.is_a?(Hash) && parsed_content["project_conflict_id"].present? %>
+        <% conflict = ProjectConflict.find_by(id: parsed_content["project_conflict_id"]) %>
+        <% if conflict %>
+          <%= render "project_conflicts/conflict", conflict: conflict %>
+        <% end %>
       <% elsif parsed_content.is_a?(Hash) && parsed_content["knowledge_note_id"].present? %>
         <% note = KnowledgeNote.find_by(id: parsed_content["knowledge_note_id"]) %>
         <% if note %>
@@ -66,7 +71,11 @@
           <% end %>
         </dl>
       <% elsif message.content.present? %>
-        <%= tag.div render_markdown(message.content), class: "markdown-content", data: (animate ? { controller: "typewriter" } : {}) %>
+        <% cited = message.cited_findings %>
+        <%= tag.div render_markdown(message.content, findings: cited), class: "markdown-content", data: (animate ? { controller: "typewriter" } : {}) %>
+        <%# Fora do elemento animado de propósito: o typewriter revela nó de texto por nó de texto
+            e engoliria o conteúdo do popover junto. %>
+        <%= render_citation_popovers(cited) %>
       <% else %>
         <span class="italic opacity-60">(sem conteúdo)</span>
       <% end %>

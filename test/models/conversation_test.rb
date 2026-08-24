@@ -157,4 +157,45 @@ class ConversationTest < ActiveSupport::TestCase
     assert_equal 1, markers.count
     assert_includes markers.first.content, "Preço total calculado"
   end
+
+  # O que a IA sabe sobre o projeto tem que caber num lugar só, reconstruído a cada turno — senão
+  # ela cita achado que já foi superado ou ignora divergência que o consultor ainda não decidiu.
+  test "refresh_proposal_state_snapshot! carries the findings with their citation codes" do
+    conversation = conversations(:reviewing_conversation)
+    finding = conversation.project_findings.create!(
+      field: "orgao_ambiental", value: "INEMA", nature: "fato", source_kind: "tr",
+      excerpt: "...protocolo junto ao INEMA..."
+    )
+
+    conversation.refresh_proposal_state_snapshot!
+    marker = conversation.messages.where(role: "user", internal: true).last
+
+    assert_includes marker.content, "[ACHADOS DESTA PROPOSTA]"
+    assert_includes marker.content, "[#{finding.citation_code}] Órgão ambiental: INEMA"
+    assert_not_includes marker.content, "protocolo junto ao INEMA", "o trecho é para o consultor ver no chip, não para gastar contexto a cada turno"
+  end
+
+  test "refresh_proposal_state_snapshot! tells the AI to treat an open divergence as a caveat, never to pick a side" do
+    conversation = conversations(:reviewing_conversation)
+    tr = conversation.project_findings.create!(field: "area_ha", value: "500", nature: "fato", source_kind: "tr")
+    kmz = conversation.project_findings.create!(field: "area_ha", value: "620", nature: "fato", source_kind: "sistema")
+    conflict = conversation.project_conflicts.create!(field: "area_ha", summary: "Áreas diferentes.")
+    [ tr, kmz ].each { |f| conflict.project_conflict_findings.create!(project_finding: f) }
+
+    conversation.refresh_proposal_state_snapshot!
+    marker = conversation.messages.where(role: "user", internal: true).last
+
+    assert_includes marker.content, "[DIVERGÊNCIAS ABERTAS ENTRE OS DOCUMENTOS]"
+    assert_includes marker.content, "NUNCA escolha um dos valores sozinho"
+    assert_includes marker.content, "Isso NÃO impede gerar a proposta."
+  end
+
+  test "a divergence already decided leaves the snapshot" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.project_conflicts.create!(field: "area_ha", summary: "Áreas diferentes.", status: "dismissed")
+
+    conversation.refresh_proposal_state_snapshot!
+
+    assert_not_includes conversation.messages.where(role: "user", internal: true).last.content, "DIVERGÊNCIAS ABERTAS"
+  end
 end

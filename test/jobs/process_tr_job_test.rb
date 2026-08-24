@@ -5,6 +5,37 @@ class ProcessTrJobTest < ActiveSupport::TestCase
     @conversation = conversations(:processing_conversation)
   end
 
+  # A extração devolve uma lista de achados, cada um com a prova de onde saiu (ver
+  # ProjectFindings::Recorder).
+  def tr_reply(campo:, valor:, natureza: "fato", trecho: "trecho literal do TR", local: "item 3.1")
+    { achados: [ { campo: campo, valor: valor, natureza: natureza, trecho: trecho, local: local } ] }.to_json
+  end
+
+  def attach_tr!(filename: "tr.pdf")
+    message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("%PDF-1.4"), filename: filename, content_type: "application/pdf", metadata: { kind: "tr" }
+    )
+    message
+  end
+
+  test "records each finding with its evidence and the document it came from" do
+    attach_tr!
+
+    stub_ai_complete(tr_reply(campo: "orgao_ambiental", valor: "INEMA", trecho: "...protocolo junto ao INEMA...", local: "item 2")) do
+      ProcessTrJob.perform_now(@conversation.id)
+    end
+
+    finding = @conversation.project_findings.sole
+    assert_equal "orgao_ambiental", finding.field
+    assert_equal "INEMA", finding.value
+    assert_equal "fato", finding.nature
+    assert_equal "tr", finding.source_kind
+    assert_equal "item 2", finding.locator
+    assert_includes finding.excerpt, "INEMA"
+    assert_equal "tr.pdf", finding.document_name
+  end
+
   test "marks tr as skipped and still checks completion when there is no TR attachment" do
     # processing_conversation já tem comp_docs: skipped — sem TR anexado, os dois passos resolvem
     # e check_processing_complete! deve disparar o GenerateSummaryJob (sem executá-lo de verdade).
@@ -22,7 +53,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
       metadata: { kind: "tr" }
     )
 
-    stub_ai_complete('{"tipo_licenca": "LP"}') { ProcessTrJob.perform_now(@conversation.id) }
+    stub_ai_complete(tr_reply(campo: "tipo_licenca", valor: "LP")) { ProcessTrJob.perform_now(@conversation.id) }
 
     @conversation.reload
     assert_equal "done", @conversation.processing_step_status("tr")
@@ -43,7 +74,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
       io: StringIO.new("%PDF-1.4"), filename: "anexo_tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
     )
 
-    stub_ai_complete('{"tipo_licenca": "LP"}') { ProcessTrJob.perform_now(@conversation.id) }
+    stub_ai_complete(tr_reply(campo: "tipo_licenca", valor: "LP")) { ProcessTrJob.perform_now(@conversation.id) }
 
     @conversation.reload
     assert_equal "done", @conversation.processing_step_status("tr")
@@ -59,7 +90,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
       io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
     )
 
-    stub_ai_complete('{"tipo_estudo_codigo": "eia_rima"}') { ProcessTrJob.perform_now(@conversation.id) }
+    stub_ai_complete(tr_reply(campo: "tipo_estudo", valor: "eia_rima")) { ProcessTrJob.perform_now(@conversation.id) }
 
     assert_equal study_types(:eia_rima), @conversation.reload.study_type
   end
@@ -70,7 +101,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
       io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
     )
 
-    stub_ai_complete('{"tipo_estudo_codigo": "eia_rima"}') { ProcessTrJob.perform_now(@conversation.id) }
+    stub_ai_complete(tr_reply(campo: "tipo_estudo", valor: "eia_rima")) { ProcessTrJob.perform_now(@conversation.id) }
     sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
 
     assert_includes sent_prompt, "código: eia_rima"
@@ -87,7 +118,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
       io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
     )
 
-    fenced_reply = "```json\n{\"tipo_estudo_codigo\": \"eia_rima\"}\n```"
+    fenced_reply = "```json\n#{tr_reply(campo: "tipo_estudo", valor: "eia_rima")}\n```"
     stub_ai_complete(fenced_reply) { ProcessTrJob.perform_now(@conversation.id) }
 
     assert_equal study_types(:eia_rima), @conversation.reload.study_type
@@ -100,7 +131,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
       io: StringIO.new("%PDF-1.4"), filename: "tr.pdf", content_type: "application/pdf", metadata: { kind: "tr" }
     )
 
-    stub_ai_complete('{"tipo_estudo_codigo": "tipo_que_nao_existe"}') { ProcessTrJob.perform_now(@conversation.id) }
+    stub_ai_complete(tr_reply(campo: "tipo_estudo", valor: "tipo_que_nao_existe")) { ProcessTrJob.perform_now(@conversation.id) }
 
     assert_nil @conversation.reload.study_type_id
   end

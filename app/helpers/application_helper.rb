@@ -11,9 +11,26 @@ module ApplicationHelper
   MARKDOWN_ALLOWED_TAGS = %w[p br strong em ul ol li h1 h2 h3 h4 h5 h6 a code pre blockquote table thead tbody tr td th hr del].freeze
   MARKDOWN_ALLOWED_ATTRIBUTES = %w[href rel target].freeze
 
-  def render_markdown(text)
-    sanitize(MARKDOWN_RENDERER.render(normalize_markdown_lists(text.to_s)),
+  # findings: achados desta conversa que o texto cita por código (ver Message#cited_findings).
+  # Cada "[F12]" vira um botão que abre o popover com o trecho e o documento de origem — é assim
+  # que o consultor consegue perguntar "por que você concluiu isso?" sem sair do chat.
+  #
+  # A substituição acontece DEPOIS do sanitize de propósito: o token é texto puro e atravessa o
+  # Redcarpet e o sanitize intacto, e a marcação do chip é montada aqui no servidor, escapando o
+  # que veio da IA. Código sem achado correspondente é REMOVIDO — deixá-lo visível daria à
+  # afirmação uma aparência de fonte que ela não tem.
+  def render_markdown(text, findings: nil)
+    html = sanitize(MARKDOWN_RENDERER.render(normalize_markdown_lists(text.to_s)),
       tags: MARKDOWN_ALLOWED_TAGS, attributes: MARKDOWN_ALLOWED_ATTRIBUTES)
+
+    by_id = Array(findings).index_by(&:id)
+    html.gsub(Message::CITATION_PATTERN) { citation_chip(by_id[Regexp.last_match(1).to_i]) }.html_safe
+  end
+
+  # Os popovers dos achados citados numa mensagem. Ficam fora do elemento animado pelo typewriter
+  # (ver conversations/_message.html.erb).
+  def render_citation_popovers(findings)
+    safe_join(Array(findings).map { |finding| citation_popover(finding) })
   end
 
   ICON_USUARIOS = "M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z"
@@ -52,6 +69,29 @@ module ApplicationHelper
   end
 
   private
+    # Sem achado correspondente, a marca simplesmente some do texto.
+    def citation_chip(finding)
+      return "" unless finding
+
+      tag.button(finding.citation_code,
+        type: "button",
+        popovertarget: dom_id(finding, :citation),
+        class: "align-baseline mx-0.5 px-1.5 rounded-selector bg-primary/10 text-primary text-[0.7rem] font-medium hover:bg-primary/20 cursor-pointer",
+        title: "Ver de onde saiu esta informação")
+    end
+
+    def citation_popover(finding)
+      tag.div(id: dom_id(finding, :citation), popover: "auto",
+              class: "rounded-box border border-base-300 bg-base-100 shadow-lg p-4 max-w-md text-sm") do
+        safe_join([
+          tag.p("#{finding.citation_code} · #{finding.field_label}", class: "font-semibold text-base-content"),
+          tag.p(finding.value, class: "text-base-content mt-1"),
+          finding.excerpt.present? ? tag.blockquote("“#{finding.excerpt}”", class: "text-base-content/70 italic mt-2") : nil,
+          tag.p("#{finding.nature_label} · #{finding.origin_label}", class: "text-xs text-base-content/50 mt-2")
+        ].compact)
+      end
+    end
+
     # A IA raramente deixa uma linha em branco antes de uma lista (ex.: "**Título:**\n* item"),
     # e sem essa linha em branco o Redcarpet não reconhece o bloco como lista. Insere a linha em
     # branco só na transição pra dentro da lista, sem mexer no espaçamento entre os itens.
