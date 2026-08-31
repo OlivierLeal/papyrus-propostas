@@ -47,59 +47,75 @@
       <p class="text-xs text-base-content/50 mb-4">Todos opcionais aqui — dá pra enviar depois, direto no chat.</p>
 
       <div class="flex flex-col gap-3">
-        <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
-          <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-              <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm4.75 6.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V9.25a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium text-base-content">ET — Pedido Técnico do Estudo</p>
-            <p class="text-xs text-base-content/50">O que o cliente está pedindo — documento principal, PDF ou DOCX, pode escolher vários</p>
-          </div>
-          <input type="file" name="et[]" multiple accept=".pdf,.doc,.docx" class="file-input file-input-sm file-input-bordered">
-        </label>
+        <div data-controller="file-list">
+          <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
+            <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+                <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm4.75 6.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V9.25a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-base-content">ET — Pedido Técnico do Estudo</p>
+              <p class="text-xs text-base-content/50">O que o cliente está pedindo — documento principal, PDF ou DOCX, pode escolher vários</p>
+            </div>
+            <input type="file" name="et[]" multiple accept=".pdf,.doc,.docx" class="file-input file-input-sm file-input-bordered"
+                   data-file-list-target="input" data-action="change->file-list#update">
+          </label>
+          <div class="flex flex-wrap gap-1.5 mt-2 px-1 hidden" data-file-list-target="list"></div>
+        </div>
 
-        <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
-          <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-              <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm4.75 6.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V9.25a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium text-base-content">TR — Termo de Referência</p>
-            <p class="text-xs text-base-content/50">Opcional — documento do órgão ambiental/instituição, guia de como executar o ET, quando o cliente já tiver</p>
-          </div>
-          <input type="file" name="tr[]" multiple accept=".pdf,.doc,.docx" class="file-input file-input-sm file-input-bordered">
-        </label>
+        <div data-controller="file-list">
+          <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
+            <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+                <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.378 2H4.5Zm4.75 6.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V9.25a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-base-content">TR — Termo de Referência</p>
+              <p class="text-xs text-base-content/50">Opcional — documento do órgão ambiental/instituição, guia de como executar o ET, quando o cliente já tiver</p>
+            </div>
+            <input type="file" name="tr[]" multiple accept=".pdf,.doc,.docx" class="file-input file-input-sm file-input-bordered"
+                   data-file-list-target="input" data-action="change->file-list#update">
+          </label>
+          <div class="flex flex-wrap gap-1.5 mt-2 px-1 hidden" data-file-list-target="list"></div>
+        </div>
 
-        <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
-          <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-              <path fill-rule="evenodd" d="M9.69 18.933 5.5 15.75l-2.79-2.09a1.5 1.5 0 0 1 0-2.4l2.79-2.09 4.19-3.183a1.5 1.5 0 0 1 1.82 0l4.19 3.183 2.79 2.09a1.5 1.5 0 0 1 0 2.4l-2.79 2.09-4.19 3.183a1.5 1.5 0 0 1-1.82 0Z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium text-base-content">Área de estudo (KMZ)</p>
-            <p class="text-xs text-base-content/50">.kmz ou .kml</p>
-          </div>
-          <input type="file" name="kmz" multiple accept=".kmz,.kml" class="file-input file-input-sm file-input-bordered">
-        </label>
+        <div data-controller="file-list">
+          <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
+            <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+                <path fill-rule="evenodd" d="M9.69 18.933 5.5 15.75l-2.79-2.09a1.5 1.5 0 0 1 0-2.4l2.79-2.09 4.19-3.183a1.5 1.5 0 0 1 1.82 0l4.19 3.183 2.79 2.09a1.5 1.5 0 0 1 0 2.4l-2.79 2.09-4.19 3.183a1.5 1.5 0 0 1-1.82 0Z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-base-content">Área de estudo (KMZ)</p>
+              <p class="text-xs text-base-content/50">.kmz ou .kml</p>
+            </div>
+            <input type="file" name="kmz" multiple accept=".kmz,.kml" class="file-input file-input-sm file-input-bordered"
+                   data-file-list-target="input" data-action="change->file-list#update">
+          </label>
+          <div class="flex flex-wrap gap-1.5 mt-2 px-1 hidden" data-file-list-target="list"></div>
+        </div>
 
-        <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
-          <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-              <path d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2.75 6a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" />
-            </svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium text-base-content">Documentos complementares</p>
-            <p class="text-xs text-base-content/50">Propostas anteriores, normas, condicionantes... pode escolher vários</p>
-          </div>
-          <input type="file" name="complementary_documents[]" multiple
-                 accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
-                 class="file-input file-input-sm file-input-bordered">
-        </label>
+        <div data-controller="file-list">
+          <label class="flex items-center gap-3 p-3 rounded-field border border-base-300 hover:border-primary/40 transition-colors cursor-pointer">
+            <div class="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+                <path d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2.75 6a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Zm0 3a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" />
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-base-content">Documentos complementares</p>
+              <p class="text-xs text-base-content/50">Propostas anteriores, normas, condicionantes... pode escolher vários</p>
+            </div>
+            <input type="file" name="complementary_documents[]" multiple
+                   accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                   class="file-input file-input-sm file-input-bordered"
+                   data-file-list-target="input" data-action="change->file-list#update">
+          </label>
+          <div class="flex flex-wrap gap-1.5 mt-2 px-1 hidden" data-file-list-target="list"></div>
+        </div>
       </div>
     </div>
 

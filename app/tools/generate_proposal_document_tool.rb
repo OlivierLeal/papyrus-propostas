@@ -39,20 +39,37 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :nome_documento_tr, desc: "Nome do documento de ET (Pedido Técnico do Estudo) usado como base do escopo — " \
     "o nome do parâmetro ficou de antes da separação ET/TR, mas o valor esperado é o do ET, o documento principal"
   param :escopo_e_metodologia, desc: "Parágrafo(s) INTRODUTÓRIOS da seção 'Escopo e Metodologia' — contexto geral de " \
-    "como o serviço será executado, antes de entrar nos tópicos temáticos (ver topicos_escopo). Se o escopo não " \
-    "tiver divisão temática nenhuma (estudo simples, sem meios físico/biótico/socioeconômico separados), pode ser " \
-    "o texto inteiro da seção."
+    "como o serviço será executado, antes de entrar nos tópicos (ver topicos_escopo). Se o escopo for simples " \
+    "demais pra render nenhum tópico à parte, pode ser o texto inteiro da seção."
   param :topicos_escopo, type: "array", required: false,
-    desc: "Divisão temática do escopo (ex.: Meio Físico, Meio Biótico, Meio Socioeconômico, Restrições Ambientais, " \
-          "Análise de Impactos, Produtos Cartográficos — os que o ET/TR pedir, na ordem que fizer sentido). Cada " \
-          "item no formato \"Título | Texto do tópico\" (ex.: \"Meio Físico | Caracterização climática com análise " \
-          "de séries meteorológicas históricas...\"). O sistema numera cada um como subtópico da seção (5.1, 5.2...) " \
-          "e destaca o título em negrito — não escreva o número nem \"5.\" você mesma, nem tente negritar com texto. " \
-          "Use sempre que o ET/TR estruturar o escopo em blocos temáticos; deixe de fora quando o estudo não tiver " \
-          "essa divisão (nesse caso escreva tudo em escopo_e_metodologia mesmo)."
+    desc: "Etapas do PROCESSO de execução do serviço — não é um resumo do que será diagnosticado (isso já está em " \
+          "caracterizacao_do_empreendimento/objetivo_dos_servicos), é como a Papyrus vai EXECUTAR: reuniões, " \
+          "vistorias, tramitação junto ao órgão, cada estudo/produto intermediário que compõe o serviço. Pense " \
+          "nas etapas reais do trabalho, na ordem em que acontecem, por exemplo (adapte ao que o ET/TR e a " \
+          "equipe/precificação desta proposta realmente preveem — nem toda proposta tem todas): " \
+          "enquadramento/classificação legal do empreendimento; reunião de kick-off (quantos profissionais); " \
+          "assessoria para tramitação do processo junto ao órgão (protocolo, acompanhamento, quantas vistorias " \
+          "técnicas, quantas reuniões com o órgão); o(s) diagnóstico(s)/estudo(s) em si (pode dividir por meio " \
+          "físico/biótico/socioeconômico aqui dentro, se fizer sentido); cada produto intermediário que tiver " \
+          "etapa própria (ex.: estudos arqueológicos com suas fichas/relatórios específicos, inventário florestal, " \
+          "reunião pública, planos e programas ambientais); geoprocessamento/cartografia, quando for entrega " \
+          "própria. Cada item no formato \"Título | Texto da etapa\" (ex.: \"Reunião Kick Off | Será realizada 01 " \
+          "reunião de abertura do contrato, com participação de 02 profissionais...\"). Números de vistorias, " \
+          "reuniões, dias e campanhas de campo têm que vir do que já está definido nesta proposta ([ESTADO ATUAL " \
+          "DA PROPOSTA]/achados do ET-TR) — nunca invente quantidade; se não souber, descreva a atividade sem " \
+          "quantificar. O sistema numera cada item como subtópico da seção (5.1, 5.2...) e destaca o título em " \
+          "negrito — não escreva o número nem \"5.\" você mesma, nem tente negritar com texto. Use o " \
+          "search_historical_archive pra ver como a Papyrus estruturou o escopo de projetos parecidos antes de " \
+          "escrever — a estrutura processual varia bastante por tipo de estudo e vale seguir o padrão já usado."
   param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
   param :produtos, type: "array",
-    desc: "Lista dos produtos/entregáveis. Cada item pode trazer o formato depois de uma barra vertical " \
+    desc: "Lista dos produtos/entregáveis — tem que bater com o que topicos_escopo descreve: cada etapa que gera " \
+          "um documento próprio (o estudo/diagnóstico principal, mas também fichas, relatórios e certidões " \
+          "intermediárias de cada produto específico do escopo — ex.: um estudo arqueológico costuma gerar FCA, " \
+          "PAIPA e RAIPA como produtos separados, não só \"Estudos Arqueológicos\"; inventário florestal, planos " \
+          "e programas ambientais, relatório de reunião pública e certidão/certificado da licença também são " \
+          "produtos próprios quando essas etapas existirem no escopo). Não invente produto que não tenha etapa " \
+          "correspondente no escopo. Cada item pode trazer o formato depois de uma barra vertical " \
           "(ex.: \"Estudo Ambiental para Atividades de Médio Impacto (EMI) | Word e PDF\"); sem a barra, " \
           "o sistema usa \"Digital (PDF)\". Um item terminado em dois-pontos e sem formato vira uma linha de " \
           "AGRUPAMENTO no quadro (ex.: \"Licença Prévia (LP):\") — use isso para separar os produtos por fase " \

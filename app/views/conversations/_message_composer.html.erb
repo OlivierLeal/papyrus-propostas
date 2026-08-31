@@ -1,8 +1,8 @@
 <%= form_with url: conversation_messages_path(conversation), multipart: true, id: "message_composer",
       class: "flex flex-col gap-2 p-6 pt-4 shrink-0 border-t border-base-300",
-      data: { controller: "chat-attach chat-composer",
+      data: { controller: "file-list chat-composer",
               action: "turbo:submit-start->chat-composer#lock turbo:submit-end->chat-composer#unlock" } do |form| %>
-  <p class="text-xs text-base-content/50 px-1 hidden" data-chat-attach-target="filenames"></p>
+  <div class="flex flex-wrap gap-1.5 px-1 hidden" data-file-list-target="list"></div>
 
   <div class="flex items-end gap-2">
     <label class="btn btn-ghost btn-square shrink-0" title="Anexar documento complementar">
@@ -10,7 +10,7 @@
         <path fill-rule="evenodd" d="M8.75 2.75a3.5 3.5 0 0 0-3.5 3.5v6.5a2.5 2.5 0 0 0 5 0v-5.5a.75.75 0 0 1 1.5 0v5.5a4 4 0 1 1-8 0v-6.5a5 5 0 0 1 10 0v5.75a.75.75 0 0 1-1.5 0V6.25a3.5 3.5 0 0 0-3.5-3.5Z" clip-rule="evenodd" />
       </svg>
       <%= file_field_tag "documents[]", multiple: true, class: "hidden",
-            data: { chat_attach_target: "input", action: "change->chat-attach#update" } %>
+            data: { file_list_target: "input", action: "change->file-list#update" } %>
     </label>
     <%= text_area_tag "content", nil, placeholder: "Peça um ajuste, envie um documento... (Enter envia, Shift+Enter pula linha)",
           autocomplete: "off", rows: 1,
