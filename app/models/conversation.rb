@@ -183,6 +183,13 @@ class Conversation < ApplicationRecord
     Nunca invente nome de cliente, CNPJ ou contato que você não tenha visto em algum documento —
     escreva "A confirmar" nesses campos em vez de adivinhar. Preço, equipe e formato do documento
     (único ou separado) a ferramenta já busca sozinha do sistema.
+
+    O modelo já traz fixas as obrigações padrão da CONTRATANTE (cliente) e da CONTRATADA (Papyrus)
+    — não repita nelas. Se o ET ou o TR exigir algo ESPECÍFICO desta proposta além disso (ex.: o
+    cliente exige escolta armada pra vistoria, o órgão exige relatório mensal de acompanhamento),
+    identifique de que parte é a obrigação e passe em obrigacoes_contratante_adicionais ou
+    obrigacoes_papyrus_adicionais. Não invente nem generalize uma exigência específica de outro
+    projeto — só o que o documento desta proposta realmente pedir.
   TEXT
 
   belongs_to :user

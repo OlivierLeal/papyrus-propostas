@@ -48,6 +48,85 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes xml, "{{OBJETIVO_SERVICOS}}"
   end
 
+  test "fill fills a token in remove_paragraph_if_blank normally when a value is supplied" do
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge("OBRIGACOES_PAPYRUS_ADICIONAIS" => "Emitir relatório mensal de acompanhamento."),
+      tables: @tables, remove_paragraph_if_blank: %w[OBRIGACOES_PAPYRUS_ADICIONAIS]
+    )
+    xml = document_xml(bytes)
+
+    assert_includes xml, "Emitir relatório mensal de acompanhamento."
+    assert_not_includes xml, "{{OBRIGACOES_PAPYRUS_ADICIONAIS}}"
+  end
+
+  test "fill expands multiple lines for a token in remove_paragraph_if_blank into separate list items" do
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge("OBRIGACOES_CONTRATANTE_ADICIONAIS" => "Fornecer escolta armada.\nDisponibilizar embarcação."),
+      tables: @tables, remove_paragraph_if_blank: %w[OBRIGACOES_CONTRATANTE_ADICIONAIS]
+    )
+    xml = document_xml(bytes)
+
+    assert_includes xml, "Fornecer escolta armada."
+    assert_includes xml, "Disponibilizar embarcação."
+  end
+
+  test "fill removes the whole paragraph for a blank token listed in remove_paragraph_if_blank" do
+    # A chave precisa estar presente com valor "" — igual GenerateProposalDocumentTool sempre
+    # manda, mesmo sem nenhum item extra (ver join_lines). Chave ausente cai no outro caso (fill
+    # leaves placeholders with no supplied value as-is), não em "valor vazio".
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge("OBRIGACOES_CONTRATANTE_ADICIONAIS" => "", "OBRIGACOES_PAPYRUS_ADICIONAIS" => ""),
+      tables: @tables, remove_paragraph_if_blank: %w[OBRIGACOES_CONTRATANTE_ADICIONAIS OBRIGACOES_PAPYRUS_ADICIONAIS]
+    )
+    xml = document_xml(bytes)
+
+    assert_not_includes xml, "OBRIGACOES_CONTRATANTE_ADICIONAIS"
+    assert_not_includes xml, "OBRIGACOES_PAPYRUS_ADICIONAIS"
+  end
+
+  test "fill blanks a token not listed in remove_paragraph_if_blank the normal way, keeping the paragraph" do
+    # Comportamento padrão de qualquer outro placeholder — não regride pros tokens que não pedem
+    # o item de lista sumir (ex.: MAPA_AREA_ESTUDO, que fica com o parágrafo mas texto vazio).
+    kept = @filler.fill(
+      placeholders: @placeholders.merge("OBRIGACOES_CONTRATANTE_ADICIONAIS" => ""),
+      tables: @tables, remove_paragraph_if_blank: []
+    )
+    removed = @filler.fill(
+      placeholders: @placeholders.merge("OBRIGACOES_CONTRATANTE_ADICIONAIS" => ""),
+      tables: @tables, remove_paragraph_if_blank: %w[OBRIGACOES_CONTRATANTE_ADICIONAIS]
+    )
+
+    kept_paragraphs = parsed_document(kept).xpath("//w:p", NS).size
+    removed_paragraphs = parsed_document(removed).xpath("//w:p", NS).size
+
+    assert_equal kept_paragraphs - 1, removed_paragraphs
+  end
+
+  test "fill bolds a line wrapped in ** and strips the markers, in a single-value placeholder" do
+    bytes = @filler.fill(placeholders: @placeholders.merge("NOME_CLIENTE" => "**Cliente Negrito**"), tables: @tables)
+    doc = parsed_document(bytes)
+
+    text_node = doc.xpath("//w:t").find { |t| t.text == "Cliente Negrito" }
+    assert text_node.present?, "esperava o texto sem os marcadores **"
+    assert text_node.at_xpath("ancestor::w:r/w:rPr/w:b", NS).present?
+  end
+
+  test "fill bolds a line wrapped in ** inside a multi-line expanded placeholder, leaving the other lines plain" do
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge("ESCOPO_METODOLOGIA" => "**5.1 MEIO FÍSICO**\nTexto normal do tópico."),
+      tables: @tables
+    )
+    doc = parsed_document(bytes)
+
+    titulo = doc.xpath("//w:t").find { |t| t.text == "5.1 MEIO FÍSICO" }
+    corpo = doc.xpath("//w:t").find { |t| t.text == "Texto normal do tópico." }
+
+    assert titulo.present?
+    assert titulo.at_xpath("ancestor::w:r/w:rPr/w:b", NS).present?
+    assert corpo.present?
+    assert_not corpo.at_xpath("ancestor::w:r/w:rPr/w:b", NS).present?
+  end
+
   test "fill_table grows the table to fit every data row" do
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
@@ -292,6 +371,9 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes technical_xml, "Disponibilizar a Lista de stakeholders." # último item da seção 7
     assert_includes technical_xml, "EQUIPE TÉCNICA"
     assert_includes technical_xml, "PRAZO DE EXECUÇÃO"
+    # VALIDADE DA PROPOSTA (2026-08) foi movida pra antes de PREÇO E CONDIÇÕES DE PAGAMENTO
+    # justamente pra sair também na proposta só-técnica — antes ficava do lado comercial.
+    assert_includes technical_xml, "VALIDADE DA PROPOSTA"
     # E a fronteira continua valendo: a parte comercial não vaza para a técnica.
     assert_not_includes technical_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
   end
@@ -306,7 +388,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_includes commercial_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
     assert_includes commercial_xml, "DADOS BANCÁRIOS"
-    assert_includes commercial_xml, "VALIDADE DA PROPOSTA"
+    # VALIDADE DA PROPOSTA ficou do lado técnico agora (ver teste acima) — não duplica aqui.
+    assert_not_includes commercial_xml, "VALIDADE DA PROPOSTA"
     assert_not_includes commercial_xml, "Parágrafo 1 do escopo"
     assert_not_includes commercial_xml, "RESPONSABILIDADES DAS PARTES"
   end

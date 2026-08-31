@@ -50,25 +50,30 @@ class ProposalDocxFiller
   # images: { "MAPA_AREA_ESTUDO" => bytes_png } — substitui o <w:r> do parágrafo que contém
   # literalmente "{{TOKEN}}" por uma imagem embutida de verdade (ver #fill_images!). Quem chama
   # decide se manda bytes aqui ou "" em `placeholders` pro mesmo token (nunca os dois).
-  def fill(placeholders:, tables: {}, images: {})
-    build(placeholders: placeholders, tables: tables, images: images)
+  #
+  # remove_paragraph_if_blank: tokens cujo parágrafo INTEIRO deve sumir (não só ficar com texto
+  # vazio) quando o valor vier em branco — usado pra item de lista opcional (ex.: obrigação extra
+  # da CONTRATANTE/PAPYRUS que só existe quando o ET pede algo específico): a maioria das
+  # propostas não tem nenhuma, e um item de lista vazio ("● ") ficaria visível no documento final.
+  def fill(placeholders:, tables: {}, images: {}, remove_paragraph_if_blank: [])
+    build(placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank)
   end
 
   # technical_overrides/commercial_overrides: placeholders que diferem entre os dois arquivos
   # (ex.: título da capa) — mesclados por cima de `placeholders` só na respectiva variante. Quem
   # decide os valores é quem chama (ver GenerateProposalDocumentTool); este serviço não sabe o
   # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
-  def fill_split(placeholders:, tables: {}, images: {}, technical_overrides: {}, commercial_overrides: {})
+  def fill_split(placeholders:, tables: {}, images: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {})
     {
-      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images) { |doc| trim_body!(doc, keep: :technical) },
-      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images) { |doc| trim_body!(doc, keep: :commercial) }
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :technical) },
+      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :commercial) }
     }
   end
 
   private
     # Sempre opera numa cópia descartável — Zip::File#open com bloco reescreve o arquivo no
     # próprio caminho ao sair do bloco, então nunca toca no modelo original.
-    def build(placeholders:, tables:, images: {})
+    def build(placeholders:, tables:, images: {}, remove_paragraph_if_blank: [])
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
         FileUtils.cp(@template_path, tmp.path)
 
@@ -80,7 +85,7 @@ class ProposalDocxFiller
           # fill_split) — a seção some do documento final de qualquer forma, então a única sobra é
           # uma mídia/relationship sem uso no zip, inofensiva (Word/LibreOffice ignoram sem erro).
           fill_images!(doc, images, zip)
-          fill_simple_placeholders!(doc, placeholders)
+          fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
           tables.each do |table_index, config|
             table_node = doc.xpath("//w:tbl", NS)[table_index]
             fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false))
@@ -164,16 +169,19 @@ class ProposalDocxFiller
       XML
     end
 
-    def fill_simple_placeholders!(doc, values)
+    def fill_simple_placeholders!(doc, values, remove_paragraph_if_blank: [])
       doc.xpath("//w:t", NS).each do |t|
         next unless t.text.include?("{{")
 
+        tokens = t.text.scan(/\{\{(\w+)\}\}/).flatten
         replaced = t.text.gsub(/\{\{(\w+)\}\}/) { values.fetch(::Regexp.last_match(1), "{{#{::Regexp.last_match(1)}}}").to_s }
 
-        if replaced.include?("\n")
+        if replaced.blank? && (tokens & remove_paragraph_if_blank).any?
+          t.at_xpath("ancestor::w:p", NS)&.remove
+        elsif replaced.include?("\n")
           expand_into_paragraphs!(t, replaced)
         else
-          t.content = replaced
+          apply_line!(t, replaced)
         end
       end
     end
@@ -186,14 +194,38 @@ class ProposalDocxFiller
     def expand_into_paragraphs!(t, replaced)
       paragraph = t.at_xpath("ancestor::w:p", NS)
       lines = replaced.split(/\n+/).map(&:strip).reject(&:empty?)
-      return (t.content = replaced) if paragraph.nil? || lines.size <= 1
+      return apply_line!(t, replaced) if paragraph.nil? || lines.size <= 1
 
       lines.each do |line|
         new_paragraph = paragraph.dup
-        new_paragraph.at_xpath(".//w:t", NS).content = line
+        apply_line!(new_paragraph.at_xpath(".//w:t", NS), line)
         paragraph.add_previous_sibling(new_paragraph)
       end
       paragraph.remove
+    end
+
+    BOLD_LINE = /\A\*\*(.+)\*\*\z/
+
+    # "**texto**" (mesma convenção Markdown que a IA já usa no chat) vira um parágrafo em negrito
+    # — usado pelo escopo pra subtítulo numerado ("**5.1 MEIO FÍSICO**", ver
+    # GenerateProposalDocumentTool#escopo_com_topicos). Resto do texto continua parágrafo comum,
+    # sem precisar de um segundo placeholder/mecanismo só pra isso.
+    def apply_line!(text_node, line)
+      match = BOLD_LINE.match(line)
+      return text_node.content = line unless match
+
+      text_node.content = match[1]
+      bold_run!(text_node)
+    end
+
+    def bold_run!(text_node)
+      run = text_node.at_xpath("ancestor::w:r", NS)
+      run_pr = run.at_xpath("w:rPr", NS)
+      unless run_pr
+        run_pr = Nokogiri::XML::Node.new("w:rPr", run.document)
+        run.prepend_child(run_pr)
+      end
+      run_pr.add_child(Nokogiri::XML::Node.new("w:b", run.document)) unless run_pr.at_xpath("w:b", NS)
     end
 
     # tbl: nó <w:tbl>. A 2ª linha (1ª de dados) vira o "molde": clonada se faltar linha,

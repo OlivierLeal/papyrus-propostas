@@ -360,6 +360,40 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   end
 
 
+  # TÓPICOS DO ESCOPO (2026-08). O escopo de estudos com divisão temática (meio físico, biótico,
+  # socioeconômico...) saía tudo em texto corrido, sem numeração — pedido do consultor pra sair
+  # "5.1", "5.2" etc., como o resto do documento.
+  test "numera e negrita cada tópico do escopo, na ordem enviada" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(topicos_escopo: [
+      "Meio Físico | Caracterização climática e geomorfológica.",
+      "Meio Biótico | Mapeamento da cobertura vegetal."
+    ]))
+
+    doc = Nokogiri::XML(document_xml(@proposal.generated_documents.first))
+    titulo1 = doc.xpath("//w:t").find { |t| t.text == "5.1 MEIO FÍSICO" }
+    titulo2 = doc.xpath("//w:t").find { |t| t.text == "5.2 MEIO BIÓTICO" }
+    corpo1 = doc.xpath("//w:t").find { |t| t.text == "Caracterização climática e geomorfológica." }
+
+    assert titulo1.present?, "esperava o subtítulo numerado 5.1"
+    assert titulo1.at_xpath("ancestor::w:r/w:rPr/w:b", NS).present?, "esperava o subtítulo em negrito"
+    assert titulo2.present?, "esperava o subtítulo numerado 5.2"
+    assert corpo1.present?
+    assert_not corpo1.at_xpath("ancestor::w:r/w:rPr/w:b", NS).present?, "o texto do tópico não deveria vir em negrito"
+  end
+
+  test "não sobra bloco de tópicos quando topicos_escopo não é enviado" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_not_includes xml, "5.1"
+  end
+
   # ITENS NÃO PREVISTOS. Toda proposta validada pela Papyrus fecha o escopo com o que ela NÃO
   # cobre; nas geradas pelo sistema essa lista simplesmente não existia.
   test "o escopo termina com os itens não previstos e a ressalva de proposta complementar" do
@@ -383,6 +417,35 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     assert_includes document_xml(@proposal.generated_documents.first), "serão objeto de proposta complementar"
+  end
+
+  # OBRIGAÇÕES ADICIONAIS. Quando o ET/TR pede algo específico de uma das partes além do que já é
+  # fixo no modelo (7.1/7.2), a IA identifica e a ferramenta acrescenta como item novo na lista.
+  test "acrescenta as obrigações adicionais da contratante e da papyrus quando informadas" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(
+      obrigacoes_contratante_adicionais: [ "Fornecer escolta armada para as vistorias de campo." ],
+      obrigacoes_papyrus_adicionais: [ "Emitir relatório mensal de acompanhamento ao órgão financiador." ]
+    ))
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "Fornecer escolta armada para as vistorias de campo."
+    assert_includes xml, "Emitir relatório mensal de acompanhamento ao órgão financiador."
+  end
+
+  # A maioria das propostas não tem obrigação extra nenhuma — o item de lista não pode ficar
+  # visível em branco no documento final (ver ProposalDocxFiller#fill_simple_placeholders!).
+  test "não deixa item de obrigação em branco quando não há nada adicional" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_not_includes xml, "OBRIGACOES_CONTRATANTE_ADICIONAIS"
+    assert_not_includes xml, "OBRIGACOES_PAPYRUS_ADICIONAIS"
   end
 
   test "o formato de cada produto vem da IA, com padrão quando ela não informa" do

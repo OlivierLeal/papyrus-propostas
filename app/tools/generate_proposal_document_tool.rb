@@ -38,7 +38,18 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :caracterizacao_do_empreendimento, desc: "Texto da seção 'Caracterização do Empreendimento'"
   param :nome_documento_tr, desc: "Nome do documento de ET (Pedido Técnico do Estudo) usado como base do escopo — " \
     "o nome do parâmetro ficou de antes da separação ET/TR, mas o valor esperado é o do ET, o documento principal"
-  param :escopo_e_metodologia, desc: "Texto da seção 'Escopo e Metodologia', descrevendo como o serviço será executado"
+  param :escopo_e_metodologia, desc: "Parágrafo(s) INTRODUTÓRIOS da seção 'Escopo e Metodologia' — contexto geral de " \
+    "como o serviço será executado, antes de entrar nos tópicos temáticos (ver topicos_escopo). Se o escopo não " \
+    "tiver divisão temática nenhuma (estudo simples, sem meios físico/biótico/socioeconômico separados), pode ser " \
+    "o texto inteiro da seção."
+  param :topicos_escopo, type: "array", required: false,
+    desc: "Divisão temática do escopo (ex.: Meio Físico, Meio Biótico, Meio Socioeconômico, Restrições Ambientais, " \
+          "Análise de Impactos, Produtos Cartográficos — os que o ET/TR pedir, na ordem que fizer sentido). Cada " \
+          "item no formato \"Título | Texto do tópico\" (ex.: \"Meio Físico | Caracterização climática com análise " \
+          "de séries meteorológicas históricas...\"). O sistema numera cada um como subtópico da seção (5.1, 5.2...) " \
+          "e destaca o título em negrito — não escreva o número nem \"5.\" você mesma, nem tente negritar com texto. " \
+          "Use sempre que o ET/TR estruturar o escopo em blocos temáticos; deixe de fora quando o estudo não tiver " \
+          "essa divisão (nesse caso escreva tudo em escopo_e_metodologia mesmo)."
   param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
   param :produtos, type: "array",
     desc: "Lista dos produtos/entregáveis. Cada item pode trazer o formato depois de uma barra vertical " \
@@ -64,6 +75,20 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
+  param :obrigacoes_contratante_adicionais, type: "array", required: false,
+    desc: "Obrigações EXTRAS da CONTRATANTE (o cliente) além das já fixas no modelo (acesso à área, fornecer " \
+          "documentos, pagar taxas do órgão, etc. — não repita essas). Um item por linha, só o que o ET ou o TR " \
+          "exigir especificamente deste cliente (ex.: \"Fornecer escolta armada para as vistorias de campo\", " \
+          "\"Disponibilizar embarcação para acesso à área insular\"). Não invente — só o que estiver escrito no " \
+          "documento. Se nada exigir algo além do padrão, não envie este parâmetro."
+
+  param :obrigacoes_papyrus_adicionais, type: "array", required: false,
+    desc: "Obrigações EXTRAS da PAPYRUS (CONTRATADA) além das já fixas no modelo (executar o escopo, usar pessoal " \
+          "qualificado, seguir a legislação, etc. — não repita essas). Um item por linha, só o que o ET ou o TR " \
+          "exigir especificamente (ex.: \"Emitir relatório mensal de acompanhamento ao órgão financiador\", " \
+          "\"Realizar treinamento da equipe do cliente em SST antes do início dos serviços\"). Não invente — só o " \
+          "que estiver escrito no documento. Se nada exigir algo além do padrão, não envie este parâmetro."
+
   def initialize(conversation:)
     super()
     @conversation = conversation
@@ -82,6 +107,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     images = build_images
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
+    remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS
 
     # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
     # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
@@ -90,7 +116,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     if @proposal.status == "draft"
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables, images: images,
+        placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
@@ -102,7 +128,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables, images: images,
+        placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") },
         commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("comercial") }
       )
@@ -112,7 +138,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
     else
       combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
-      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images)
+      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
       { success: true, version: @proposal.version, filenames: [ combined_filename ],
         message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação." }.to_json
@@ -123,6 +149,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
+    # Item de lista opcional no modelo (7.1/7.2 — ver ProposalDocxFiller#fill_simple_placeholders!)
+    # — some o parágrafo inteiro em vez de deixar um "●" sem texto quando não há nada extra.
+    OBRIGACOES_ADICIONAIS_TOKENS = %w[OBRIGACOES_CONTRATANTE_ADICIONAIS OBRIGACOES_PAPYRUS_ADICIONAIS].freeze
+
     # O consultor às vezes dita o nome do arquivo no chat ("tem que se chamar PTC26002_PMM..."),
     # normalmente porque a pasta na rede e o controle de propostas já foram criados com aquele
     # nome (itens 1 e 2 do passo a passo interno). A partir daí é esse o nome, inclusive nas
@@ -172,8 +202,17 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "EQUIPE_LIDER_PROJETO_QUALIFICACAO" => lider[1],
         "EQUIPE_SEG_TRABALHO_NOME" => seguranca[0],
         "EQUIPE_SEG_TRABALHO_QUALIFICACAO" => seguranca[1],
-        "PRECO_TOTAL" => @proposal.docx_total_price
+        "PRECO_TOTAL" => @proposal.docx_total_price,
+        "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(args[:obrigacoes_contratante_adicionais]),
+        "OBRIGACOES_PAPYRUS_ADICIONAIS" => join_lines(args[:obrigacoes_papyrus_adicionais])
       }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }
+    end
+
+    # Cada item vira um parágrafo/item de lista próprio no modelo (ver expand_into_paragraphs!);
+    # lista vazia devolve "" — junto com remove_paragraph_if_blank, isso some o item de lista
+    # inteiro, em vez de deixar um "●" sem texto na maioria das propostas (que não tem nada extra).
+    def join_lines(items)
+      Array(items).map { |item| item.to_s.strip }.compact_blank.join("\n")
     end
 
     # Os índices são a POSIÇÃO da tabela no modelo, não um id: 0 = sumário de revisões,
@@ -188,13 +227,34 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # O escopo escrito pela IA sempre termina com o que a proposta NÃO cobre. Vem como parâmetro
     # próprio (e não embutido na prosa) porque era justamente o que sumia: nas propostas geradas
     # até aqui essa lista simplesmente não existia, enquanto as escritas por gente sempre a têm.
+    # A seção "ESCOPO E METODOLOGIA DE EXECUÇÃO DO SERVIÇO" é sempre a 5ª de nível 1 no modelo —
+    # a estrutura de seções é fixa, só o conteúdo varia por proposta — por isso o número dos
+    # subtópicos pode ser calculado aqui: a IA não tem como saber a posição real da seção no
+    # documento renderizado, só o sistema sabe.
+    SECAO_ESCOPO_NUMERO = 5
+
     def escopo_com_itens_nao_previstos(args)
       itens = Array(args[:itens_nao_previstos]).map { |item| item.to_s.strip }.compact_blank
-      bloco = [ "Itens não previstos" ]
+      bloco = [ "**Itens não previstos**" ]
       bloco.concat(itens.map { |item| "- #{item}" })
       bloco << RESSALVA_PROPOSTA_COMPLEMENTAR
 
-      [ args[:escopo_e_metodologia], bloco.join("\n\n") ].compact_blank.join("\n\n")
+      [ args[:escopo_e_metodologia], topicos_do_escopo(args), bloco.join("\n\n") ].compact_blank.join("\n\n")
+    end
+
+    # "Título | texto" vira "**5.N TÍTULO**" (negrito — ver ProposalDocxFiller#apply_line!)
+    # seguido do texto normal do tópico. Devolve "" quando a IA não usar topicos_escopo (escopo
+    # sem divisão temática), então não sobra nada em branco entre a introdução e os itens não
+    # previstos.
+    def topicos_do_escopo(args)
+      topicos = Array(args[:topicos_escopo]).filter_map do |item|
+        titulo, texto = item.to_s.split("|", 2).map(&:strip)
+        titulo.presence && texto.presence && [ titulo, texto ]
+      end
+
+      topicos.each_with_index.map do |(titulo, texto), index|
+        "**#{SECAO_ESCOPO_NUMERO}.#{index + 1} #{titulo.upcase}**\n\n#{texto}"
+      end.join("\n\n")
     end
 
     # "Produto | Formato" vira linha normal; "Fase:" (sem formato) vira linha de agrupamento, do

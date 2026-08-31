@@ -182,6 +182,19 @@ coluna QUANT., a seção 9 (prazo) ganhou um segundo parágrafo, e as obrigaçõ
 perderam os itens de rádio comunicador e espaço físico/CATFA. O cálculo continua auditável linha a
 linha na Tela de Precificação — o que mudou é o que vai impresso para o cliente.
 
+**Validade da proposta sempre 90 dias, inclusive na técnica-sozinha (2026-08):** a seção
+"VALIDADE DA PROPOSTA" (texto fixo "Esta proposta tem validade de 90 dias.", sem placeholder —
+nunca varia por proposta) foi movida pra ANTES de "PREÇO E CONDIÇÕES DE PAGAMENTO" — antes ficava
+depois de "DADOS BANCÁRIOS", ou seja, só existia no lado comercial/combinado, e sumia quando só a
+proposta técnica saía (`proposal.status == "draft"`, ver `GenerateProposalDocumentTool#execute`).
+A numeração das seções é automática (mesmo `numId`/`pStyle="Ttulo1"` de todo título de nível 1),
+então mover o parágrafo bastou pra reindexar sozinha — mas o texto "Quadro 10-1: Desembolso" (na
+seção de Preço) é literal, não é campo de referência automática do Word, e teve que ser atualizado
+à mão pra "Quadro 11-1" quando a seção de Preço passou a ser a 11ª (era a 10ª). Efeito colateral
+aceito: a validade deixou de aparecer no documento COMERCIAL quando gerado separado (technical ×
+commercial, `document_split == "separated"`) — ela existe no técnico e no combinado, não mais
+sozinha do lado comercial.
+
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
 1 = produtos, 2 = equipe, 3 = desembolso) e têm que ser remapeados se alguma tabela for
@@ -207,6 +220,32 @@ e pode trocar antes de gerar. Conforme a escolha, o sistema gera 1 arquivo (`.do
 (`proposta_tecnica.docx` + `proposta_comercial.docx`), a partir de modelos `.docx` correspondentes.
 
 O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA gera novo texto estruturado e o backend remonta o(s) DOCX (nova versão).
+
+**Obrigações adicionais da CONTRATANTE/CONTRATADA (2026-08):** as seções 7.1 (obrigações da
+Papyrus) e 7.2 (obrigações da contratante) trazem uma lista fixa no modelo — a maioria das
+propostas não precisa de mais nada. Quando o ET ou o TR exige algo específico de uma das partes
+além disso (ex.: escolta armada pra vistoria, relatório mensal a um órgão financiador), a IA
+identifica de que parte é a exigência e passa em `obrigacoes_contratante_adicionais` /
+`obrigacoes_papyrus_adicionais` (`GenerateProposalDocumentTool`) — um item por linha, viram itens
+novos na mesma lista (`ProposalDocxFiller#expand_into_paragraphs!`, mesmo mecanismo já usado pros
+itens não previstos). O modelo tem um item-molde a mais em cada lista, com um placeholder
+(`{{OBRIGACOES_CONTRATANTE_ADICIONAIS}}` / `{{OBRIGACOES_PAPYRUS_ADICIONAIS}}`) — quando não há
+nada extra, o parágrafo inteiro some (`remove_paragraph_if_blank`), nunca fica um item de lista em
+branco no documento.
+
+**Subtópicos numerados no escopo (2026-08):** estudos com divisão temática clara (meio físico,
+biótico, socioeconômico, restrições ambientais...) saíam tudo em texto corrido, sem nenhuma
+numeração — pedido do consultor pra sair como o resto do documento, "5.1", "5.2" etc. A seção
+"ESCOPO E METODOLOGIA DE EXECUÇÃO DO SERVIÇO" é sempre a 5ª de nível 1 do modelo (estrutura fixa,
+só o conteúdo muda), então o número é calculado no backend
+(`GenerateProposalDocumentTool::SECAO_ESCOPO_NUMERO`) — a IA nunca numera ela mesma, porque não
+tem como saber a posição real da seção no documento renderizado. A IA manda os tópicos em
+`topicos_escopo` (array "Título | texto"; `escopo_e_metodologia` fica só com os parágrafos
+introdutórios, antes dos tópicos); o backend monta "5.N TÍTULO" e o `ProposalDocxFiller` entende
+`**texto**` (mesma convenção Markdown que a IA já usa no chat) como um parágrafo em negrito — sem
+precisar de um placeholder por tópico, já que a quantidade varia por proposta. Escopo sem divisão
+temática (estudo simples) pode deixar `topicos_escopo` de fora e escrever tudo em
+`escopo_e_metodologia`, como antes.
 
 ---
 
