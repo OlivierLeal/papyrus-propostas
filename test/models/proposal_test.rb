@@ -114,6 +114,33 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal 15, pricing.proposal_professionals.find_by(professional: professionals(:diretora)).hours_office
   end
 
+  # BUG achado comparando uma proposta EMI gerada pelo sistema com a PTC real aprovada pela
+  # Papyrus: nem Charlene nem Ricardo apareciam. Causa: study_type sem NENHUM study_template
+  # cadastrado (RAP, Relatório Técnico, PEA, EMI, hoje — ver CLAUDE.md seção 11.1) fazia
+  # build_with_ai_suggested_team! retornar cedo (templates.empty?), sem chamar
+  # ensure_always_included_lines! nunca.
+  test "build_with_ai_suggested_team! includes always_included professionals even when the study_type has no study_templates at all" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
+    proposal = conversation.create_proposal!(status: "draft")
+
+    pricing = proposal.build_with_ai_suggested_team!
+
+    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora))
+  end
+
+  test "build_from_template! includes always_included professionals even when the study_type has no study_templates at all" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
+    proposal = conversation.create_proposal!(status: "draft")
+
+    pricing = proposal.build_from_template!
+
+    line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
+    assert line.present?
+    assert_equal "Diretora de Negócios", line.deliverable_name # role do professional, sem template pra saber o entregável
+    assert_equal 0, line.hours_office
+    assert_equal 0, line.hours_field
+  end
+
   test "build_from_template! includes an always_included professional even when their own template defaults to zero hours" do
     proposal = @conversation.create_proposal!(status: "draft")
 

@@ -107,7 +107,11 @@ class Proposal < ApplicationRecord
   def build_with_ai_suggested_team!
     templates = conversation.study_type.study_templates.includes(:professional).to_a
     pricing = create_project_pricing!
-    return finalize!(pricing) if templates.empty?
+
+    if templates.empty?
+      ensure_always_included_lines!(pricing, templates)
+      return finalize!(pricing)
+    end
 
     suggestion = fetch_ai_suggestion(templates)
     apply_lines!(pricing, Array(suggestion["linhas"]), templates)
@@ -244,18 +248,39 @@ class Proposal < ApplicationRecord
     # pula linha com 0h nos dois campos (ver acima) e a IA pode simplesmente não sugerir a linha
     # — nenhum dos dois casos pode fazer um fixo sumir da equipe, então a garantia é do sistema,
     # não da sugestão da IA. O consultor ainda ajusta as horas depois, na Tela de Precificação.
+    #
+    # NÃO itera só sobre `templates`: um study_type sem NENHUM study_template cadastrado (RAP,
+    # Relatório Técnico, PEA, EMI, hoje — ver CLAUDE.md seção 11.1) tem `templates` vazio, e antes
+    # disso fazia o fixo sumir também nesses casos — achado comparando uma proposta EMI gerada
+    # pelo sistema com a PTC real aprovada pela Papyrus (nem Charlene/Ricardo apareciam). Por isso
+    # a fonte da verdade aqui é `Professional.always_included`, com o "role" como deliverable_name
+    # quando não há template pro study_type dessa proposta pra saber o nome do entregável.
     def ensure_always_included_lines!(pricing, templates)
       present = pricing.proposal_professionals.pluck(:professional_id, :deliverable_name).to_set
+      templates_by_professional = templates.group_by(&:professional_id)
 
-      templates.select { |t| t.professional.always_included? }.each do |template|
-        next if present.include?([ template.professional_id, template.deliverable_name ])
+      Professional.active.always_included.find_each do |professional|
+        professional_templates = templates_by_professional[professional.id]
 
-        pricing.proposal_professionals.create!(
-          professional: template.professional,
-          deliverable_name: template.deliverable_name,
-          hours_office: template.hours_office_default,
-          hours_field: template.hours_field_default
-        )
+        if professional_templates.present?
+          professional_templates.each do |template|
+            next if present.include?([ template.professional_id, template.deliverable_name ])
+
+            pricing.proposal_professionals.create!(
+              professional: template.professional,
+              deliverable_name: template.deliverable_name,
+              hours_office: template.hours_office_default,
+              hours_field: template.hours_field_default
+            )
+          end
+        else
+          deliverable_name = professional.role
+          next if present.include?([ professional.id, deliverable_name ])
+
+          pricing.proposal_professionals.create!(
+            professional: professional, deliverable_name: deliverable_name, hours_office: 0, hours_field: 0
+          )
+        end
       end
     end
 
