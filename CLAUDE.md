@@ -1,6 +1,8 @@
 # Papyrus Propostas
 
-Sistema para automatizar a geração de **Propostas Técnicas e Comerciais** da Papyrus Consultoria Ambiental. O consultor sobe um Termo de Referência (TR), um arquivo KMZ e documentos complementares; o sistema processa tudo (IA + geoespacial), o consultor revisa e ajusta via chat, aprova o preço e recebe um PDF pronto no padrão visual da Papyrus.
+Sistema para automatizar a geração de **Propostas Técnicas e Comerciais** da Papyrus Consultoria Ambiental. O consultor sobe um ET (Pedido Técnico do Estudo), opcionalmente um TR (Termo de Referência), um arquivo KMZ e documentos complementares; o sistema processa tudo (IA + geoespacial), o consultor revisa e ajusta via chat, aprova o preço e recebe um PDF pronto no padrão visual da Papyrus.
+
+**Nota de terminologia (correção feita em 2026-08, o cliente havia explicado errado antes):** **ET** = Pedido Técnico do Estudo — o documento em que o CLIENTE explica o que está pedindo à Papyrus. É o documento principal/obrigatório, a base do escopo. **TR** = Termo de Referência — documento que vem de uma INSTITUIÇÃO/órgão ambiental, com exigências de metodologia, diagnósticos e condicionantes; funciona como GUIA de como executar o ET, nunca no lugar dele. O TR é opcional — nem todo cliente tem ou envia um.
 
 Este documento é a fonte de verdade do escopo. Foi consolidado a partir de dois documentos-fonte que descrevem o projeto em estágios diferentes:
 
@@ -25,10 +27,10 @@ A IA nunca faz conta de dinheiro. Ela só identifica escopo; quem precifica é o
 ## 2. Fluxo do usuário (jornada completa)
 
 1. Consultor faz login.
-2. Clica em "Nova Proposta" → **Tela de Setup**: informa nome do cliente e tipo de estudo, sobe o TR (PDF/DOCX), sobe o KMZ, adiciona documentos complementares (opcional).
+2. Clica em "Nova Proposta" → **Tela de Setup**: informa nome do cliente e tipo de estudo, sobe o ET (PDF/DOCX, principal), opcionalmente o TR (PDF/DOCX, guia institucional), sobe o KMZ, adiciona documentos complementares (opcional).
 3. Revisa os arquivos na tela de setup e confirma ("Gerar Proposta").
 4. **Processamento em background** (paralelo, via jobs):
-   - IA analisa o TR.
+   - IA analisa o ET (e o TR, quando enviado).
    - Módulo geoespacial processa o KMZ.
    - IA lê os documentos complementares.
 5. Sistema apresenta um **resumo estruturado** na Tela de Resultado (via WebSocket/Action Cable, com progresso em tempo real).
@@ -56,7 +58,7 @@ Documentos complementares podem ser enviados a qualquer momento da conversa, nã
 | IA / LLM | Claude API (Anthropic) via gem `ruby_llm` — lê PDF/DOCX nativamente |
 | Geoespacial | RGeo + GDAL para parsing de KMZ/KML e cálculos; PostGIS para queries de sobreposição |
 | Mapas | Mapbox Static API — gera imagem estática do polígono para inserir no PDF |
-| Hospedagem | Stay22 API (`api.stay22.com/v2/accommodations`) — busca opções de acomodação pelo município identificado no TR; consultor escolhe a melhor opção no chat (ver seção 5) |
+| Hospedagem | Stay22 API (`api.stay22.com/v2/accommodations`) — busca opções de acomodação pelo município identificado no ET/TR; consultor escolhe a melhor opção no chat (ver seção 5) |
 | Geração de documento | **DOCX** (não PDF — decisão revista), preenchendo um modelo `.docx` real da Papyrus via manipulação direta do XML interno (gem `rubyzip`, já dependência do projeto pelo KMZ) — ver seção 8 |
 | Infra | VPS (Hostinger), deploy via Kamal ou Docker, CI/CD via GitHub Actions |
 
@@ -80,8 +82,8 @@ RS→FEPAM, RJ→INEA, SC→IMA, BA→INEMA, SP→CETESB, MG→SEMAD/SUPRAM, out
 **Núcleo da conversa** (via gem `ruby_llm` — `acts_as_chat`/`acts_as_message`, ver seção 12):
 - `users` — id, email, name, role, password_digest
 - `conversations` — `acts_as_chat`; colunas de domínio: user_id, client_name, status, study_type_id, setup_completed_at (colunas nativas da gem: model_id)
-- `messages` — `acts_as_message`; colunas nativas da gem: conversation_id, role, content, content_raw, tokens de entrada/saída/cache. Anexos (TR, KMZ, complementares) via Active Storage nativo (`has_many_attached :attachments`), **não** uma tabela `attachments` própria — o upload na Tela de Setup é a primeira mensagem do usuário na conversa, já com os arquivos anexados
-- `tool_calls` / `models` — tabelas nativas da gem (function-calling e registro de modelos LLM com pricing/capabilities); não fazem parte do domínio, mas ficam disponíveis para uso futuro (ex.: extração estruturada de dados do TR)
+- `messages` — `acts_as_message`; colunas nativas da gem: conversation_id, role, content, content_raw, tokens de entrada/saída/cache. Anexos (ET, TR, KMZ, complementares) via Active Storage nativo (`has_many_attached :attachments`), **não** uma tabela `attachments` própria — o upload na Tela de Setup é a primeira mensagem do usuário na conversa, já com os arquivos anexados
+- `tool_calls` / `models` — tabelas nativas da gem (function-calling e registro de modelos LLM com pricing/capabilities); não fazem parte do domínio, mas ficam disponíveis para uso futuro (ex.: extração estruturada de dados do ET)
 
 **Proposta e precificação (implementado):**
 - `proposals` — conversation_id, content_json, pdf_url, version, status (`draft`/`priced`/`approved`)
@@ -104,7 +106,7 @@ Relacionamentos principais: `users` 1—N `conversations`; `conversations` 1—N
 
 Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística, sobreposições geoespaciais.
 
-1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do TR e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). A sugestão é **sempre restrita ao "menu"** de profissionais × entregáveis já cadastrados em `study_templates` para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha sugerida que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada. Se a chamada à IA falhar ou não retornar nenhuma linha válida, o sistema cai automaticamente no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`hours_office_default`/`hours_field_default`) direto do template.
+1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do ET, do TR (quando houver) e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). A sugestão é **sempre restrita ao "menu"** de profissionais × entregáveis já cadastrados em `study_templates` para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha sugerida que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada. Se a chamada à IA falhar ou não retornar nenhuma linha válida, o sistema cai automaticamente no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`hours_office_default`/`hours_field_default`) direto do template.
 2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas escritório/campo, mais adição/remoção de linhas fora do menu sugerido (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
 3. **Cálculo** (`ProjectPricing#recalculate!` / `ProposalProfessional#recalculate_subtotal`):
    - `C1` = horas escritório × taxa escritório
@@ -114,22 +116,23 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
    - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta em `external_costs` (jsonb)
    - `C6` = TOTAL = Σ profissionais + logística + externos
 4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo (`professionals`); BDI e impostos (`tax_multiplier`) editáveis por proposta em `project_pricings` (defaults 1.20/1.25). **Não existe mais uma tabela de configuração de logística** (`logistics_configs` foi removida) — aluguel/dia, alimentação/dia, combustível total e dias de campo são campos digitados direto na Tela de Precificação por proposta.
-5. **Hospedagem**: não entra no cálculo automático. O sistema consulta a API do Stay22 usando o município identificado no TR e apresenta as opções de acomodação como mensagem no chat; o consultor escolhe a melhor opção manualmente. Por enquanto isso fica só registrado na conversa (informativo) — pendente da chave de API do Stay22.
+5. **Hospedagem**: não entra no cálculo automático. O sistema consulta a API do Stay22 usando o município identificado no ET/TR e apresenta as opções de acomodação como mensagem no chat; o consultor escolhe a melhor opção manualmente. Por enquanto isso fica só registrado na conversa (informativo) — pendente da chave de API do Stay22.
 6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas (`payment_schedule_amounts`, default 30/60/5/5), dados prontos para o PDF. Proposta só é editável enquanto `status != "approved"`; aprovar (`proposals#approve`) trava os campos e conclui a conversa.
 
 ---
 
 ## 6. Pipeline de processamento de dados
 
-Após confirmação na tela de setup, arquivos vão para Active Storage (criptografado) e disparam 3 jobs em paralelo:
+Após confirmação na tela de setup, arquivos vão para Active Storage (criptografado) e disparam jobs em paralelo:
 
-- **ProcessTR**: extração de texto (ou envio nativo do PDF/DOCX pra Claude) → IA identifica tipo de licença, tipo de estudo, órgão ambiental, municípios, diagnósticos, condicionantes, ressalvas. Ao concluir, dispara a busca de hospedagem (Stay22) usando o município identificado.
+- **ProcessET**: extração de texto (ou envio nativo do PDF/DOCX pra Claude) do documento PRINCIPAL/obrigatório (o pedido do cliente) → IA identifica tipo de licença, tipo de estudo, órgão ambiental, municípios, diagnósticos, condicionantes, ressalvas. Ao concluir, dispara a busca de hospedagem (Stay22) usando o município identificado.
+- **ProcessTR**: mesma extração, sobre o TR institucional OPCIONAL (guia de execução, quando o cliente enviar um) — reforça/complementa o que o ET já trouxe, sem bloquear o processamento se não existir.
 - **ProcessKMZ**: descomprime → parseia XML/KML (Nokogiri) → extrai coordenadas → RGeo calcula área (ha), perímetro (km), centroide → PostGIS cruza com as 6 camadas de referência → gera imagem do mapa (Mapbox Static API, bounding box + margem 20%).
 - **ProcessCompDocs**: IA identifica tipo de cada documento complementar e extrai escopos anteriores, preços de referência, condicionantes, metodologias, equipes usadas.
 
-Um 4º job (**GenerateSummary**) só dispara quando os três anteriores terminam, e monta o resumo estruturado exibido na Tela de Resultado via WebSocket.
+Um job final (**GenerateSummary**) só dispara quando os anteriores terminam, e monta o resumo estruturado exibido na Tela de Resultado via WebSocket.
 
-**Ponto de atenção:** TRs grandes (100+ páginas) com muitos complementares podem levar 60–120s para processar — feedback visual (barra de progresso por etapa) é essencial.
+**Ponto de atenção:** ETs/TRs grandes (100+ páginas) com muitos complementares podem levar 60–120s para processar — feedback visual (barra de progresso por etapa) é essencial.
 
 ---
 
@@ -143,7 +146,7 @@ Regras:
 - Condicionantes de licenças anteriores → identificar e sinalizar impacto em escopo/preço.
 - Projeto básico → extrair tipo de empreendimento, capacidade/potência, infraestrutura prevista.
 - Sempre informar ao usuário quais informações foram extraídas de cada documento, para validação.
-- Se um complementar conflitar com o TR, sinalizar a divergência e pedir orientação ao usuário (nunca decidir sozinho).
+- Se um complementar conflitar com o ET ou o TR, sinalizar a divergência e pedir orientação ao usuário (nunca decidir sozinho).
 
 ---
 
@@ -155,7 +158,7 @@ deles (com a identidade visual já aplicada) em vez de recriar o layout em HTML/
 
 Processo em duas etapas, com responsabilidades separadas (princípio mantido):
 
-1. A IA produz um **texto estruturado** com todo o conteúdo (seções, dados, escopo, equipe, valores), guiada pelo "Prompt de Geração de Proposta" (seção 9), incluindo se o TR exige apresentação em documentos/envelopes separados (técnico × comercial).
+1. A IA produz um **texto estruturado** com todo o conteúdo (seções, dados, escopo, equipe, valores), guiada pelo "Prompt de Geração de Proposta" (seção 9), incluindo se o ET ou o TR exige apresentação em documentos/envelopes separados (técnico × comercial).
 2. O backend Rails preenche o(s) modelo(s) `.docx` da Papyrus com esse conteúdo — abrindo o arquivo (é um zip com XML dentro), substituindo marcadores de texto no `word/document.xml` via `rubyzip`, e re-empacotando. **Não é a IA que mexe no arquivo** — ela só gera o texto que entra nos marcadores.
 
 O layout visual (fontes, cores, margens, logotipos, tabelas) vem pronto do modelo `.docx` da Papyrus — o código só substitui conteúdo, nunca redesenha layout. Isso garante consistência visual entre propostas independente do conteúdo gerado.
@@ -198,8 +201,8 @@ e o salvamento muda a forma do XML sem mudar o conteúdo: o estilo dos títulos 
 nenhum. Código que lê o modelo tem que tolerar as duas formas — e teste de geração compara TEXTO
 (`//w:t`), nunca a string do XML cru.
 
-**Técnica × Comercial separadas ou juntas:** a IA lê o TR e sinaliza se ele exige documentos/envelopes
-separados (comum em licitação pública). O consultor vê essa sugestão na Tela de Precificação/Aprovação
+**Técnica × Comercial separadas ou juntas:** a IA lê o ET e o TR (quando houver) e sinaliza se algum
+deles exige documentos/envelopes separados (comum em licitação pública). O consultor vê essa sugestão na Tela de Precificação/Aprovação
 e pode trocar antes de gerar. Conforme a escolha, o sistema gera 1 arquivo (`.docx` único) ou 2
 (`proposta_tecnica.docx` + `proposta_comercial.docx`), a partir de modelos `.docx` correspondentes.
 
@@ -217,11 +220,11 @@ O usuário pode pedir ajustes de conteúdo via chat a qualquer momento; a IA ger
 
 ## 10. Requisitos não-funcionais
 
-- Processamento do TR: até 120s (documentos até 100 páginas).
+- Processamento do ET/TR: até 120s (documentos até 100 páginas).
 - Processamento do KMZ: até 30s.
 - Geração do PDF final: até 60s.
 - Suporte a até 5 usuários simultâneos (fase inicial).
-- TLS 1.3 em trânsito; arquivos armazenados (TR, KMZ, PDFs) criptografados.
+- TLS 1.3 em trânsito; arquivos armazenados (ET, TR, KMZ, PDFs) criptografados.
 - Conformidade com LGPD.
 - Backups diários automáticos, retenção de 30 dias.
 - Disponibilidade mínima 99% (SLA).
@@ -266,7 +269,7 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
      roteamento cross-region — como o acervo tem cliente, CNPJ e preço, o dado fica no Brasil.
    - Uso pela IA, em duas frentes:
      - **Proativa**: `GenerateSummaryJob` roda `Rag::SimilarJobFinder` sobre o que foi extraído
-       do TR e informa no resumo quais projetos anteriores se parecem com este ("25051 ·
+       do ET (e do TR, quando houver) e informa no resumo quais projetos anteriores se parecem com este ("25051 ·
        Petrobras · Diagnóstico Quilombola — referência direta"). É o caso real do consultor:
        mesmo serviço, outra área — a proposta antiga é o melhor ponto de partida, e não adianta
        ela ficar no acervo se ninguém for buscá-la. Cumpre os itens 4 e 9 do passo a passo
@@ -283,8 +286,8 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
        1. **Descritor de serviço** (`GenerateSummaryJob::SEARCH_FIELDS`): a consulta é montada
           campo a campo, com orçamento por campo, só com o que descreve o SERVIÇO. Cliente,
           contato, prazo e nome de arquivo ficam de fora — cliente é faceta de filtro, nunca
-          semântica. `ProcessTrJob` passou a extrair um campo `empreendimento` (tecnologia e
-          porte) justamente para alimentar isto.
+          semântica. `ProcessEtJob` (e `ProcessTrJob`, quando houver TR) extrai um campo
+          `empreendimento` (tecnologia e porte) justamente para alimentar isto.
        2. **`Rag::BoilerplateDetector`**: marca o trecho que aparece em ≥20% dos outros jobs
           (obrigações, validade, prazo, condições de pagamento) — é IDF aplicado a trecho. Fica
           fora da comparação entre jobs, mas continua recuperável na busca direta. Roda no fim
@@ -359,7 +362,7 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 - Layout do documento final vem do modelo `.docx` real da Papyrus (preenchido via `rubyzip`), não é gerado pela IA nem recriado em HTML/CSS — ver seção 8.
 - IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
 - Views HTML+ERB são validadas pela gem `herb` (`bin/herb lint`, configurada em `.herb.yml`, rodando também no `bin/ci` e no workflow do GitHub Actions). O linter em si é o pacote npm `@herb-tools/linter`, fixado no `package.json` na mesma versão da gem — ao atualizar uma, atualizar a outra e o campo `version:` do `.herb.yml`.
-- Anexos de conversa (TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
+- Anexos de conversa (ET, TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
 - RAG do acervo (seção 11.1): rodar `script/rag/report.rb` e revisar o HTML ANTES de
   `script/rag/index.rb` — indexar é a única etapa que custa dinheiro. A ingestão é idempotente
   por SHA256 + `Rag::Indexer::PIPELINE_VERSION`; suba a versão ao mudar extração ou chunking de
@@ -395,19 +398,21 @@ isso?", e não havia como comparar o que dois documentos dizem sobre a mesma coi
 
 ### `project_findings` — informação com origem
 
-Cada informação extraída do TR ou de um complementar vira uma linha: `field` (menu fechado em
+Cada informação extraída do ET, do TR ou de um complementar vira uma linha: `field` (menu fechado em
 `ProjectFinding::FIELDS`), `value`, `nature` (`fato` | `inferencia` | `sugestao`), `source_kind`
-(`consultor` > `sistema` > `tr` > `complementar`, nessa ordem de autoridade), o blob do documento
-de origem, o `excerpt` (trecho literal, teto de 300 caracteres) e o `locator`.
+(`consultor` > `sistema` > `tr` > `et` > `complementar`, nessa ordem de autoridade — TR vence ET
+porque vem da própria instituição/órgão ambiental, autoridade sobre os próprios requisitos), o
+blob do documento de origem, o `excerpt` (trecho literal, teto de 300 caracteres) e o `locator`.
 
-- A extração (`ProcessTrJob`, `ProcessCompDocsJob`) pede uma **lista de achados** em vez de um
-  hash de campos, e grava via `ProjectFindings::Recorder`. Continua **uma chamada de IA por
-  documento** — mudou o formato, não a quantidade.
+- A extração (`ProcessEtJob`, `ProcessTrJob`, `ProcessCompDocsJob`) pede uma **lista de achados**
+  em vez de um hash de campos, e grava via `ProjectFindings::Recorder`. Continua **uma chamada de
+  IA por documento** — mudou o formato, não a quantidade.
 - Campo fora do menu vira `outro` (com o rótulo preservado no valor), nunca chave nova. Natureza
   ilegível vira `inferencia`, nunca `fato`: na dúvida, tratar como dedução é o erro barato.
 - `ProcessKmzJob` grava área e perímetro medidos como achados `source_kind: "sistema"`, sem IA.
-- Quem consome: `ProcessTrJob#assign_study_type!`, `GenerateSummaryJob` (resumo e descritor de
-  serviço do RAG) e o snapshot que a IA lê a cada turno.
+- Quem consome: `ProcessEtJob#assign_study_type!` (e `ProcessTrJob#assign_study_type!` como
+  reforço, quando o ET não tiver definido), `GenerateSummaryJob` (resumo e descritor de serviço do
+  RAG) e o snapshot que a IA lê a cada turno.
 
 ### Citação inline (`[F12]`)
 
@@ -419,7 +424,7 @@ removido do texto**: marca inventada renderizada como fonte é pior que nenhuma 
 
 ### `project_conflicts` — divergência entre documentos
 
-`ProjectFindings::ConflictDetector` roda no `GenerateSummaryJob` (único ponto depois de TR, KMZ e
+`ProjectFindings::ConflictDetector` roda no `GenerateSummaryJob` (único ponto depois de ET, TR, KMZ e
 complementares terminarem). A ordem das etapas é o que segura custo e precisão: só campo
 comparável, só entre fontes diferentes, igualdade textual e comparação numérica (tolerância de 2%)
 resolvem sem IA, e só o que sobra vai numa **única** chamada em lote para julgar se a diferença é

@@ -21,7 +21,7 @@ class ProposalsController < ApplicationController
     @conversation.ensure_proposal!
 
     redirect_to conversation_proposal_path(@conversation),
-      notice: "Equipe sugerida pela IA com base no TR e nos documentos complementares. Revise as horas antes de aprovar."
+      notice: "Equipe sugerida pela IA com base no ET, no TR (quando houver) e nos documentos complementares. Revise as horas antes de aprovar."
   end
 
   def update

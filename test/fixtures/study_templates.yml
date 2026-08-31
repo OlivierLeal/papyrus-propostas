@@ -11,3 +11,13 @@ fauna_flora_eia_rima:
   deliverable_name: Diagnóstico de fauna e flora
   hours_office_default: 30
   hours_field_default: 48
+
+# Horas padrão zeradas de propósito — mesmo cenário real do seeds.rb (placeholder até alguém
+# preencher horas de verdade). Serve pra provar que ensure_always_included_lines! não depende de
+# um default não-zero pra garantir a linha.
+direcao_eia_rima:
+  study_type: eia_rima
+  professional: diretora
+  deliverable_name: Direção de Negócios
+  hours_office_default: 0
+  hours_field_default: 0

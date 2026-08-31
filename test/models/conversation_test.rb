@@ -99,15 +99,15 @@ class ConversationTest < ActiveSupport::TestCase
   test "mark_step! merges the step atomically and keeps other steps untouched" do
     conversation = conversations(:processing_conversation)
 
-    conversation.mark_step!("tr", "done")
+    conversation.mark_step!("et", "done")
 
-    assert_equal "done", conversation.reload.processing_step_status("tr")
+    assert_equal "done", conversation.reload.processing_step_status("et")
     assert_equal "skipped", conversation.processing_step_status("comp_docs")
   end
 
-  test "check_processing_complete! enqueues GenerateSummaryJob once tr and comp_docs are resolved" do
+  test "check_processing_complete! enqueues GenerateSummaryJob once et and comp_docs are resolved" do
     conversation = conversations(:processing_conversation)
-    conversation.mark_step!("tr", "done")
+    conversation.mark_step!("et", "done")
 
     assert_enqueued_with(job: GenerateSummaryJob, args: [ conversation.id ]) do
       conversation.check_processing_complete!
@@ -116,7 +116,7 @@ class ConversationTest < ActiveSupport::TestCase
 
   test "check_processing_complete! does not enqueue twice" do
     conversation = conversations(:processing_conversation)
-    conversation.mark_step!("tr", "done")
+    conversation.mark_step!("et", "done")
     conversation.check_processing_complete!
 
     assert_no_enqueued_jobs only: GenerateSummaryJob do

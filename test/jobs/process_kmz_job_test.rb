@@ -38,7 +38,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
   end
 
   test "marks kmz as skipped when there is no KMZ attachment" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
 
     ProcessKmzJob.perform_now(@conversation.id)
 
@@ -46,7 +46,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
   end
 
   test "processes a valid KMZ and populates the geospatial result, falling back to the SVG croqui when Mapbox is unavailable" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz(VALID_KML)
 
     stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
@@ -63,7 +63,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
   end
 
   test "uses the real Mapbox map instead of the SVG croqui when it's available" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz(VALID_KML)
 
     stub_mapbox_fetch("fake-png-bytes") { ProcessKmzJob.perform_now(@conversation.id) }
@@ -78,7 +78,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
   end
 
   test "marks kmz as failed and does not raise when the KMZ has no geometry at all" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz("isso não é um KML válido")
 
     ProcessKmzJob.perform_now(@conversation.id)
@@ -88,7 +88,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
   end
 
   test "processes a KMZ with only a LineString (no polygon), computing length instead of area" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz(LINE_KML)
 
     stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
@@ -104,7 +104,7 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
   end
 
   test "triggers GenerateSummaryJob once tr and comp_docs are already resolved" do
-    @conversation.update!(processing_steps: { "tr" => "done", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
 
     assert_enqueued_with(job: GenerateSummaryJob, args: [ @conversation.id ]) do
       ProcessKmzJob.perform_now(@conversation.id)

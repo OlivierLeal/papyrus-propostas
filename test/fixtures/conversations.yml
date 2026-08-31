@@ -5,7 +5,8 @@ reviewing_conversation:
   client_name: Serra Verde Energias Renováveis S.A.
   status: reviewing
   processing_steps:
-    tr: done
+    et: done
+    tr: skipped
     comp_docs: skipped
     kmz: skipped
     summary: done
@@ -17,7 +18,8 @@ processing_conversation:
   client_name: Cliente Em Processamento
   status: processing
   processing_steps:
-    tr: pending
+    et: pending
+    tr: skipped
     comp_docs: skipped
     kmz: skipped
     summary: pending
@@ -29,7 +31,8 @@ priced_conversation:
   client_name: Cliente Já Precificado
   status: pricing
   processing_steps:
-    tr: done
+    et: done
+    tr: skipped
     comp_docs: skipped
     kmz: skipped
     summary: done

@@ -46,8 +46,10 @@ class ProposalTest < ActiveSupport::TestCase
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    assert_equal 1, pricing.proposal_professionals.count
-    assert_equal 60, pricing.proposal_professionals.first.hours_office
+    # 2, não 1: a diretora (always_included) entra sozinha via ensure_always_included_lines!,
+    # mesmo não estando nas linhas que a IA sugeriu.
+    assert_equal 2, pricing.proposal_professionals.count
+    assert_equal 60, pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").hours_office
     assert_equal "combined", proposal.reload.document_split
   end
 
@@ -82,12 +84,52 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "separated", proposal.reload.document_split
   end
 
+  test "build_with_ai_suggested_team! includes an always_included professional even with all-zero default hours and no AI line for them" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    ai_response = {
+      linhas: [ { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", hours_office: 60, hours_field: 0 } ],
+      documentos_separados: false
+    }.to_json
+
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    diretora_line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
+    assert diretora_line.present?
+    assert_equal 0, diretora_line.hours_office
+    assert_equal 0, diretora_line.hours_field
+  end
+
+  test "build_with_ai_suggested_team! keeps the AI's real hours for an always_included professional instead of overwriting with the zero default" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    ai_response = {
+      linhas: [ { professional_id: professionals(:diretora).id, deliverable_name: "Direção de Negócios", hours_office: 15, hours_field: 0 } ],
+      documentos_separados: false
+    }.to_json
+
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    assert_equal 1, pricing.proposal_professionals.where(professional: professionals(:diretora)).count
+    assert_equal 15, pricing.proposal_professionals.find_by(professional: professionals(:diretora)).hours_office
+  end
+
+  test "build_from_template! includes an always_included professional even when their own template defaults to zero hours" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    pricing = proposal.build_from_template!
+
+    diretora_line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
+    assert diretora_line.present?
+  end
+
   test "build_with_ai_suggested_team! falls back to the template when the AI reply is not valid JSON" do
     proposal = @conversation.create_proposal!(status: "draft")
 
     pricing = stub_ai_complete("isso não é json") { proposal.build_with_ai_suggested_team! }
 
-    assert_equal 2, pricing.proposal_professionals.count
+    # 3 templates no menu (coordenação, fauna/flora, direção da diretora fixa).
+    assert_equal 3, pricing.proposal_professionals.count
   end
 
   test "build_with_ai_suggested_team! strips markdown fences before parsing" do
@@ -96,8 +138,8 @@ class ProposalTest < ActiveSupport::TestCase
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    # Nenhuma linha válida vinda da IA (vazio) cai no fallback do template.
-    assert_equal 2, pricing.proposal_professionals.count
+    # Nenhuma linha válida vinda da IA (vazio) cai no fallback do template (3 templates no menu).
+    assert_equal 3, pricing.proposal_professionals.count
   end
 
   test "build_with_ai_suggested_team! falls back to the template when the AI call itself raises" do
@@ -105,7 +147,7 @@ class ProposalTest < ActiveSupport::TestCase
 
     pricing = stub_ai_error { proposal.build_with_ai_suggested_team! }
 
-    assert_equal 2, pricing.proposal_professionals.count
+    assert_equal 3, pricing.proposal_professionals.count
   end
 
   test "team_slot_for_docx returns the professional with the most office hours by default" do

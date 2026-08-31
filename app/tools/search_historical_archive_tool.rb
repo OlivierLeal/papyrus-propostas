@@ -16,7 +16,7 @@ class SearchHistoricalArchiveTool < RubyLLM::Tool
     redigir uma seção, que escopo aplicou num tipo de estudo, que equipe usou, que ressalvas fez,
     ou o que um cliente exigiu num projeto parecido.
 
-    Não use para perguntas sobre os documentos DESTA proposta (TR, KMZ e complementares desta
+    Não use para perguntas sobre os documentos DESTA proposta (ET, TR, KMZ e complementares desta
     conversa já estão no histórico). Esta ferramenta é só para o acervo de projetos passados.
 
     Os trechos retornados são REFERÊNCIA para escrever, nunca fonte de preço: valores de

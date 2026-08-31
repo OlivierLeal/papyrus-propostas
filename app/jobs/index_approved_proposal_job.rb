@@ -29,7 +29,7 @@ class IndexApprovedProposalJob < ApplicationJob
 
   private
 
-  # A técnica e a comercial saem como arquivos separados quando o TR exige; a técnica é a que
+  # A técnica e a comercial saem como arquivos separados quando o ET/TR exige; a técnica é a que
   # tem a prosa que interessa ao RAG (a comercial é tabela de preço, que nunca é referência).
   def latest_generated_document(proposal)
     documents = proposal.generated_documents.map(&:blob)

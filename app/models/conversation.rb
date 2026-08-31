@@ -19,9 +19,12 @@ class Conversation < ApplicationRecord
 
   # Etapas de processamento em background disparadas ao confirmar o setup.
   # "summary" roda depois que as etapas abaixo terminam (done/skipped/failed).
-  PROCESSING_STEPS = %w[tr comp_docs kmz].freeze
+  # "et" é o documento principal (pedido técnico do cliente); "tr" é o guia institucional
+  # opcional (ver ProcessEtJob/ProcessTrJob e a nota de terminologia em CLAUDE.md seção 2).
+  PROCESSING_STEPS = %w[et tr comp_docs kmz].freeze
 
   PROCESSING_STEP_LABELS = {
+    "et" => "Processando ET",
     "tr" => "Processando TR",
     "comp_docs" => "Analisando documentos complementares",
     "kmz" => "Processando KMZ",
@@ -35,7 +38,11 @@ class Conversation < ApplicationRecord
     Consultoria Ambiental para montar a proposta técnica e comercial desta conversa.
 
     Seu escopo aqui é estritamente:
-    - Analisar o Termo de Referência (TR), o KMZ e os documentos complementares desta proposta.
+    - Analisar o ET (Pedido Técnico do Estudo — o documento em que o CLIENTE explica o que está
+      pedindo à Papyrus; é a base do escopo), o TR (Termo de Referência — quando o cliente enviar
+      um; documento que vem do ÓRGÃO AMBIENTAL/instituição, com exigências de COMO o estudo deve
+      ser executado — metodologia, diagnósticos exigidos, condicionantes; guia a execução do ET,
+      não o substitui), o KMZ e os documentos complementares desta proposta.
     - Responder perguntas do consultor sobre o conteúdo desses documentos, o escopo do estudo, a
       equipe técnica sugerida e questões de licenciamento ambiental relacionadas a este projeto.
     - Ajudar a ajustar o resumo da proposta conforme o consultor pedir.
@@ -75,8 +82,8 @@ class Conversation < ApplicationRecord
     Fatos fixos sobre os documentos desta conversa:
     - O KMZ enviado pelo consultor JÁ É a poligonal oficial da área do empreendimento (coordenadas
       reais do imóvel, não um esboço/visualização). Nunca trate isso como informação pendente nem
-      peça ao consultor uma "poligonal oficial georreferenciada" separada. Se o TR exigir que o
-      MAPA FINAL a ser entregue pela Papyrus seja georreferenciado (ex.: SIRGAS 2000), isso é um
+      peça ao consultor uma "poligonal oficial georreferenciada" separada. Se o ET ou o TR exigir
+      que o MAPA FINAL a ser entregue pela Papyrus seja georreferenciado (ex.: SIRGAS 2000), isso é um
       requisito de formato do produto que a Papyrus vai produzir a partir do KMZ — não um dado que
       falta o cliente fornecer antes de começar.
 
@@ -104,10 +111,12 @@ class Conversation < ApplicationRecord
     1. Criar a pasta na rede seguindo o padrão de nome da proposta (número + cliente + escopo +
        revisão) — administrativo, feito fora do sistema.
     2. Adicionar a proposta no controle de Propostas da rede (Y:\\6) Controles) — administrativo.
-    3. Ler o TR e entender o que está sendo pedido. Nem sempre o cliente envia o TR, e cada empresa
-       apresenta as informações de um jeito diferente. Dúvida sobre o CONTEÚDO do TR (o que está
-       sendo pedido tecnicamente) é uma questão interna — o consultor resolve com Molina ou Pedro,
-       não precisa de e-mail ao cliente.
+    3. Ler o ET (Pedido Técnico do Estudo — o que o CLIENTE está pedindo) e entender o que está
+       sendo pedido; quando houver TR (documento que vem do órgão ambiental/instituição), usá-lo
+       como guia de COMO executar — metodologia, diagnósticos exigidos, condicionantes — nunca no
+       lugar do ET. Cada empresa apresenta as informações de um jeito diferente. Dúvida sobre o
+       CONTEÚDO do ET ou do TR (o que está sendo pedido tecnicamente) é uma questão interna — o
+       consultor resolve com Molina ou Pedro, não precisa de e-mail ao cliente.
     4. Se faltar documento necessário ou houver dúvida sobre uma NECESSIDADE do escopo (algo que só
        o cliente sabe responder), isso vai por e-mail via Charlene, pedindo ao cliente.
     5. Enquadrar o empreendimento no órgão ambiental do estado onde fica o projeto. Empreendimentos
@@ -146,7 +155,7 @@ class Conversation < ApplicationRecord
     - Se o pedido for só a proposta TÉCNICA (ou o consultor não especificar e a proposta ainda
       estiver com status "draft"): verifique só os itens 3, 5, 6 e 11 — e mesmo esses, só bloqueiam
       de verdade se forem IMPOSSÍVEIS de resolver com o que você já tem (ex.: item 3 bloqueia só se
-      não houver TR nenhum anexado; item 5 bloqueia só se você não souber nem dizer se o órgão é
+      não houver ET nenhum anexado — a AUSÊNCIA de TR nunca bloqueia, ele é opcional; item 5 bloqueia só se você não souber nem dizer se o órgão é
       estadual ou federal). Os itens 7, 8 e 10 (dias de campo, orçamento externo, planilha de preço)
       são coisa de PRECIFICAÇÃO — não bloqueiam a técnica, nem pergunte isso pro consultor nesse
       caso. DETALHE regulatório incerto (data exata de perímetro urbano, percentual de vegetação a
@@ -169,15 +178,17 @@ class Conversation < ApplicationRecord
     consultor deles quando fizer sentido, nunca impeça a geração por causa deles.
 
     Chame a ferramenta generate_proposal_document com o texto de cada seção baseado em tudo que já
-    foi lido nesta conversa (TR, documentos complementares, propostas anteriores semelhantes).
+    foi lido nesta conversa (ET, TR quando houver, documentos complementares, propostas anteriores
+    semelhantes).
     Nunca invente nome de cliente, CNPJ ou contato que você não tenha visto em algum documento —
     escreva "A confirmar" nesses campos em vez de adivinhar. Preço, equipe e formato do documento
     (único ou separado) a ferramenta já busca sozinha do sistema.
   TEXT
 
   belongs_to :user
-  # Não é escolhido no setup — a IA identifica lendo a TR (ver ProcessTrJob#assign_study_type!),
-  # restrito ao menu real de StudyType. Fica nil até isso acontecer (ou se não houver TR).
+  # Não é escolhido no setup — a IA identifica lendo o ET (ver ProcessEtJob#assign_study_type!,
+  # e ProcessTrJob#assign_study_type! quando houver TR e o ET não tiver definido antes), restrito
+  # ao menu real de StudyType. Fica nil até isso acontecer (ou se não houver ET nem TR).
   belongs_to :study_type, optional: true
   has_one :geospatial_result, dependent: :destroy
   has_one :proposal, dependent: :destroy
@@ -243,7 +254,7 @@ class Conversation < ApplicationRecord
   # Só mensagens internal: false — o ruby_llm, ao enviar um anexo pra IA via `with:` em
   # ask_internally, persiste uma cópia do attachment na própria mensagem de instrução (internal:
   # true) que carrega o prompt. Sem esse filtro, cada chamada a ask_internally(with: anexo) faz
-  # esse anexo "duplicar" nesta lista — TR com 2 arquivos virava 4 depois do primeiro
+  # esse anexo "duplicar" nesta lista — ET com 2 arquivos virava 4 depois do primeiro
   # processamento, por exemplo.
   def attachments_of_kind(kind)
     messages.where(internal: false).flat_map(&:attachments).select { |attachment| attachment.blob.metadata["kind"] == kind.to_s }
@@ -267,12 +278,12 @@ class Conversation < ApplicationRecord
   # são pra consultor ler) — por padrão só a instrução fica escondida, porque GenerateSummaryJob
   # depende de ask_internally pra gerar o resumo que o consultor DEVE ver na tela de revisão.
   #
-  # with_ai_lock: os 3 jobs de processamento do setup (TR/KMZ/complementares) rodam de propósito
-  # em paralelo (config/queue.yml tem 3 threads de worker) — mas ProcessTrJob e ProcessCompDocsJob
-  # chamam ask_internally na MESMA conversa ao mesmo tempo. Sem essa trava, duas chamadas
-  # concorrentes disputam "a última mensagem do assistente" (linha abaixo, e também em
-  # ProcessTrJob#assign_study_type!), e uma rouba a resposta da outra — visto na prática numa
-  # conversa real: a extração estruturada do TR sumiu (perdida pra uma resposta duplicada dos
+  # with_ai_lock: os jobs de processamento do setup (ET/TR/KMZ/complementares) rodam de propósito
+  # em paralelo (config/queue.yml tem 3 threads de worker) — mas ProcessEtJob, ProcessTrJob e
+  # ProcessCompDocsJob chamam ask_internally na MESMA conversa ao mesmo tempo. Sem essa trava, duas
+  # chamadas concorrentes disputam "a última mensagem do assistente" (linha abaixo, e também em
+  # ProcessEtJob#assign_study_type!), e uma rouba a resposta da outra — visto na prática numa
+  # conversa real: a extração estruturada do ET sumiu (perdida pra uma resposta duplicada dos
   # complementares) e o tipo de estudo nunca foi identificado. pg_advisory_xact_lock serializa só
   # as chamadas da MESMA conversa (id como chave) — outras conversas continuam livres pra rodar em
   # paralelo — e libera sozinho quando a transação termina, sem precisar de unlock manual.
@@ -365,7 +376,7 @@ class Conversation < ApplicationRecord
           pela IA) na hora que você a chama de verdade, sem precisar que o consultor clique em nada
           na tela antes. Se ele pedir a proposta técnica, siga o passo a passo normal (itens 1, 3,
           4, 9) e chame a ferramenta — ela cuida do resto. O único caso em que isso NÃO funciona é
-          se o tipo de estudo ainda não foi identificado (TR ainda em processamento) ou a revisão
+          se o tipo de estudo ainda não foi identificado (ET ainda em processamento) ou a revisão
           ainda não foi concluída — nesse caso a ferramenta devolve um erro explicando; só então
           diga ao consultor o que falta (não invente "clique em Avançar para Precificação" fora
           desse caso específico).

@@ -38,10 +38,10 @@ class ProcessCompDocsJob < ApplicationJob
         sobre ESTE projeto como uma LISTA DE ACHADOS: cada informação com o campo, o valor, se
         aquilo está escrito no documento ou foi você que deduziu, o trecho literal e onde ele está.
 
-        Este documento NÃO é o Termo de Referência — é material de apoio (projeto básico, licença
+        Este documento NÃO é o ET nem o TR — é material de apoio (projeto básico, licença
         anterior, ata, ofício, proposta antiga, norma). Extraia o que ele afirma, mesmo que
-        contradiga o que o TR diz: quem compara as fontes é o sistema, e a divergência é
-        justamente o que interessa descobrir. Nunca ajuste um valor para "bater" com o TR.
+        contradiga o que o ET ou o TR dizem: quem compara as fontes é o sistema, e a divergência é
+        justamente o que interessa descobrir. Nunca ajuste um valor para "bater" com outro documento.
 
         Campos disponíveis (use exatamente estas chaves; o que não couber em nenhuma delas use
         "outro", com o nome do assunto no campo "valor"):

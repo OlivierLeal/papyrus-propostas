@@ -99,7 +99,8 @@ class Proposal < ApplicationRecord
   end
 
   # Pede pra IA sugerir horas por profissional/entregável com base em tudo que já foi
-  # extraído do TR e dos documentos complementares desta conversa (CLAUDE.md seção 5).
+  # extraído do ET, do TR (quando houver) e dos documentos complementares desta conversa
+  # (CLAUDE.md seção 5).
   # A sugestão é restrita ao "menu" de profissionais/entregáveis do study_templates —
   # a IA nunca pode inventar um profissional ou entregável que não exista no sistema.
   # Se a IA falhar ou não sugerir nada válido, cai no template padrão como segurança.
@@ -111,6 +112,7 @@ class Proposal < ApplicationRecord
     suggestion = fetch_ai_suggestion(templates)
     apply_lines!(pricing, Array(suggestion["linhas"]), templates)
     apply_lines!(pricing, template_fallback_lines(templates), templates) if pricing.proposal_professionals.none?
+    ensure_always_included_lines!(pricing, templates)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
 
     finalize!(pricing)
@@ -125,6 +127,7 @@ class Proposal < ApplicationRecord
     templates = conversation.study_type.study_templates.includes(:professional).to_a
     pricing = create_project_pricing!
     apply_lines!(pricing, template_fallback_lines(templates), templates)
+    ensure_always_included_lines!(pricing, templates)
     finalize!(pricing)
   end
 
@@ -182,8 +185,8 @@ class Proposal < ApplicationRecord
 
       <<~TEXT
         Você é um assistente que sugere a composição de equipe para uma proposta de consultoria
-        ambiental, com base em tudo que já foi analisado nesta conversa (TR e documentos
-        complementares, incluindo propostas anteriores semelhantes, se houver).
+        ambiental, com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, e
+        documentos complementares, incluindo propostas anteriores semelhantes, se houver).
 
         Profissionais e entregáveis DISPONÍVEIS para o tipo de estudo "#{conversation.study_type.name}"
         (não sugira nada fora desta lista — nunca invente professional_id ou entregável novo):
@@ -193,9 +196,10 @@ class Proposal < ApplicationRecord
         considerando a complexidade, os diagnósticos exigidos e as demais informações já extraídas
         nesta conversa. Se um item não for necessário para este projeto, sugira 0 para ambas as horas.
 
-        Além disso, releia o TR e diga se ele exige que a proposta técnica e a proposta comercial
-        sejam apresentadas como documentos/envelopes SEPARADOS (comum em licitação pública) — se o
-        TR não falar nada sobre isso, considere que NÃO exige (documento único).
+        Além disso, releia o ET e o TR (quando houver) e diga se algum deles exige que a proposta
+        técnica e a proposta comercial sejam apresentadas como documentos/envelopes SEPARADOS
+        (comum em licitação pública) — se nenhum falar nada sobre isso, considere que NÃO exige
+        (documento único).
 
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
@@ -231,6 +235,26 @@ class Proposal < ApplicationRecord
           deliverable_name: template.deliverable_name,
           hours_office: hours_office,
           hours_field: hours_field
+        )
+      end
+    end
+
+    # Profissionais fixos (professionals.always_included — Diretoria/Coordenação da Papyrus)
+    # entram em TODA proposta, com as horas padrão do template como ponto de partida. apply_lines!
+    # pula linha com 0h nos dois campos (ver acima) e a IA pode simplesmente não sugerir a linha
+    # — nenhum dos dois casos pode fazer um fixo sumir da equipe, então a garantia é do sistema,
+    # não da sugestão da IA. O consultor ainda ajusta as horas depois, na Tela de Precificação.
+    def ensure_always_included_lines!(pricing, templates)
+      present = pricing.proposal_professionals.pluck(:professional_id, :deliverable_name).to_set
+
+      templates.select { |t| t.professional.always_included? }.each do |template|
+        next if present.include?([ template.professional_id, template.deliverable_name ])
+
+        pricing.proposal_professionals.create!(
+          professional: template.professional,
+          deliverable_name: template.deliverable_name,
+          hours_office: template.hours_office_default,
+          hours_field: template.hours_field_default
         )
       end
     end

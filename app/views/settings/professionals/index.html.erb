@@ -32,7 +32,12 @@
       <tbody class="divide-y divide-base-300">
         <% @professionals.each do |professional| %>
           <tr class="hover:bg-base-200/40 transition-colors">
-            <td class="font-medium text-base-content"><%= professional.name %></td>
+            <td class="font-medium text-base-content">
+              <%= professional.name %>
+              <% if professional.always_included? %>
+                <span class="badge badge-info badge-soft badge-sm ml-1" title="Sempre incluído na equipe">Fixo</span>
+              <% end %>
+            </td>
             <td class="text-base-content/70"><%= professional.role %></td>
             <td class="text-base-content/70"><%= number_to_currency(professional.rate_office, unit: "R$", separator: ",", delimiter: ".") %></td>
             <td class="text-base-content/70"><%= number_to_currency(professional.rate_field, unit: "R$", separator: ",", delimiter: ".") %></td>

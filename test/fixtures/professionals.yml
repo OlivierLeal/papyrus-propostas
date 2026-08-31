@@ -24,3 +24,13 @@ inativo:
   registration: CREA 99999
   specialties: Meio físico
   active: false
+
+diretora:
+  name: Diretora Fixa
+  role: Diretora de Negócios
+  rate_office: 300.00
+  rate_field: 0.00
+  registration: CREA 00000
+  specialties: Direção
+  active: true
+  always_included: true

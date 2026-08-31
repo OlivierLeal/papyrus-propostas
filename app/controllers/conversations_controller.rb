@@ -17,10 +17,11 @@ class ConversationsController < ApplicationController
       return
     end
 
+    ets = Array(params[:et]).reject(&:blank?)
     trs = Array(params[:tr]).reject(&:blank?)
     kmz = params[:kmz]
     complementary_documents = Array(params[:complementary_documents]).reject(&:blank?)
-    file_errors = validate_setup_files(trs, kmz)
+    file_errors = validate_setup_files(ets, trs, kmz)
 
     if file_errors.any?
       @conversation.errors.add(:base, file_errors.join(" "))
@@ -30,7 +31,8 @@ class ConversationsController < ApplicationController
 
     @conversation.save!
     @conversation.apply_system_instructions!
-    message = @conversation.messages.build(role: "user", content: setup_message_content(trs, kmz, complementary_documents, params[:notes]))
+    message = @conversation.messages.build(role: "user", content: setup_message_content(ets, trs, kmz, complementary_documents, params[:notes]))
+    ets.each { |et| attach_with_kind(message, et, "et") }
     trs.each { |tr| attach_with_kind(message, tr, "tr") }
     attach_with_kind(message, kmz, "kmz") if kmz.present?
     complementary_documents.each { |doc| attach_with_kind(message, doc, "complementary") }
@@ -45,7 +47,7 @@ class ConversationsController < ApplicationController
   end
 
   # Único jeito de definir/corrigir o tipo de estudo depois da criação — nunca no setup (ver
-  # ProcessTrJob#assign_study_type!, que já preenche isso sozinho lendo a TR).
+  # ProcessEtJob#assign_study_type!, que já preenche isso sozinho lendo o ET).
   def update
     @conversation.update!(study_type_params)
     redirect_to @conversation, notice: "Tipo de estudo atualizado."
@@ -61,6 +63,7 @@ class ConversationsController < ApplicationController
 
       @conversation.update!(status: "processing", setup_completed_at: Time.current, processing_steps: steps)
 
+      ProcessEtJob.perform_later(@conversation.id) if steps["et"] == "pending"
       ProcessTrJob.perform_later(@conversation.id) if steps["tr"] == "pending"
       ProcessCompDocsJob.perform_later(@conversation.id) if steps["comp_docs"] == "pending"
       ProcessKmzJob.perform_later(@conversation.id) if steps["kmz"] == "pending"
@@ -78,14 +81,15 @@ class ConversationsController < ApplicationController
       params.require(:conversation).permit(:study_type_id)
     end
 
-    def validate_setup_files(trs, kmz)
+    def validate_setup_files(ets, trs, kmz)
       errors = []
-      errors << "TR deve ser um arquivo PDF ou DOCX." if trs.any? { |tr| !tr_content_type?(tr) }
+      errors << "ET deve ser um arquivo PDF ou DOCX." if ets.any? { |et| !document_content_type?(et) }
+      errors << "TR deve ser um arquivo PDF ou DOCX." if trs.any? { |tr| !document_content_type?(tr) }
       errors << "KMZ deve ser um arquivo .kmz ou .kml." if kmz.present? && !kmz_filename?(kmz)
       errors
     end
 
-    def tr_content_type?(file)
+    def document_content_type?(file)
       %w[
         application/pdf
         application/msword
@@ -97,8 +101,9 @@ class ConversationsController < ApplicationController
       file.original_filename.match?(/\.(kmz|kml)\z/i)
     end
 
-    def setup_message_content(trs, kmz, complementary_documents, notes)
+    def setup_message_content(ets, trs, kmz, complementary_documents, notes)
       parts = []
+      parts << "ET: #{ets.map(&:original_filename).join(', ')}" if ets.any?
       parts << "TR: #{trs.map(&:original_filename).join(', ')}" if trs.any?
       parts << "KMZ: #{kmz.original_filename}" if kmz.present?
       parts << "#{complementary_documents.size} documento(s) complementar(es)" if complementary_documents.any?

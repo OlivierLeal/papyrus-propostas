@@ -17,7 +17,7 @@ class RememberForFutureProposalsTool < RubyLLM::Tool
     - uma condicionante ou ressalva do órgão ambiental;
     - uma correção que o consultor fez em você e que você deve lembrar.
 
-    NÃO use para: informação que já está no TR (ela vive na proposta), fato pontual deste
+    NÃO use para: informação que já está no ET ou no TR (ela vive na proposta), fato pontual deste
     projeto que não se repete, nem nada que você deduziu sem confirmação. Na dúvida, não
     registre — nota errada aprovada vira "conhecimento da Papyrus" e contamina propostas futuras.
 

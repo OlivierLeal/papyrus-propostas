@@ -7,8 +7,9 @@ class ApplicationController < ActionController::Base
   stale_when_importmap_changes
 
   private
-    # Anexa um arquivo enviado por upload a uma mensagem, marcando o "tipo" (tr/kmz/complementary)
-    # nos metadados do blob — é assim que os jobs de processamento identificam qual anexo é qual.
+    # Anexa um arquivo enviado por upload a uma mensagem, marcando o "tipo"
+    # (et/tr/kmz/complementary) nos metadados do blob — é assim que os jobs de processamento
+    # identificam qual anexo é qual.
     def attach_with_kind(message, file, kind)
       message.attachments.attach(
         io: file,

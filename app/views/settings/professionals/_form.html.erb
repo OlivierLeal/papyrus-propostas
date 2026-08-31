@@ -46,6 +46,11 @@
     <span class="label-text">Ativo</span>
   </label>
 
+  <label class="label cursor-pointer justify-start gap-2">
+    <%= form.check_box :always_included, class: "checkbox checkbox-sm" %>
+    <span class="label-text">Sempre incluir na equipe (Diretoria/Coordenação — entra em toda proposta, independente do que a IA sugerir)</span>
+  </label>
+
   <div class="flex items-center gap-2 mt-2">
     <%= form.submit "Salvar", class: "btn btn-primary" %>
     <%= link_to "Cancelar", settings_professionals_path, class: "btn btn-ghost" %>

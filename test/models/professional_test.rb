@@ -30,6 +30,11 @@ class ProfessionalTest < ActiveSupport::TestCase
     assert_not_includes Professional.active, professionals(:inativo)
   end
 
+  test "always_included scope only returns professionals flagged as always included" do
+    assert_includes Professional.always_included, professionals(:diretora)
+    assert_not_includes Professional.always_included, professionals(:coordenador)
+  end
+
   test "cannot be destroyed while referenced by proposal_professionals" do
     professional = professionals(:coordenador)
     assert_no_difference "Professional.count" do

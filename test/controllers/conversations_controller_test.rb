@@ -28,17 +28,20 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "create persists the conversation, applies system instructions and enqueues all processing jobs" do
+    et = fixture_file_upload("tr_sample.pdf", "application/pdf")
     tr = fixture_file_upload("tr_sample.pdf", "application/pdf")
     kmz = fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz")
 
-    assert_enqueued_with(job: ProcessTrJob) do
-      assert_enqueued_with(job: ProcessCompDocsJob) do
-        assert_enqueued_with(job: ProcessKmzJob) do
-          assert_difference "Conversation.count", 1 do
-            post conversations_path, params: {
-              conversation: { client_name: "Cliente Novo" },
-              tr: tr, kmz: kmz, complementary_documents: [ fixture_file_upload("comp_sample.pdf", "application/pdf") ]
-            }
+    assert_enqueued_with(job: ProcessEtJob) do
+      assert_enqueued_with(job: ProcessTrJob) do
+        assert_enqueued_with(job: ProcessCompDocsJob) do
+          assert_enqueued_with(job: ProcessKmzJob) do
+            assert_difference "Conversation.count", 1 do
+              post conversations_path, params: {
+                conversation: { client_name: "Cliente Novo" },
+                et: et, tr: tr, kmz: kmz, complementary_documents: [ fixture_file_upload("comp_sample.pdf", "application/pdf") ]
+              }
+            end
           end
         end
       end
@@ -51,7 +54,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert conversation.messages.where(role: "system").exists?
   end
 
-  test "create never sets study_type — it's identified later by ProcessTrJob, not chosen at setup" do
+  test "create never sets study_type — it's identified later by ProcessEtJob, not chosen at setup" do
     post conversations_path, params: {
       conversation: { client_name: "Cliente Novo" }
     }
@@ -60,8 +63,8 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_nil conversation.study_type_id # study_type_id nos params é ignorado — não é mais permitido
   end
 
-  test "create works with no attachments at all (tr, comp_docs and kmz all skipped)" do
-    assert_no_enqueued_jobs(only: [ ProcessTrJob, ProcessCompDocsJob, ProcessKmzJob ]) do
+  test "create works with no attachments at all (et, tr, comp_docs and kmz all skipped)" do
+    assert_no_enqueued_jobs(only: [ ProcessEtJob, ProcessTrJob, ProcessCompDocsJob, ProcessKmzJob ]) do
       post conversations_path, params: {
         conversation: { client_name: "Cliente Sem Arquivos" }
       }
@@ -69,6 +72,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
 
     conversation = Conversation.order(:created_at).last
     assert_redirected_to conversation
+    assert_equal "skipped", conversation.processing_step_status("et")
     assert_equal "skipped", conversation.processing_step_status("tr")
     assert_equal "skipped", conversation.processing_step_status("comp_docs")
     assert_equal "skipped", conversation.processing_step_status("kmz")
@@ -77,6 +81,18 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
   test "create re-renders the form with errors when client_name is missing" do
     assert_no_difference "Conversation.count" do
       post conversations_path, params: { conversation: { client_name: "" } }
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  test "create rejects an ET that isn't PDF or DOCX" do
+    bad_et = fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz")
+
+    assert_no_difference "Conversation.count" do
+      post conversations_path, params: {
+        conversation: { client_name: "Cliente Novo" }, et: bad_et
+      }
     end
 
     assert_response :unprocessable_entity
@@ -94,24 +110,38 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
-  test "create accepts more than one TR file, attaching all of them with kind tr" do
-    trs = [ fixture_file_upload("tr_sample.pdf", "application/pdf"), fixture_file_upload("comp_sample.pdf", "application/pdf") ]
+  test "create accepts more than one ET file, attaching all of them with kind et" do
+    ets = [ fixture_file_upload("tr_sample.pdf", "application/pdf"), fixture_file_upload("comp_sample.pdf", "application/pdf") ]
 
     post conversations_path, params: {
-      conversation: { client_name: "Cliente TR Múltiplo" }, tr: trs
+      conversation: { client_name: "Cliente ET Múltiplo" }, et: ets
     }
 
     conversation = Conversation.order(:created_at).last
     assert_redirected_to conversation
-    assert_equal 2, conversation.attachments_of_kind("tr").size
+    assert_equal 2, conversation.attachments_of_kind("et").size
   end
 
-  test "create rejects the whole batch when any of the multiple TR files isn't PDF or DOCX" do
-    trs = [ fixture_file_upload("tr_sample.pdf", "application/pdf"), fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz") ]
+  test "create accepts an optional TR alongside the ET, attaching it separately with kind tr" do
+    et = fixture_file_upload("tr_sample.pdf", "application/pdf")
+    tr = fixture_file_upload("comp_sample.pdf", "application/pdf")
+
+    post conversations_path, params: {
+      conversation: { client_name: "Cliente ET e TR" }, et: et, tr: tr
+    }
+
+    conversation = Conversation.order(:created_at).last
+    assert_redirected_to conversation
+    assert_equal 1, conversation.attachments_of_kind("et").size
+    assert_equal 1, conversation.attachments_of_kind("tr").size
+  end
+
+  test "create rejects the whole batch when any of the multiple ET files isn't PDF or DOCX" do
+    ets = [ fixture_file_upload("tr_sample.pdf", "application/pdf"), fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz") ]
 
     assert_no_difference "Conversation.count" do
       post conversations_path, params: {
-        conversation: { client_name: "Cliente Novo" }, tr: trs
+        conversation: { client_name: "Cliente Novo" }, et: ets
       }
     end
 

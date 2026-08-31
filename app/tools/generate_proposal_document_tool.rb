@@ -17,7 +17,7 @@
 class GenerateProposalDocumentTool < RubyLLM::Tool
   description <<~DESC
     Gera o(s) arquivo(s) .docx da proposta preenchidos, usando o texto que você escrever pra
-    cada seção (baseado no TR, nos documentos complementares e em propostas anteriores
+    cada seção (baseado no ET, no TR quando houver, nos documentos complementares e em propostas anteriores
     semelhantes já analisados nesta conversa) e os dados de preço/equipe que já existem no
     sistema. Enquanto a proposta ainda está em "draft" (preço não aprovado na Tela de
     Precificação), esta ferramenta só gera a proposta_tecnica.docx — sem tabela de preço nem
@@ -36,7 +36,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :cnpj_cliente, desc: "CNPJ do cliente, ou \"A confirmar\" se não souber"
   param :objetivo_dos_servicos, desc: "Texto da seção 'Objetivo dos Serviços'"
   param :caracterizacao_do_empreendimento, desc: "Texto da seção 'Caracterização do Empreendimento'"
-  param :nome_documento_tr, desc: "Nome do documento de TR usado como base do escopo"
+  param :nome_documento_tr, desc: "Nome do documento de ET (Pedido Técnico do Estudo) usado como base do escopo — " \
+    "o nome do parâmetro ficou de antes da separação ET/TR, mas o valor esperado é o do ET, o documento principal"
   param :escopo_e_metodologia, desc: "Texto da seção 'Escopo e Metodologia', descrevendo como o serviço será executado"
   param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
   param :produtos, type: "array",
@@ -71,7 +72,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   def execute(**args)
     @proposal = @conversation.proposal || @conversation.ensure_proposal!
     return { error: "Ainda não dá pra criar a proposta — falta o tipo de estudo ser identificado " \
-      "(TR ainda em processamento) ou a revisão ser concluída." }.to_json if @proposal.nil?
+      "(ET ainda em processamento) ou a revisão ser concluída." }.to_json if @proposal.nil?
 
     apply_filename_override!(args[:nome_arquivo])
     @proposal.increment!(:version)
