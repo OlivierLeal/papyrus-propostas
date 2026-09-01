@@ -24,6 +24,33 @@ class ConversationTest < ActiveSupport::TestCase
     assert_equal "Em revisão", conversation.status_label
   end
 
+  # REGRESSÃO — achado em produção (chat 30, 2026-09-01): o consultor marcou o tipo de estudo pela
+  # tela ENQUANTO o RespondToMessageJob da mensagem "gere a proposta" já estava rodando com a
+  # Conversation carregada no início do job — a resposta da IA levou dezenas de segundos, tempo de
+  # sobra pro update concorrente gravar no banco. Sem reload, a ferramenta via o objeto antigo
+  # (study_type ainda nil em memória) mesmo já estando gravado no banco havia bom tempo, e recusava
+  # gerar a proposta com "ET ainda em processamento" — mensagem enganosa, já que o ET tinha
+  # terminado fazia tempo; o problema era só o objeto em memória estar desatualizado.
+  test "ensure_proposal! reloads before checking, catching a study_type set by a concurrent request while this job was running" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Corrida de Concorrência", status: "reviewing")
+    stale_copy = Conversation.find(conversation.id) # simula o objeto já carregado pelo job, antes do update concorrente
+
+    conversation.update!(study_type: study_types(:eia_rima)) # "outra requisição" (a tela) atualiza o banco enquanto o job roda
+
+    assert_nil stale_copy.study_type_id # confirma que o objeto em memória está mesmo desatualizado, sem reload nenhum ainda
+
+    proposal = stub_ai_error { stale_copy.ensure_proposal! }
+
+    assert proposal.present?
+    assert_equal study_types(:eia_rima), stale_copy.study_type
+  end
+
+  test "ensure_proposal! returns nil (without reloading forever) when the study_type still isn't set anywhere" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Tipo Nenhum", status: "reviewing")
+
+    assert_nil conversation.ensure_proposal!
+  end
+
   test "apply_system_instructions! creates two hidden system messages" do
     conversation = conversations(:processing_conversation)
     # Fixtures inserem via SQL puro e pulam callbacks — o before_save que resolve o Model (ruby_llm)

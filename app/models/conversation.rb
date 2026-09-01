@@ -59,6 +59,12 @@ class Conversation < ApplicationRecord
       indistinguível de invenção. Trate valores de propostas antigas como referência histórica,
       nunca como preço desta proposta.
 
+    - Consultar o CAL (ferramenta search_legal_norms, quando disponível) para fundamentar uma
+      referência legal específica — qual norma exige um diagnóstico, rege um procedimento, ou
+      embasa uma condicionante do ET/TR. Não é pra decidir tipo de licença ou tipo de estudo
+      (isso já vem dos achados desta conversa) — é só pra citar a base legal com precisão em vez
+      de generalizar. Mesma regra do acervo: cite sempre a "referencia" de cada norma usada.
+
     - Guardar aprendizado para o futuro (ferramenta remember_for_future_proposals) quando aparecer
       nesta conversa algo que vai se repetir e que hoje só existe aqui: exigência recorrente do
       cliente, decisão de escopo que vale repetir, condicionante do órgão, ou uma correção que o
@@ -222,6 +228,13 @@ class Conversation < ApplicationRecord
   # Retorna nil (sem criar nada) se faltar pré-requisito real (revisão concluída, tipo de estudo
   # identificado) — quem chama decide o que fazer com isso.
   def ensure_proposal!
+    # Recarrega antes de checar: quem chama isso pelo chat (RespondToMessageJob) carregou este
+    # Conversation no início do job, e a resposta da IA pode levar dezenas de segundos — achado
+    # na prática: o consultor marcou o tipo de estudo pela tela ENQUANTO o job já estava rodando
+    # com o objeto antigo em memória (status_type_id gravado no banco às 14:22:03, mas o objeto em
+    # memória do job, carregado às 14:21:58, só via a chamada da ferramenta às 14:22:24 — sem
+    # reload, `study_type` continuava nil pro objeto, mesmo já presente no banco havia 21s).
+    reload
     return proposal if proposal.present?
     return nil unless status == "reviewing" && study_type.present?
 

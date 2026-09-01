@@ -30,15 +30,7 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
   end
 
   test "registers the document-generation tool even without a proposal yet (it creates one on demand), but not the external-cost tool" do
-    with_tool_calls = []
-    original_method = Conversation.instance_method(:with_tool)
-    Conversation.define_method(:with_tool) { |tool| with_tool_calls << tool.class; self }
-
-    begin
-      stub_ai_complete("ok") { RespondToMessageJob.perform_now(@conversation.id) }
-    ensure
-      Conversation.define_method(:with_tool, original_method)
-    end
+    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
 
     # reviewing_conversation não tem proposal ainda, por isso a de custo externo fica de fora.
     # A de memória (RememberForFutureProposalsTool) vale em qualquer conversa: o consultor pode
@@ -48,18 +40,19 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
 
   test "registers both the document-generation and external-cost tools when there is a proposal" do
     conversation = conversations(:priced_conversation)
-    with_tool_calls = []
-    original_method = Conversation.instance_method(:with_tool)
-    Conversation.define_method(:with_tool) { |tool| with_tool_calls << tool.class; self }
 
-    begin
-      stub_ai_complete("ok") { RespondToMessageJob.perform_now(conversation.id) }
-    ensure
-      Conversation.define_method(:with_tool, original_method)
-    end
+    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(conversation.id) } }
 
     assert_includes with_tool_calls, GenerateProposalDocumentTool
     assert_includes with_tool_calls, AddExternalCostTool
+  end
+
+  test "registers the CAL legal norms tool only when CAL_EMAIL/CAL_PASSWORD are configured" do
+    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    assert_not_includes with_tool_calls, SearchLegalNormsTool
+
+    with_tool_calls = with_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    assert_includes with_tool_calls, SearchLegalNormsTool
   end
 
   test "broadcasts a friendly error bubble and does not raise when the AI call errors out" do
@@ -97,4 +90,38 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
 
     assert_equal [ "projeto_basico.pdf" ], mensagem.reload.to_llm.content.attachments.map(&:filename)
   end
+
+  private
+    def capture_tool_calls
+      with_tool_calls = []
+      original_method = Conversation.instance_method(:with_tool)
+      Conversation.define_method(:with_tool) { |tool| with_tool_calls << tool.class; self }
+
+      begin
+        stub_ai_complete("ok") { yield }
+      ensure
+        Conversation.define_method(:with_tool, original_method)
+      end
+
+      with_tool_calls
+    end
+
+    # CAL_EMAIL/CAL_PASSWORD vêm do .env real deste ambiente de dev (dotenv-rails carrega em todo
+    # RAILS_ENV) — os testes de lista de ferramentas não podem depender disso estar configurado
+    # ou não, senão quebram conforme o .env de quem roda. Controla o estado explicitamente.
+    def without_cal_configured
+      with_env("CAL_EMAIL" => nil, "CAL_PASSWORD" => nil) { yield }
+    end
+
+    def with_cal_configured
+      with_env("CAL_EMAIL" => "consultor@papyrus.com", "CAL_PASSWORD" => "segredo") { yield }
+    end
+
+    def with_env(values)
+      originals = values.keys.index_with { |key| ENV[key] }
+      values.each { |key, value| ENV[key] = value }
+      yield
+    ensure
+      originals.each { |key, value| ENV[key] = value }
+    end
 end

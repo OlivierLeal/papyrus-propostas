@@ -389,6 +389,58 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 
 **Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
 
+### 11.2. CAL/Ius Natura — normas legais (implementado, fase 1)
+
+A Papyrus assina o CAL (`sistemacal.com.br`), base de legislação ambiental da Ius Natura, e
+precisa que a IA consiga citar a norma exata por trás de uma exigência ao escrever a proposta
+(ex.: qual resolução exige um inventário florestal, qual portaria rege um procedimento do órgão)
+em vez de generalizar. O CAL não tem API pública — é uma aplicação ASP.NET MVC clássica (login por
+formulário, sessão por cookie, busca via endpoint AJAX interno), então a integração reproduz
+exatamente as requisições que o próprio consultor faria navegando (nunca contorna CAPTCHA, MFA ou
+qualquer controle de acesso, nunca acessa dado de outra conta — a mesma regra que já vale pra
+qualquer scraping autorizado). Qualquer endpoint novo do CAL precisa do mesmo processo de
+descoberta manual antes de entrar no código — **nunca chutar uma URL**. Nem sempre é possível
+inspecionar via DevTools/Network (não é este app que roda no navegador do consultor); o endpoint
+de download do anexo, por exemplo, foi achado lendo o JS que a própria página autenticada carrega
+(`GET` num dos `<script src>` do HTML, grep pelo nome da função usada no `onclick` do resultado de
+busca) — mesmo princípio (só reproduzir o que o front-end do CAL já faz), outro meio de leitura.
+
+- `app/services/cal/client.rb` — HTTP + cookie jar manual (`Net::HTTP` não mantém sessão nem
+  segue redirect sozinho) + extração do `__RequestVerificationToken` (CSRF) da página de login.
+  A sessão fica em `Rails.cache` (TTL de 15 min, conservador porque o CAL não documenta o próprio
+  tempo de vida) e é relogada sozinha quando uma chamada volta redirecionada pro login — o
+  chamador nunca lida com login/expiração diretamente. `#download` é à parte de `#get`/`#post_form`:
+  o CAL redireciona pra uma URL assinada num CDN externo (`files.sistemacal.com.br`, com
+  `Expires`/`Signature` próprios), que não leva cookie nenhum — a autorização já está na própria
+  URL.
+- `app/services/cal/normas.rb` — busca (`POST /NormaLegalBdCliente/Search`), parâmetros e headers
+  (`X-Requested-With`, `TabId`) copiados de uma requisição real; `Accept-Encoding: identity` é
+  proposital (o CAL comprime com brotli/zstd por padrão, e `Net::HTTP` não descomprime sozinho).
+  `#find_by_codigo` reusa a mesma busca com o filtro `NormaLegalCodigos` em vez de `PalavraChave`.
+- `app/services/cal/norma.rb` — normaliza uma linha de `colecaoBdCliente` num `Data.define`,
+  incluindo o parse da data no formato ASP.NET AJAX clássico (`/Date(ms desde epoch)/`, não
+  ISO 8601) e uma `referencia` pronta pra citação.
+- `app/services/cal/documento.rb` — a busca só devolve metadados e um resumo curto (`Assunto`); pra
+  saber o que uma norma exige de verdade, baixa o PDF real (`GET /UploadArquivo/ObterPdfPorNome
+  ?nome=<anexo_id>` → segue o redirect assinado) e extrai o texto com `Rag::TextExtractor` (mesmo
+  extrator do RAG do acervo — trata PDF nativo e devolve `nil` num PDF escaneado, em vez de
+  inventar/fingir que leu).
+- `SearchLegalNormsTool` — ferramenta sob demanda (mesmo padrão do `SearchHistoricalArchiveTool`:
+  citação obrigatória via campo `referencia`, só registrada em `RespondToMessageJob` quando
+  `Cal::Client.configured?`, pra IA não "descobrir" uma ferramenta que sempre falharia sem
+  credenciais). Não decide tipo de licença/estudo — só fundamenta referência legal do que os
+  achados desta conversa já identificaram. Duas formas de uso: `palavra_chave` busca e devolve uma
+  lista com resumo de cada norma; `codigo_norma` (o código de uma norma já encontrada numa busca
+  anterior na mesma conversa) devolve o texto completo do documento, via `Cal::Documento`.
+- Credenciais em `CAL_EMAIL`/`CAL_PASSWORD` no `.env` (mesmo padrão de segredo do projeto — nunca
+  hardcoded), carregadas também em teste pelo `dotenv-rails`. Por isso os testes que verificam a
+  lista de ferramentas registradas controlam essas variáveis explicitamente (`with_env` em
+  `respond_to_message_job_test.rb`) em vez de depender do que estiver no `.env` de quem roda.
+
+**Ainda não implementado:** paginação automática (`cal.normas.search_all`, hoje só a 1ª página),
+e uso proativo (hoje é só sob demanda pela IA — cogitar, como no RAG, uma sugestão proativa de
+normas aplicáveis no resumo da proposta, se isso se mostrar útil na prática).
+
 ---
 
 ## 12. Convenções do projeto
@@ -418,6 +470,7 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
   nunca é. Decisão do consultor sobre divergência é sempre um achado novo, nunca um update no que
   o documento disse.
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
+- CAL/Ius Natura (normas legais, ver seção 11.2): credenciais em `CAL_EMAIL`/`CAL_PASSWORD` no `.env`, nunca hardcoded — não é chave de API, é login real (usuário/senha) da conta que a Papyrus assina. `Cal::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22.
 
 ---
 
