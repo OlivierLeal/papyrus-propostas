@@ -32,17 +32,20 @@ class SearchLegalNormsTool < RubyLLM::Tool
 
   LIMIT = 8
 
+  # Lazy de propósito: Cal::Client.new (o default de Normas/Documento) levanta
+  # AuthenticationError já na CONSTRUÇÃO se faltar credencial — instanciar aqui e não só na hora
+  # de usar faria a ferramenta quebrar ao ser criada, não ao ser chamada.
   def initialize(normas: nil, documento: nil)
     super()
-    @normas = normas || Cal::Normas.new
-    @documento = documento || Cal::Documento.new
+    @normas_override = normas
+    @documento_override = documento
   end
 
   def execute(palavra_chave: nil, ano: nil, codigo_norma: nil)
     return full_text(codigo_norma) if codigo_norma.to_s.strip.present?
     return { error: "Preciso saber o que buscar no CAL, ou o código de uma norma já encontrada nesta conversa." }.to_json if palavra_chave.to_s.strip.blank?
 
-    result = @normas.search(palavra_chave: palavra_chave.to_s.strip, ano: ano.presence)
+    result = normas.search(palavra_chave: palavra_chave.to_s.strip, ano: ano.presence)
 
     return { resultados: [], aviso: "Nenhuma norma encontrada no CAL para essa busca." }.to_json unless result.any?
 
@@ -62,11 +65,19 @@ class SearchLegalNormsTool < RubyLLM::Tool
 
   private
 
+  def normas
+    @normas_override || (@normas_override = Cal::Normas.new)
+  end
+
+  def documento
+    @documento_override || (@documento_override = Cal::Documento.new)
+  end
+
   def full_text(codigo)
-    norma = @normas.find_by_codigo(codigo.to_s.strip)
+    norma = normas.find_by_codigo(codigo.to_s.strip)
     return { error: "Não encontrei a norma #{codigo} no CAL." }.to_json unless norma
 
-    texto = @documento.texto(norma.anexo_id)
+    texto = documento.texto(norma.anexo_id)
     return {
       referencia: norma.referencia,
       aviso: "Encontrei a norma mas não consegui ler o texto do documento (pode ser um PDF escaneado, ou sem anexo)."

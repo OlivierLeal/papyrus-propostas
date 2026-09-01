@@ -44,13 +44,16 @@ class ProjectFinding < ApplicationRecord
 
   # A ordem aqui é a autoridade da fonte (seção 7 do documento de arquitetura): decisão do
   # consultor vence tudo; o que o sistema mediu (área/perímetro do KMZ) vence o que um documento
-  # afirma; entre os documentos, TR (vem da própria instituição/órgão ambiental — autoridade sobre
-  # os próprios requisitos) vence ET (pedido técnico do cliente — o que ele está pedindo, mas não
-  # necessariamente a redação exata da exigência regulatória) vence complementar. Ordena o que o
-  # consultor vê ao decidir uma divergência — nunca resolve a divergência sozinha.
+  # afirma; CAL (o texto da lei promulgada, ver ProcessLegalNormsJob) vence qualquer documento
+  # desta proposta — é a fonte primária, o que um TR ou ET dizem sobre a exigência é interpretação
+  # de alguém; entre os documentos, TR (vem da própria instituição/órgão ambiental — autoridade
+  # sobre os próprios requisitos) vence ET (pedido técnico do cliente — o que ele está pedindo, mas
+  # não necessariamente a redação exata da exigência regulatória) vence complementar. Ordena o que
+  # o consultor vê ao decidir uma divergência — nunca resolve a divergência sozinha.
   SOURCE_KINDS = {
     "consultor" => "Decisão do consultor",
     "sistema" => "Calculado pelo sistema",
+    "cal" => "Legislação (CAL/Ius Natura)",
     "tr" => "Termo de Referência",
     "et" => "Pedido Técnico do Estudo (ET)",
     "complementar" => "Documento complementar"

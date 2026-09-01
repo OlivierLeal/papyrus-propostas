@@ -25,6 +25,7 @@ class ProcessEtJob < ApplicationJob
     Rails.logger.error("ProcessEtJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
     conversation&.mark_step!("et", "failed")
   ensure
+    advance_after_et!(conversation) if conversation
     conversation&.check_processing_complete!
   end
 
@@ -117,5 +118,19 @@ class ProcessEtJob < ApplicationJob
       codes = conversation.project_findings.active.where(field: "tipo_estudo").pluck(:value)
       study_type = codes.filter_map { |code| StudyType.find_by(code: code.to_s.strip) }.first
       conversation.update!(study_type: study_type) if study_type
+    end
+
+    # TR nunca dispara em paralelo com ET — só depois que o ET termina (seja qual for o
+    # resultado: done, skipped ou failed) é que se sabe se há município pra pesquisar no CAL. Se
+    # "cal" nasceu "pending" (ver ConversationsController#start_processing!), passa a vez pra
+    # ProcessLegalNormsJob, que decide sozinho se há o que pesquisar e dispara o TR no final dele
+    # mesmo; senão, dispara o TR direto — sem CAL configurado ou sem nada a pesquisar, não há
+    # motivo pra fazer o TR esperar.
+    def advance_after_et!(conversation)
+      if conversation.processing_step_status("cal") == "pending"
+        ProcessLegalNormsJob.perform_later(conversation.id)
+      elsif conversation.processing_step_status("tr") == "pending"
+        ProcessTrJob.perform_later(conversation.id)
+      end
     end
 end

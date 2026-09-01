@@ -27,15 +27,18 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  # ProcessTrJob NÃO é um dos jobs disparados aqui — TR só entra depois que ET (e a pesquisa no
+  # CAL entre os dois, quando ela roda) terminam, ver ProcessEtJob#advance_after_et! e
+  # ProcessLegalNormsJob. Testado à parte, no fluxo de encadeamento de cada job.
   test "create persists the conversation, applies system instructions and enqueues all processing jobs" do
     et = fixture_file_upload("tr_sample.pdf", "application/pdf")
     tr = fixture_file_upload("tr_sample.pdf", "application/pdf")
     kmz = fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz")
 
     assert_enqueued_with(job: ProcessEtJob) do
-      assert_enqueued_with(job: ProcessTrJob) do
-        assert_enqueued_with(job: ProcessCompDocsJob) do
-          assert_enqueued_with(job: ProcessKmzJob) do
+      assert_enqueued_with(job: ProcessCompDocsJob) do
+        assert_enqueued_with(job: ProcessKmzJob) do
+          assert_no_enqueued_jobs(only: ProcessTrJob) do
             assert_difference "Conversation.count", 1 do
               post conversations_path, params: {
                 conversation: { client_name: "Cliente Novo" },
@@ -52,6 +55,20 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "processing", conversation.status
     assert_equal @user, conversation.user
     assert conversation.messages.where(role: "system").exists?
+  end
+
+  test "create marks cal as pending when there's an ET and the CAL is configured, skipped otherwise" do
+    et = fixture_file_upload("tr_sample.pdf", "application/pdf")
+
+    with_cal_configured do
+      post conversations_path, params: { conversation: { client_name: "Com CAL" }, et: et }
+    end
+    assert_equal "pending", Conversation.order(:created_at).last.processing_step_status("cal")
+
+    without_cal_configured do
+      post conversations_path, params: { conversation: { client_name: "Sem CAL" }, et: et }
+    end
+    assert_equal "skipped", Conversation.order(:created_at).last.processing_step_status("cal")
   end
 
   test "create never sets study_type — it's identified later by ProcessEtJob, not chosen at setup" do
@@ -73,6 +90,7 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     conversation = Conversation.order(:created_at).last
     assert_redirected_to conversation
     assert_equal "skipped", conversation.processing_step_status("et")
+    assert_equal "skipped", conversation.processing_step_status("cal")
     assert_equal "skipped", conversation.processing_step_status("tr")
     assert_equal "skipped", conversation.processing_step_status("comp_docs")
     assert_equal "skipped", conversation.processing_step_status("kmz")

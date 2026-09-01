@@ -123,16 +123,17 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
 
 ## 6. Pipeline de processamento de dados
 
-Após confirmação na tela de setup, arquivos vão para Active Storage (criptografado) e disparam jobs em paralelo:
+Após confirmação na tela de setup, arquivos vão para Active Storage (criptografado) e disparam jobs — a maioria em paralelo, exceto uma cadeia sequencial:
 
 - **ProcessET**: extração de texto (ou envio nativo do PDF/DOCX pra Claude) do documento PRINCIPAL/obrigatório (o pedido do cliente) → IA identifica tipo de licença, tipo de estudo, órgão ambiental, municípios, diagnósticos, condicionantes, ressalvas. Ao concluir, dispara a busca de hospedagem (Stay22) usando o município identificado.
-- **ProcessTR**: mesma extração, sobre o TR institucional OPCIONAL (guia de execução, quando o cliente enviar um) — reforça/complementa o que o ET já trouxe, sem bloquear o processamento se não existir.
+- **ProcessLegalNorms** (2026-09): roda **depois do ET e antes do TR**, nunca em paralelo com nenhum dos dois — só depois que o ET identifica o(s) município(s) é que dá pra saber o âmbito certo (municipal/estadual/federal) pra pesquisar no CAL (ver seção 11.2). Sem município identificado, pula direto pro TR. Quando roda, os achados que traz (`source_kind: "cal"`) já estão disponíveis ANTES do TR ser lido, pra a IA cruzar o que a legislação exige com o que o TR institucional pede.
+- **ProcessTR**: mesma extração do ET, sobre o TR institucional OPCIONAL (guia de execução, quando o cliente enviar um) — reforça/complementa o que o ET (e o CAL, quando pesquisado) já trouxeram, sem bloquear o processamento se não existir.
 - **ProcessKMZ**: descomprime → parseia XML/KML (Nokogiri) → extrai coordenadas → RGeo calcula área (ha), perímetro (km), centroide → PostGIS cruza com as 6 camadas de referência → gera imagem do mapa (Mapbox Static API, bounding box + margem 20%).
 - **ProcessCompDocs**: IA identifica tipo de cada documento complementar e extrai escopos anteriores, preços de referência, condicionantes, metodologias, equipes usadas.
 
-Um job final (**GenerateSummary**) só dispara quando os anteriores terminam, e monta o resumo estruturado exibido na Tela de Resultado via WebSocket.
+ProcessKMZ e ProcessCompDocs continuam em paralelo com a cadeia ET→CAL→TR, sem depender dela. Um job final (**GenerateSummary**) só dispara quando tudo termina, e monta o resumo estruturado exibido na Tela de Resultado via WebSocket.
 
-**Ponto de atenção:** ETs/TRs grandes (100+ páginas) com muitos complementares podem levar 60–120s para processar — feedback visual (barra de progresso por etapa) é essencial.
+**Ponto de atenção:** ETs/TRs grandes (100+ páginas) com muitos complementares podem levar 60–120s para processar — feedback visual (barra de progresso por etapa) é essencial. A cadeia ET→CAL→TR ser sequencial (em vez de tudo em paralelo, como antes) alonga esse tempo quando o CAL está configurado e há município identificado — trade-off aceito, é o preço de pesquisar o âmbito certo antes de ler o TR.
 
 ---
 
@@ -389,7 +390,7 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
 
 **Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
 
-### 11.2. CAL/Ius Natura — normas legais (implementado, fase 1)
+### 11.2. CAL/Ius Natura — normas legais (implementado)
 
 A Papyrus assina o CAL (`sistemacal.com.br`), base de legislação ambiental da Ius Natura, e
 precisa que a IA consiga citar a norma exata por trás de uma exigência ao escrever a proposta
@@ -425,21 +426,52 @@ busca) — mesmo princípio (só reproduzir o que o front-end do CAL já faz), o
   ?nome=<anexo_id>` → segue o redirect assinado) e extrai o texto com `Rag::TextExtractor` (mesmo
   extrator do RAG do acervo — trata PDF nativo e devolve `nil` num PDF escaneado, em vez de
   inventar/fingir que leu).
-- `SearchLegalNormsTool` — ferramenta sob demanda (mesmo padrão do `SearchHistoricalArchiveTool`:
-  citação obrigatória via campo `referencia`, só registrada em `RespondToMessageJob` quando
-  `Cal::Client.configured?`, pra IA não "descobrir" uma ferramenta que sempre falharia sem
-  credenciais). Não decide tipo de licença/estudo — só fundamenta referência legal do que os
-  achados desta conversa já identificaram. Duas formas de uso: `palavra_chave` busca e devolve uma
-  lista com resumo de cada norma; `codigo_norma` (o código de uma norma já encontrada numa busca
-  anterior na mesma conversa) devolve o texto completo do documento, via `Cal::Documento`.
+- `SearchLegalNormsTool` — mesma filosofia de citação do `SearchHistoricalArchiveTool` (campo
+  `referencia` obrigatório no texto), só registrada quando `Cal::Client.configured?`, pra IA não
+  "descobrir" uma ferramenta que sempre falharia sem credenciais. Não decide tipo de
+  licença/estudo — só fundamenta referência legal do que os achados desta conversa já
+  identificaram. Duas formas de uso: `palavra_chave` busca e devolve uma lista com resumo de cada
+  norma; `codigo_norma` (o código de uma norma já encontrada numa busca anterior na mesma
+  conversa) devolve o texto completo do documento, via `Cal::Documento`. `normas`/`documento` são
+  lazy no construtor — `Cal::Client.new` levanta `AuthenticationError` já na criação se faltar
+  credencial, e instanciar isso ansiosamente faria a ferramenta quebrar ao ser criada, não ao ser
+  chamada.
+- **Uso proativo, não só sob demanda** (`app/jobs/process_legal_norms_job.rb`): roda sozinho entre
+  o ET e o TR (ver seção 6) — pega o(s) município(s) que o ET identificou, registra
+  `SearchLegalNormsTool` e deixa a IA se autogerenciar: decidir o âmbito certo (mais de um
+  município → estadual/federal; um único município → qualquer âmbito que se aplique de fato),
+  pesquisar quantas vezes precisar, ler o texto completo antes de concluir o que uma norma exige,
+  e devolver achados no mesmo formato de `ProjectFindings::Recorder` (`source_kind: "cal"`, campo
+  geralmente `"condicionantes"`). Testado ao vivo com um caso real (parque eólico na Bahia): a IA
+  sozinha encontrou a Resolução CEPRAM 4636/18 — específica pra eólicas no estado, nunca mencionada
+  no prompt — leu o texto completo e extraiu 7 achados corretos, cada um com artigo/trecho literal.
+  Pula (`cal: skipped`) quando não há município identificado ou o CAL não está configurado; a
+  ferramenta continua disponível sob demanda no chat normal também, registrada pelo mesmo
+  `RespondToMessageJob` de sempre.
+- **`Conversation#ask_internally` registra a ferramenta sozinho quando o histórico já tem tool
+  use** (`messages.exists?(role: "tool")`) — achado ao vivo: assim que `ProcessLegalNormsJob` usa
+  a ferramenta uma vez, o histórico passa a ter blocos `toolUse`/`toolResult`, e o Bedrock recusa
+  reenviar esse histórico numa chamada seguinte que não declare `toolConfig` (erro "The toolConfig
+  field must be defined...", mesmo sem nenhuma tool call nova) — quebrou `GenerateSummaryJob` de
+  verdade. Não registra incondicionalmente (abriria a ferramenta pra chamadas que esperam JSON
+  puro de volta, tipo `ProcessEtJob`, mesmo em conversas que nunca usaram tool nenhuma) — só
+  quando já existe uso anterior nesta conversa.
 - Credenciais em `CAL_EMAIL`/`CAL_PASSWORD` no `.env` (mesmo padrão de segredo do projeto — nunca
-  hardcoded), carregadas também em teste pelo `dotenv-rails`. Por isso os testes que verificam a
-  lista de ferramentas registradas controlam essas variáveis explicitamente (`with_env` em
-  `respond_to_message_job_test.rb`) em vez de depender do que estiver no `.env` de quem roda.
+  hardcoded), carregadas também em teste pelo `dotenv-rails`. Por isso os testes que dependem de
+  `Cal::Client.configured?` controlam essas variáveis explicitamente (`CalStubHelper`, em
+  `test/test_helpers/cal_stub_helper.rb`, incluído globalmente no `test_helper.rb`) em vez de
+  depender do que estiver no `.env` de quem roda.
 
-**Ainda não implementado:** paginação automática (`cal.normas.search_all`, hoje só a 1ª página),
-e uso proativo (hoje é só sob demanda pela IA — cogitar, como no RAG, uma sugestão proativa de
-normas aplicáveis no resumo da proposta, se isso se mostrar útil na prática).
+**`AiJsonResponse` agora tolera texto antes da cerca ```json`` (2026-09):** só removia a cerca
+quando ela estava na âncora do início ABSOLUTO da string — funcionava nos jobs de extração normais
+(a IA responde só o JSON), mas depois de usar uma ferramenta algumas vezes a IA tende a narrar um
+resumo antes ("Com base na pesquisa, identifiquei..."), mesmo o prompt pedindo pra não fazer isso.
+Um achado real (7 itens, texto de norma incluído) se perdeu em silêncio por causa disso antes da
+correção. Agora busca a cerca em qualquer posição da string e, sem cerca nenhuma, cai para o
+primeiro `{` até o **último** `}` (guloso, não `.*?`) — precisa ser guloso porque o JSON tem objetos
+aninhados (`achados` é um array de hashes) e um regex não-guloso pararia no primeiro `}` interno.
+
+**Ainda não implementado:** paginação automática (`cal.normas.search_all`, hoje só a 1ª página).
 
 ---
 

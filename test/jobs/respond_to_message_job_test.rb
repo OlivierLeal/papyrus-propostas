@@ -105,23 +105,4 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
 
       with_tool_calls
     end
-
-    # CAL_EMAIL/CAL_PASSWORD vêm do .env real deste ambiente de dev (dotenv-rails carrega em todo
-    # RAILS_ENV) — os testes de lista de ferramentas não podem depender disso estar configurado
-    # ou não, senão quebram conforme o .env de quem roda. Controla o estado explicitamente.
-    def without_cal_configured
-      with_env("CAL_EMAIL" => nil, "CAL_PASSWORD" => nil) { yield }
-    end
-
-    def with_cal_configured
-      with_env("CAL_EMAIL" => "consultor@papyrus.com", "CAL_PASSWORD" => "segredo") { yield }
-    end
-
-    def with_env(values)
-      originals = values.keys.index_with { |key| ENV[key] }
-      values.each { |key, value| ENV[key] = value }
-      yield
-    ensure
-      originals.each { |key, value| ENV[key] = value }
-    end
 end

@@ -6,7 +6,7 @@ class ProcessCompDocsJobTest < ActiveSupport::TestCase
   end
 
   test "marks comp_docs as skipped when there are no complementary attachments" do
-    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "pending", "summary" => "pending" })
 
     ProcessCompDocsJob.perform_now(@conversation.id)
 
@@ -14,7 +14,7 @@ class ProcessCompDocsJobTest < ActiveSupport::TestCase
   end
 
   test "processes every complementary attachment and marks done" do
-    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "pending", "summary" => "pending" })
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(
       io: StringIO.new("proposta anterior"), filename: "proposta_antiga.pdf", content_type: "application/pdf",
@@ -35,7 +35,7 @@ class ProcessCompDocsJobTest < ActiveSupport::TestCase
   end
 
   test "marks comp_docs as failed and does not raise when the AI call errors out" do
-    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "pending", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "pending", "summary" => "pending" })
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(
       io: StringIO.new("proposta anterior"), filename: "proposta_antiga.pdf", content_type: "application/pdf",
@@ -48,7 +48,7 @@ class ProcessCompDocsJobTest < ActiveSupport::TestCase
   end
 
   test "triggers GenerateSummaryJob once tr is already resolved" do
-    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "pending", "kmz" => "skipped", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "pending", "kmz" => "skipped", "summary" => "pending" })
 
     assert_enqueued_with(job: GenerateSummaryJob, args: [ @conversation.id ]) do
       ProcessCompDocsJob.perform_now(@conversation.id)

@@ -15,6 +15,7 @@ require_relative "../config/environment"
 require "rails/test_help"
 require_relative "test_helpers/session_test_helper"
 require_relative "test_helpers/ai_stub_helper"
+require_relative "test_helpers/cal_stub_helper"
 
 module ActiveSupport
   class TestCase
@@ -29,6 +30,7 @@ module ActiveSupport
     include AiStubHelper
     include RagAiStubHelper
     include EmbedderStubHelper
+    include CalStubHelper
 
     # Add more helper methods to be used by all tests here...
   end

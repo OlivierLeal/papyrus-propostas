@@ -103,7 +103,7 @@ class ProcessTrJobTest < ActiveSupport::TestCase
   end
 
   test "does not trigger GenerateSummaryJob while et is still pending" do
-    @conversation.update!(processing_steps: { "et" => "pending", "tr" => "pending", "comp_docs" => "skipped", "kmz" => "skipped", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "pending", "cal" => "skipped", "tr" => "pending", "comp_docs" => "skipped", "kmz" => "skipped", "summary" => "pending" })
 
     assert_no_enqueued_jobs(only: GenerateSummaryJob) do
       ProcessTrJob.perform_now(@conversation.id)

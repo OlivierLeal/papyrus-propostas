@@ -171,10 +171,54 @@ class ProcessEtJobTest < ActiveSupport::TestCase
   end
 
   test "does not trigger GenerateSummaryJob while comp_docs is still pending" do
-    @conversation.update!(processing_steps: { "et" => "pending", "tr" => "skipped", "comp_docs" => "pending", "kmz" => "skipped", "summary" => "pending" })
+    @conversation.update!(processing_steps: { "et" => "pending", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "pending", "kmz" => "skipped", "summary" => "pending" })
 
     assert_no_enqueued_jobs(only: GenerateSummaryJob) do
       ProcessEtJob.perform_now(@conversation.id)
+    end
+  end
+
+  # ENCADEAMENTO ET → CAL → TR (nunca em paralelo — ver Conversation::PROCESSING_STEPS): o TR
+  # precisa esperar a pesquisa no CAL, porque só depois que o ET identifica o município é que dá
+  # pra saber o âmbito certo pra pesquisar.
+  test "enqueues ProcessLegalNormsJob (not ProcessTrJob) when cal is pending, regardless of the ET outcome" do
+    attach_et!
+    @conversation.update!(processing_steps: { "et" => "pending", "cal" => "pending", "tr" => "pending", "comp_docs" => "skipped", "kmz" => "skipped", "summary" => "pending" })
+
+    assert_enqueued_with(job: ProcessLegalNormsJob, args: [ @conversation.id ]) do
+      assert_no_enqueued_jobs(only: ProcessTrJob) do
+        stub_ai_complete(et_reply(campo: "municipios", valor: "Prado")) { ProcessEtJob.perform_now(@conversation.id) }
+      end
+    end
+  end
+
+  test "enqueues ProcessLegalNormsJob even when the ET has no attachment at all (cal decides on its own if there's anything to search)" do
+    @conversation.update!(processing_steps: { "et" => "pending", "cal" => "pending", "tr" => "pending", "comp_docs" => "skipped", "kmz" => "skipped", "summary" => "pending" })
+
+    assert_enqueued_with(job: ProcessLegalNormsJob, args: [ @conversation.id ]) do
+      ProcessEtJob.perform_now(@conversation.id)
+    end
+
+    assert_equal "skipped", @conversation.reload.processing_step_status("et")
+  end
+
+  test "enqueues ProcessTrJob directly when cal is skipped and tr is pending" do
+    attach_et!
+    @conversation.update!(processing_steps: { "et" => "pending", "cal" => "skipped", "tr" => "pending", "comp_docs" => "skipped", "kmz" => "skipped", "summary" => "pending" })
+
+    assert_enqueued_with(job: ProcessTrJob, args: [ @conversation.id ]) do
+      assert_no_enqueued_jobs(only: ProcessLegalNormsJob) do
+        stub_ai_complete(et_reply(campo: "municipios", valor: "Prado")) { ProcessEtJob.perform_now(@conversation.id) }
+      end
+    end
+  end
+
+  test "enqueues neither ProcessLegalNormsJob nor ProcessTrJob when both cal and tr are already skipped" do
+    attach_et!
+    @conversation.update!(processing_steps: { "et" => "pending", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "skipped", "summary" => "pending" })
+
+    assert_no_enqueued_jobs(only: [ ProcessLegalNormsJob, ProcessTrJob ]) do
+      stub_ai_complete(et_reply(campo: "municipios", valor: "Prado")) { ProcessEtJob.perform_now(@conversation.id) }
     end
   end
 end

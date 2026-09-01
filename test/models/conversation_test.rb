@@ -90,6 +90,60 @@ class ConversationTest < ActiveSupport::TestCase
     assert reply.internal?
   end
 
+  # REGRESSÃO — achado ao vivo (worker real): assim que ProcessLegalNormsJob usa
+  # search_legal_norms uma vez, o histórico da conversa passa a ter blocos toolUse/toolResult, e
+  # o Bedrock recusa reenviar esse histórico numa chamada seguinte que não declare nenhuma
+  # ferramenta ("The toolConfig field must be defined when using toolUse and toolResult content
+  # blocks") — quebrou GenerateSummaryJob de verdade em produção. ask_internally precisa detectar
+  # isso sozinho, pra ninguém ter que lembrar de registrar a ferramenta manualmente em todo job
+  # que faz uma chamada interna depois do CAL já ter rodado.
+  test "ask_internally registers the CAL tool when this conversation already has a tool message in its history" do
+    conversation = conversations(:processing_conversation)
+    conversation.messages.create!(role: "tool", content: "{}", internal: true)
+    registered_tools = []
+    original_method = Conversation.instance_method(:with_tool)
+    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+
+    begin
+      with_cal_configured { stub_ai_complete("ok") { conversation.ask_internally("pergunta interna") } }
+    ensure
+      Conversation.define_method(:with_tool, original_method)
+    end
+
+    assert_includes registered_tools, SearchLegalNormsTool
+  end
+
+  test "ask_internally does not register the CAL tool when this conversation has never used a tool before" do
+    conversation = conversations(:processing_conversation)
+    registered_tools = []
+    original_method = Conversation.instance_method(:with_tool)
+    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+
+    begin
+      with_cal_configured { stub_ai_complete("ok") { conversation.ask_internally("pergunta interna") } }
+    ensure
+      Conversation.define_method(:with_tool, original_method)
+    end
+
+    assert_empty registered_tools
+  end
+
+  test "ask_internally never registers the CAL tool when the CAL isn't configured, even with tool history" do
+    conversation = conversations(:processing_conversation)
+    conversation.messages.create!(role: "tool", content: "{}", internal: true)
+    registered_tools = []
+    original_method = Conversation.instance_method(:with_tool)
+    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+
+    begin
+      without_cal_configured { stub_ai_complete("ok") { conversation.ask_internally("pergunta interna") } }
+    ensure
+      Conversation.define_method(:with_tool, original_method)
+    end
+
+    assert_empty registered_tools
+  end
+
   test "attachments_of_kind filters by the blob metadata kind" do
     conversation = conversations(:reviewing_conversation)
     message = conversation.messages.first

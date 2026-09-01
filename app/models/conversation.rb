@@ -21,10 +21,16 @@ class Conversation < ApplicationRecord
   # "summary" roda depois que as etapas abaixo terminam (done/skipped/failed).
   # "et" é o documento principal (pedido técnico do cliente); "tr" é o guia institucional
   # opcional (ver ProcessEtJob/ProcessTrJob e a nota de terminologia em CLAUDE.md seção 2).
-  PROCESSING_STEPS = %w[et tr comp_docs kmz].freeze
+  # "cal" roda ENTRE et e tr, nunca em paralelo com eles: só depois que o ET identifica o(s)
+  # município(s) é que dá pra saber o âmbito certo pra pesquisar no CAL (ver ProcessLegalNormsJob),
+  # e o resultado dessa pesquisa precisa estar disponível ANTES do TR ser lido, pra a IA já saber o
+  # que a legislação exige quando cruzar com o TR institucional. comp_docs e kmz continuam em
+  # paralelo com essa cadeia, sem depender dela.
+  PROCESSING_STEPS = %w[et cal tr comp_docs kmz].freeze
 
   PROCESSING_STEP_LABELS = {
     "et" => "Processando ET",
+    "cal" => "Pesquisando legislação aplicável (CAL)",
     "tr" => "Processando TR",
     "comp_docs" => "Analisando documentos complementares",
     "kmz" => "Processando KMZ",
@@ -309,6 +315,15 @@ class Conversation < ApplicationRecord
   # paralelo — e libera sozinho quando a transação termina, sem precisar de unlock manual.
   def ask_internally(prompt, with: nil, hide_response: false)
     with_ai_lock do
+      # Registra a ferramenta do CAL só quando o histórico desta conversa JÁ tem uso de alguma
+      # tool (ver ProcessLegalNormsJob) — achado na prática: a partir daí o histórico passa a ter
+      # blocos toolUse/toolResult, e o Bedrock recusa reenviar esse histórico numa chamada futura
+      # que não declare toolConfig (erro "The toolConfig field must be defined when using toolUse
+      # and toolResult content blocks", mesmo sem nenhuma tool call nova). Não registra
+      # incondicionalmente: abriria a ferramenta pra chamadas que esperam JSON puro de volta (ex.:
+      # ProcessEtJob) mesmo em conversas que nunca usaram tool nenhuma.
+      with_tool(SearchLegalNormsTool.new) if Cal::Client.configured? && messages.exists?(role: "tool")
+
       instruction = create_user_message(prompt, with: with)
       instruction.update!(internal: true)
       complete

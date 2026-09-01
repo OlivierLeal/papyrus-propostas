@@ -3,7 +3,7 @@ require "test_helper"
 class GenerateSummaryJobTest < ActiveSupport::TestCase
   setup do
     @conversation = conversations(:processing_conversation)
-    @conversation.update!(processing_steps: { "et" => "done", "tr" => "skipped", "comp_docs" => "skipped", "summary" => "queued" })
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "summary" => "queued" })
   end
 
   def record_finding!(field:, value:, source_kind: "tr", nature: "fato", excerpt: nil)

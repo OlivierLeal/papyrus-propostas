@@ -58,13 +58,21 @@ class ConversationsController < ApplicationController
     # "confirmar antes de processar" (ver CLAUDE.md, decisão revista).
     def start_processing!
       steps = Conversation::PROCESSING_STEPS.index_with do |step|
+        # "cal" não tem anexo — só faz sentido tentar se o ET vai rodar (é ele que identifica o
+        # município) e o CAL estiver configurado; a decisão fina (achou município ou não) só o
+        # ProcessEtJob sabe depois de rodar, ver #advance_after_et!.
+        next(@conversation.attachments_of_kind("et").any? && Cal::Client.configured? ? "pending" : "skipped") if step == "cal"
+
         @conversation.attachments_of_kind(step == "comp_docs" ? "complementary" : step).any? ? "pending" : "skipped"
       end.merge("summary" => "pending")
 
       @conversation.update!(status: "processing", setup_completed_at: Time.current, processing_steps: steps)
 
       ProcessEtJob.perform_later(@conversation.id) if steps["et"] == "pending"
-      ProcessTrJob.perform_later(@conversation.id) if steps["tr"] == "pending"
+      # TR espera ET terminar (e a pesquisa no CAL entre os dois, quando ela roda) — ver
+      # ProcessEtJob#advance_after_et! e ProcessLegalNormsJob. Só dispara direto daqui quando os
+      # dois já nascem "skipped" (sem ET pra ler, não há o que esperar).
+      ProcessTrJob.perform_later(@conversation.id) if steps["et"] == "skipped" && steps["cal"] == "skipped" && steps["tr"] == "pending"
       ProcessCompDocsJob.perform_later(@conversation.id) if steps["comp_docs"] == "pending"
       ProcessKmzJob.perform_later(@conversation.id) if steps["kmz"] == "pending"
       @conversation.check_processing_complete!

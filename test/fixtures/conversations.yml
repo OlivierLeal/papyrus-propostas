@@ -6,6 +6,7 @@ reviewing_conversation:
   status: reviewing
   processing_steps:
     et: done
+    cal: skipped
     tr: skipped
     comp_docs: skipped
     kmz: skipped
@@ -19,6 +20,7 @@ processing_conversation:
   status: processing
   processing_steps:
     et: pending
+    cal: skipped
     tr: skipped
     comp_docs: skipped
     kmz: skipped
@@ -32,6 +34,7 @@ priced_conversation:
   status: pricing
   processing_steps:
     et: done
+    cal: skipped
     tr: skipped
     comp_docs: skipped
     kmz: skipped
