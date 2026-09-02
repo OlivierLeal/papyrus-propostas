@@ -15,9 +15,24 @@
     <span class="text-xs text-base-content/40 px-1"><%= is_user ? "Você" : "IA" %></span>
 
     <div class="w-fit max-w-full rounded-box px-4 py-3 text-sm <%= is_user ? "bg-primary text-primary-content" : "bg-base-200 text-base-content" %>">
+      <% if message.attachments.attached? %>
+        <ul class="flex flex-col gap-1.5 <%= "mb-2" if message.content.present? %>">
+          <% message.attachments.each do |attachment| %>
+            <li>
+              <%= link_to rails_blob_path(attachment, disposition: "attachment"),
+                    class: "flex items-center gap-1.5 px-2 py-1 rounded-field bg-base-100/20 hover:bg-base-100/40 min-w-0" do %>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5 shrink-0">
+                  <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+                </svg>
+                <span class="truncate"><%= attachment.filename %></span>
+              <% end %>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
       <% if message.content.present? %>
         <%= tag.div render_markdown(message.content), class: "markdown-content", data: (animate ? { controller: "typewriter" } : {}) %>
-      <% else %>
+      <% elsif !message.attachments.attached? %>
         <span class="italic opacity-60">(sem conteúdo)</span>
       <% end %>
     </div>

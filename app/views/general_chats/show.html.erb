@@ -11,7 +11,7 @@
   <%= turbo_stream_from @general_chat %>
 
   <div class="bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[85vh]" data-controller="chat-scroll">
-    <% visible_messages = @general_chat.messages.where(internal: false).order(:created_at) %>
+    <% visible_messages = @general_chat.messages.includes(attachments_attachments: :blob).where(internal: false).order(:created_at) %>
     <div id="messages" class="flex-1 overflow-y-auto p-6 flex flex-col gap-4" data-chat-scroll-target="messages">
       <% if visible_messages.empty? %>
         <p class="text-sm text-base-content/50 text-center my-auto">Pergunte algo sobre licenciamento, legislação ou como a Papyrus já fez antes.</p>

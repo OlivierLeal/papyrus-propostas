@@ -608,3 +608,15 @@ falhou antes de qualquer resposta.
 `SearchHistoricalArchiveTool` (quando há acervo indexado) e `SearchLegalNormsTool` (quando o CAL
 está configurado) — nunca `GenerateProposalDocumentTool`, `AddExternalCostTool` nem
 `RememberForFutureProposalsTool`, que não fazem sentido sem proposta.
+
+**Anexar um documento avulso e tirar dúvida sobre ele (2026-09):** o composer deste chat aceita
+upload de PDF/DOCX (`documents[]`, mesmo campo de arquivo do chat de proposta), anexado à mensagem
+com `metadata: { kind: "document" }`. É um documento qualquer, sem vínculo com proposta nenhuma do
+sistema — a IA lê o conteúdo nativamente (`ruby_llm`) e, quando fizer sentido, cruza com o acervo
+histórico (`search_historical_archive`) pra dizer se a Papyrus já tratou de algo parecido, citando
+o projeto de referência. `GeneralMessage` ganhou `has_many_attached :attachments` e o mesmo filtro
+de "só a mensagem de usuário mais recente reenvia o anexo bruto pra IA" que `Message` já tinha
+(`attachment_sources`/`stale_for_llm?`) — sem isso, um documento anexado seria reenviado em toda
+chamada seguinte da conversa até estourar o limite de 5 documentos por request da Anthropic. Sem
+sidebar de documentos aqui (diferente de `conversations/show.html.erb`) — o anexo aparece como um
+chip de download dentro da própria bolha da mensagem (`general_chats/_message.html.erb`).
