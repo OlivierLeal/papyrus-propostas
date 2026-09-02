@@ -1,0 +1,29 @@
+<div class="p-2 mx-auto">
+  <div class="flex items-center gap-3 mb-6">
+    <%= link_to general_chats_path, class: "btn btn-ghost btn-sm btn-square", title: "Voltar" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+      </svg>
+    <% end %>
+    <h1 class="font-display text-2xl font-bold text-base-content leading-tight"><%= @general_chat.display_title %></h1>
+  </div>
+
+  <%= turbo_stream_from @general_chat %>
+
+  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[85vh]" data-controller="chat-scroll">
+    <% visible_messages = @general_chat.messages.where(internal: false).order(:created_at) %>
+    <div id="messages" class="flex-1 overflow-y-auto p-6 flex flex-col gap-4" data-chat-scroll-target="messages">
+      <% if visible_messages.empty? %>
+        <p class="text-sm text-base-content/50 text-center my-auto">Pergunte algo sobre licenciamento, legislação ou como a Papyrus já fez antes.</p>
+      <% end %>
+      <% visible_messages.each do |message| %>
+        <%= render "message", message: message %>
+      <% end %>
+      <% if visible_messages.last&.role == "user" %>
+        <%= render "conversations/typing_indicator" %>
+      <% end %>
+    </div>
+
+    <%= render "message_composer", general_chat: @general_chat %>
+  </div>
+</div>

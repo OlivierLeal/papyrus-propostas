@@ -1,0 +1,9 @@
+<%# Mesmo motivo de conversations/_user_message_broadcast.turbo_stream.erb: um único broadcast
+    garante que a mensagem e o indicador de "digitando" cheguem na ordem certa via Turbo Stream. %>
+<%= turbo_stream.append "messages" do %>
+  <%= render "general_chats/message", message: message %>
+<% end %>
+
+<%= turbo_stream.append "messages" do %>
+  <%= render "conversations/typing_indicator" %>
+<% end %>

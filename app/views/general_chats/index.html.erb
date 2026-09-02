@@ -1,0 +1,33 @@
+<div class="p-8">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Tira-Dúvidas</h1>
+      <p class="text-sm text-base-content/60">Pergunte sobre licenciamento, legislação ou como a Papyrus já fez algo antes — sem amarrar a uma proposta.</p>
+    </div>
+
+    <%= button_to general_chats_path, class: "btn btn-primary btn-sm gap-1.5" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+      </svg>
+      Nova Consulta
+    <% end %>
+  </div>
+
+  <% if @general_chats.empty? %>
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-8 text-center text-base-content/60">
+      Nenhuma consulta ainda. <%= button_to "Comece uma", general_chats_path, class: "link link-primary inline p-0 bg-transparent border-none align-baseline" %>.
+    </div>
+  <% else %>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <% @general_chats.each do |general_chat| %>
+        <%= link_to general_chat_path(general_chat),
+              class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+          <div class="card-body gap-2">
+            <h3 class="font-semibold text-base-content leading-tight line-clamp-2"><%= general_chat.display_title %></h3>
+            <div class="text-xs text-base-content/40"><%= general_chat.created_at.strftime("%d/%m/%Y") %></div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+</div>

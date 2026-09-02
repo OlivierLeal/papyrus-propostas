@@ -1,0 +1,11 @@
+with_messages_question:
+  general_chat: with_messages
+  role: user
+  content: "Qual norma regula supressão de vegetação nativa na Bahia?"
+  internal: false
+
+with_messages_answer:
+  general_chat: with_messages
+  role: assistant
+  content: "A supressão de vegetação nativa na Bahia é regulada pela Lei Estadual 10.431/2006."
+  internal: false

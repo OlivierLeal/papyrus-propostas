@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_31_144818) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_110402) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -58,6 +58,52 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_144818) do
     t.index ["status"], name: "index_conversations_on_status"
     t.index ["study_type_id"], name: "index_conversations_on_study_type_id"
     t.index ["user_id"], name: "index_conversations_on_user_id"
+  end
+
+  create_table "general_chats", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "model_id"
+    t.string "title"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["model_id"], name: "index_general_chats_on_model_id"
+    t.index ["user_id"], name: "index_general_chats_on_user_id"
+  end
+
+  create_table "general_messages", force: :cascade do |t|
+    t.integer "cache_creation_tokens"
+    t.integer "cached_tokens"
+    t.text "content"
+    t.json "content_raw"
+    t.datetime "created_at", null: false
+    t.bigint "general_chat_id", null: false
+    t.bigint "general_tool_call_id"
+    t.integer "input_tokens"
+    t.boolean "internal", default: false, null: false
+    t.bigint "model_id"
+    t.integer "output_tokens"
+    t.string "role", null: false
+    t.text "thinking_signature"
+    t.text "thinking_text"
+    t.integer "thinking_tokens"
+    t.datetime "updated_at", null: false
+    t.index ["general_chat_id"], name: "index_general_messages_on_general_chat_id"
+    t.index ["general_tool_call_id"], name: "index_general_messages_on_general_tool_call_id"
+    t.index ["model_id"], name: "index_general_messages_on_model_id"
+    t.index ["role"], name: "index_general_messages_on_role"
+  end
+
+  create_table "general_tool_calls", force: :cascade do |t|
+    t.json "arguments", default: {}
+    t.datetime "created_at", null: false
+    t.bigint "general_message_id", null: false
+    t.string "name", null: false
+    t.text "thought_signature"
+    t.string "tool_call_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["general_message_id"], name: "index_general_tool_calls_on_general_message_id"
+    t.index ["name"], name: "index_general_tool_calls_on_name"
+    t.index ["tool_call_id"], name: "index_general_tool_calls_on_tool_call_id", unique: true
   end
 
   create_table "geospatial_results", force: :cascade do |t|
@@ -151,18 +197,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_144818) do
     t.index ["conversation_id"], name: "index_knowledge_notes_on_conversation_id"
     t.index ["embedding"], name: "index_knowledge_notes_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
     t.index ["status", "client_name"], name: "index_knowledge_notes_on_status_and_client_name"
-  end
-
-  create_table "logistics_configs", force: :cascade do |t|
-    t.boolean "active", default: true, null: false
-    t.datetime "created_at", null: false
-    t.decimal "fuel_price_per_liter", precision: 10, scale: 2, null: false
-    t.decimal "lodging_per_day", precision: 10, scale: 2, null: false
-    t.decimal "meal_per_day", precision: 10, scale: 2, null: false
-    t.string "name", null: false
-    t.decimal "rental_per_day", precision: 10, scale: 2, null: false
-    t.datetime "updated_at", null: false
-    t.index ["active"], name: "index_logistics_configs_on_active"
   end
 
   create_table "messages", force: :cascade do |t|
@@ -509,6 +543,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_144818) do
   add_foreign_key "conversations", "models"
   add_foreign_key "conversations", "study_types"
   add_foreign_key "conversations", "users"
+  add_foreign_key "general_chats", "models"
+  add_foreign_key "general_chats", "users"
+  add_foreign_key "general_messages", "general_chats"
+  add_foreign_key "general_messages", "general_tool_calls"
+  add_foreign_key "general_messages", "models"
+  add_foreign_key "general_tool_calls", "general_messages"
   add_foreign_key "geospatial_results", "conversations"
   add_foreign_key "historical_proposal_chunks", "historical_proposals"
   add_foreign_key "historical_proposals", "conversations"

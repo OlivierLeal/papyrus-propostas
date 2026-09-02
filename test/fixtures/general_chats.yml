@@ -1,0 +1,8 @@
+with_messages:
+  user: one
+  model: default
+  title: Qual norma regula supressão de vegetação nativa na Bahia?
+
+empty_chat:
+  user: one
+  model: default

@@ -30,6 +30,33 @@ module AiStubHelper
   ensure
     Conversation.define_method(:complete, original_method)
   end
+
+  # Mesma técnica acima, pra GeneralChat (chat geral de dúvidas, não amarrado a nenhuma proposta).
+  def stub_general_chat_ai_complete(responses)
+    queue = Array(responses).dup
+    original_method = GeneralChat.instance_method(:complete)
+
+    GeneralChat.define_method(:complete) do
+      content = queue.size > 1 ? queue.shift : queue.first
+      messages.create!(role: "assistant", content: content)
+    end
+
+    yield
+  ensure
+    GeneralChat.define_method(:complete, original_method)
+  end
+
+  def stub_general_chat_ai_error(error_class = RubyLLM::Error)
+    original_method = GeneralChat.instance_method(:complete)
+
+    GeneralChat.define_method(:complete) do
+      raise error_class, "erro simulado em teste"
+    end
+
+    yield
+  ensure
+    GeneralChat.define_method(:complete, original_method)
+  end
 end
 
 # O pipeline de RAG (Rag::DocumentClassifier) roda offline, fora de qualquer Conversation, e

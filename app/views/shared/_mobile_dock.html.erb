@@ -6,6 +6,13 @@
     <span class="dock-label">Propostas</span>
   <% end %>
 
+  <%= link_to general_chats_path, class: request.path.start_with?("/general_chats") ? "dock-active" : nil do %>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
+      <path d="<%= ApplicationHelper::ICON_TIRA_DUVIDAS %>" />
+    </svg>
+    <span class="dock-label">Dúvidas</span>
+  <% end %>
+
   <%= link_to settings_root_path, class: request.path.start_with?("/configuracoes") ? "dock-active" : nil do %>
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
       <path d="<%= ApplicationHelper::ICON_CONFIGURACOES %>" />

@@ -28,6 +28,11 @@ Rails.application.routes.draw do
     end
   end
 
+  # Chat geral de dúvidas — não amarrado a nenhuma proposta (ver GeneralChat).
+  resources :general_chats, only: %i[index create show] do
+    resources :general_messages, only: :create
+  end
+
   namespace :settings do
     root to: "dashboard#index"
     resources :study_types, except: :show

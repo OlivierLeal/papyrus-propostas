@@ -565,3 +565,46 @@ e o rastro da divergência não se perde.
 `Proposal#apply_lines!` continua descartando linha de equipe que não existe em `study_templates`,
 mas agora registra um achado `sugestao` dizendo o que foi descartado — ou falta cadastro, ou a IA
 inventou, e as duas coisas são informação para o consultor.
+
+---
+
+## 14. Chat geral de dúvidas (`GeneralChat`, implementado)
+
+Chat de perguntas e respostas **não amarrado a nenhuma proposta** — o consultor tira uma dúvida de
+licenciamento/legislação/prática da Papyrus a qualquer momento, sem precisar abrir (ou ter) uma
+proposta em andamento. A IA consulta as mesmas duas fontes de embasamento do chat de proposta —
+acervo histórico (`SearchHistoricalArchiveTool`, seção 11.1) e CAL (`SearchLegalNormsTool`, seção
+11.2) — e cita a origem, mesma disciplina de sempre. Acessível pelo item "Tira-Dúvidas" na barra
+lateral/dock, ao lado de "Propostas".
+
+**Por que é um trio de tabelas à parte (`general_chats`/`general_messages`/`general_tool_calls`),
+não uma reaproveitando `Conversation`:** a gem `ruby_llm` (`acts_as_chat`/`acts_as_message`) amarra
+`messages.conversation_id` e `tool_calls.message_id` como chave estrangeira literal — não
+polimórfica — a uma classe de chat/mensagem específica. Não dá pra um `GeneralChat` sem proposta
+conviver na mesma tabela `messages` que `Conversation` sem um `conversation_id` fantasma. Gerado
+com `bin/rails generate ruby_llm:install chat:GeneralChat message:GeneralMessage
+tool_call:GeneralToolCall model:Model --skip-active-storage` — `model:Model` reaproveita o catálogo
+de modelos LLM existente (`models`, sem FK pra chat nenhum, genuinamente compartilhável).
+`GeneralChat` declara `acts_as_chat messages: :messages, message_class: "GeneralMessage"` (não
+`messages: :general_messages`) só pra manter a mesma interface pública de `Conversation`
+(`general_chat.messages`, não `.general_messages`) — `acts_as_model` por sua vez só aceita UMA
+associação `chats:`, então `Model` mantém a original (`chats: :conversations`) e ganha
+`has_many :general_chats` à parte.
+
+**Cuidado ao rodar o gerador da gem de novo:** ele sobrescreve incondicionalmente
+`config/initializers/ruby_llm.rb` (config real do Bedrock) e o `app/models/<qualquer classe já
+mapeada, ex.: Model>.rb` existentes com o template genérico — aconteceu ao gerar este trio.
+Sempre conferir `git diff` nesses dois arquivos depois de rodar `ruby_llm:install` e restaurar o
+que for customização do projeto.
+
+Sem tela de setup: `GeneralChatsController#create` não recebe parâmetro nenhum, só cria o chat pro
+usuário atual, aplica `GeneralChat::SYSTEM_INSTRUCTIONS` (prompt próprio — sem proposta, sem ET/TR/
+KMZ, sem achados, sem motor de preço) e manda pra tela de conversa. O título da listagem
+(`GeneralChat#display_title`) vem da primeira mensagem do consultor, truncada — só é gravado depois
+que a IA responde (`RespondToGeneralChatMessageJob`), pra não persistir um título de mensagem que
+falhou antes de qualquer resposta.
+
+`RespondToGeneralChatMessageJob` é a versão enxuta de `RespondToMessageJob`: registra só
+`SearchHistoricalArchiveTool` (quando há acervo indexado) e `SearchLegalNormsTool` (quando o CAL
+está configurado) — nunca `GenerateProposalDocumentTool`, `AddExternalCostTool` nem
+`RememberForFutureProposalsTool`, que não fazem sentido sem proposta.

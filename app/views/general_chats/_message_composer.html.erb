@@ -1,0 +1,10 @@
+<%= form_with url: general_chat_general_messages_path(general_chat), id: "message_composer",
+      class: "flex items-end gap-2 p-6 pt-4 shrink-0 border-t border-base-300",
+      data: { controller: "chat-composer",
+              action: "turbo:submit-start->chat-composer#lock turbo:submit-end->chat-composer#unlock" } do |form| %>
+  <%= text_area_tag "content", nil, placeholder: "Pergunte algo... (Enter envia, Shift+Enter pula linha)",
+        autocomplete: "off", rows: 1,
+        class: "textarea textarea-bordered flex-1 resize-none overflow-y-auto max-h-40 py-2 leading-normal",
+        data: { chat_composer_target: "input", action: "input->chat-composer#resize keydown->chat-composer#submitOnEnter" } %>
+  <%= form.submit "Enviar", class: "btn btn-primary", data: { chat_composer_target: "submit" } %>
+<% end %>
