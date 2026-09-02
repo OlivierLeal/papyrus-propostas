@@ -472,4 +472,54 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal [ "Licença Prévia (LP):", "" ], linhas.first
     assert_equal [ "Estudo de Médio Impacto (EMI)", "Word e PDF" ], linhas.second
   end
+
+  test "includes the schedule table when the pricing has items and a start date" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1))
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Assinatura do Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Mobilização"
+  end
+
+  test "leaves out a schedule type that has items but no start date set" do
+    pricing = @proposal.project_pricing
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Assinatura do Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    assert_not_includes document_xml(@proposal.generated_documents.first), "Cronograma"
+  end
+
+  test "leaves out a schedule type that has a start date but no items" do
+    @proposal.project_pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1))
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    assert_not_includes document_xml(@proposal.generated_documents.first), "Cronograma"
+  end
+
+  test "numbers both quadros when both schedule types are present" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1), schedule_empreendimento_start_date: Date.new(2026, 9, 1))
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    pricing.schedule_items.create!(schedule_type: "implantacao", phase_name: "Construção", activity_name: "Obras civis",
+      start_period: 1, duration_periods: 6, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 9-2: Cronograma de Implantação do Empreendimento."
+  end
 end

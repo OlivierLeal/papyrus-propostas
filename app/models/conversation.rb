@@ -274,6 +274,7 @@ class Conversation < ApplicationRecord
 
     new_proposal = create_proposal!(status: "draft")
     new_proposal.build_with_ai_suggested_team!
+    new_proposal.build_with_ai_suggested_schedule!
     update!(status: "pricing")
     new_proposal
   end

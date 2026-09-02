@@ -177,6 +177,91 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal 3, pricing.proposal_professionals.count
   end
 
+  test "build_with_ai_suggested_schedule! persists servico items in the order suggested, grouped by phase" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = {
+      cronograma_servico: [
+        { fase: "Mobilização", atividade: "Assinatura do Contrato", periodo_inicio: 1, duracao: 1, marco: false },
+        { fase: "Mobilização", atividade: "Campanhas de Campo", periodo_inicio: 2, duracao: 3, marco: false },
+        { fase: "Emissão", atividade: "Emissão da LP", periodo_inicio: 6, duracao: 1, marco: true }
+      ],
+      cronograma_implantacao: []
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
+
+    items = proposal.project_pricing.schedule_items.for_type("servico").to_a
+    assert_equal 3, items.size
+    assert_equal %w[Mobilização Mobilização Emissão], items.map(&:phase_name)
+    assert_equal 6, items.last.start_period
+    assert items.last.milestone
+    assert_not items.first.milestone
+    assert_empty proposal.project_pricing.schedule_items.for_type("implantacao")
+  end
+
+  test "build_with_ai_suggested_schedule! only fills cronograma_implantacao when the AI provides it" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = {
+      cronograma_servico: [],
+      cronograma_implantacao: [
+        { fase: "Construção", atividade: "Obras civis", periodo_inicio: 1, duracao: 12, marco: false }
+      ]
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
+
+    items = proposal.project_pricing.schedule_items.for_type("implantacao").to_a
+    assert_equal 1, items.size
+    assert_equal 12, items.first.duration_periods
+  end
+
+  test "build_with_ai_suggested_schedule! skips an incomplete line instead of raising" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = {
+      cronograma_servico: [
+        { fase: "", atividade: "Sem fase", periodo_inicio: 1, duracao: 1, marco: false },
+        { fase: "Mobilização", atividade: "Período inválido", periodo_inicio: 0, duracao: 1, marco: false },
+        { fase: "Mobilização", atividade: "Válida", periodo_inicio: 1, duracao: 1, marco: false }
+      ]
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
+
+    assert_equal [ "Válida" ], proposal.project_pricing.schedule_items.for_type("servico").map(&:activity_name)
+  end
+
+  test "build_with_ai_suggested_schedule! leaves the proposal without a schedule when the AI reply is not valid JSON, without raising" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+
+    stub_ai_complete("isso não é json") { proposal.build_with_ai_suggested_schedule! }
+
+    assert_empty proposal.project_pricing.schedule_items
+  end
+
+  test "build_with_ai_suggested_schedule! does not raise and leaves no schedule when the AI call itself errors out" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+
+    stub_ai_error { proposal.build_with_ai_suggested_schedule! }
+
+    assert_empty proposal.project_pricing.schedule_items
+  end
+
+  test "build_with_ai_suggested_schedule! never sets the start dates — those are always the consultant's" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = { cronograma_servico: [ { fase: "Mobilização", atividade: "X", periodo_inicio: 1, duracao: 1, marco: false } ] }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
+
+    assert_nil proposal.project_pricing.schedule_papyrus_start_date
+    assert_nil proposal.project_pricing.schedule_empreendimento_start_date
+  end
+
   test "team_slot_for_docx returns the professional with the most office hours by default" do
     proposal = proposals(:priced_proposal)
 

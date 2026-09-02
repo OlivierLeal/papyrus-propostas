@@ -3,6 +3,11 @@ class ProjectPricing < ApplicationRecord
   has_many :proposal_professionals, dependent: :destroy
   accepts_nested_attributes_for :proposal_professionals, update_only: true
 
+  # Cronograma (Gantt no .docx, ver ScheduleItem/ScheduleTableBuilder) — não entra no cálculo de
+  # preço, só é lido na hora de gerar o documento.
+  has_many :schedule_items, -> { order(:position) }, dependent: :destroy
+  accepts_nested_attributes_for :schedule_items, update_only: true
+
   validates :bdi, :tax_multiplier, presence: true, numericality: { greater_than: 0 }
   validates :distance_km, :rental_per_day, :meal_per_day, :fuel_total,
             presence: true, numericality: { greater_than_or_equal_to: 0 }

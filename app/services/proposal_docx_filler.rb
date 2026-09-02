@@ -51,29 +51,34 @@ class ProposalDocxFiller
   # literalmente "{{TOKEN}}" por uma imagem embutida de verdade (ver #fill_images!). Quem chama
   # decide se manda bytes aqui ou "" em `placeholders` pro mesmo token (nunca os dois).
   #
+  # schedules: { "servico" => { start_date:, items: [ScheduleItem,...] }, "implantacao" => {...} }
+  # — insere uma página paisagem com a(s) tabela(s) de cronograma logo depois do prazo de execução
+  # (ver #insert_schedule_tables!). Só as chaves presentes viram seção no documento; sem nenhuma,
+  # o documento sai igual a antes desta funcionalidade existir.
+  #
   # remove_paragraph_if_blank: tokens cujo parágrafo INTEIRO deve sumir (não só ficar com texto
   # vazio) quando o valor vier em branco — usado pra item de lista opcional (ex.: obrigação extra
   # da CONTRATANTE/PAPYRUS que só existe quando o ET pede algo específico): a maioria das
   # propostas não tem nenhuma, e um item de lista vazio ("● ") ficaria visível no documento final.
-  def fill(placeholders:, tables: {}, images: {}, remove_paragraph_if_blank: [])
-    build(placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank)
+  def fill(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [])
+    build(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
   end
 
   # technical_overrides/commercial_overrides: placeholders que diferem entre os dois arquivos
   # (ex.: título da capa) — mesclados por cima de `placeholders` só na respectiva variante. Quem
   # decide os valores é quem chama (ver GenerateProposalDocumentTool); este serviço não sabe o
   # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
-  def fill_split(placeholders:, tables: {}, images: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {})
+  def fill_split(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {})
     {
-      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :technical) },
-      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :commercial) }
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :technical) },
+      commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :commercial) }
     }
   end
 
   private
     # Sempre opera numa cópia descartável — Zip::File#open com bloco reescreve o arquivo no
     # próprio caminho ao sair do bloco, então nunca toca no modelo original.
-    def build(placeholders:, tables:, images: {}, remove_paragraph_if_blank: [])
+    def build(placeholders:, tables:, images: {}, schedules: {}, remove_paragraph_if_blank: [])
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
         FileUtils.cp(@template_path, tmp.path)
 
@@ -85,11 +90,19 @@ class ProposalDocxFiller
           # fill_split) — a seção some do documento final de qualquer forma, então a única sobra é
           # uma mídia/relationship sem uso no zip, inofensiva (Word/LibreOffice ignoram sem erro).
           fill_images!(doc, images, zip)
-          fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
+
+          # tables.each ANTES de insert_schedule_tables! — os índices em `tables` são a POSIÇÃO da
+          # tabela no corpo (ver build_tables no chamador). Minha tabela de cronograma nasce ENTRE
+          # a tabela 2 (equipe) e a 3 (desembolso) — inseri-la antes deslocaria "//w:tbl"[3] pra
+          # apontar pra ela em vez do Desembolso, e fill_table! reescreveria o cronograma por
+          # cima. Preencher as tabelas originais primeiro resolve os índices antes de qualquer
+          # tabela nova existir, então a ordem de inserção deixa de importar.
           tables.each do |table_index, config|
             table_node = doc.xpath("//w:tbl", NS)[table_index]
             fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false))
           end
+          insert_schedule_tables!(doc, schedules)
+          fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
 
           yield doc if block_given?
           zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
@@ -167,6 +180,78 @@ class ProposalDocxFiller
       <<~XML
         <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="#{IMAGE_WIDTH_EMU}" cy="#{IMAGE_HEIGHT_EMU}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="9001" name="#{filename}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="#{filename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="#{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="#{IMAGE_WIDTH_EMU}" cy="#{IMAGE_HEIGHT_EMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>
       XML
+    end
+
+    # "PRAZO DE EXECUÇÃO" é sempre a 9ª seção de nível 1 do modelo (estrutura fixa — mesmo
+    # princípio de GenerateProposalDocumentTool::SECAO_ESCOPO_NUMERO), por isso dá pra numerar o
+    # quadro aqui, sem a IA saber a posição real do documento renderizado.
+    SECAO_PRAZO_NUMERO = 9
+
+    SCHEDULE_TYPES_IN_ORDER = %w[servico implantacao].freeze
+    SCHEDULE_CAPTIONS = {
+      "servico" => "Cronograma do Serviço.",
+      "implantacao" => "Cronograma de Implantação do Empreendimento."
+    }.freeze
+    SCHEDULE_UNITS = { "servico" => :week, "implantacao" => :month }.freeze
+
+    # Únicas propriedades de seção (cabeçalho/rodapé/margens) que o modelo usa hoje — o mesmo
+    # <w:sectPr> retrato do fim do corpo, e uma variante paisagem com o mesmo cabeçalho/rodapé.
+    SECT_HEADER_FOOTER_XML = '<w:headerReference w:type="default" r:id="rId15"/><w:footerReference w:type="default" r:id="rId16"/>'
+    PORTRAIT_SECT_XML = "#{SECT_HEADER_FOOTER_XML}<w:pgSz w:w=\"11906\" w:h=\"16838\"/>" \
+      '<w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/>'
+    LANDSCAPE_SECT_XML = "#{SECT_HEADER_FOOTER_XML}<w:pgSz w:orient=\"landscape\" w:w=\"16838\" w:h=\"11906\"/>" \
+      '<w:pgMar w:top="1701" w:right="1418" w:bottom="1701" w:left="1418" w:header="708" w:footer="708" w:gutter="0"/>'
+
+    # Insere a(s) tabela(s) de cronograma numa página PAISAGEM logo depois do prazo de execução —
+    # ver CLAUDE.md seção 8 e ScheduleTableBuilder. Âncora pelo token "{{PRAZO_EXECUCAO}}" (ainda
+    # intacto nesse ponto — roda antes de fill_simple_placeholders!, mesmo motivo de
+    # fill_images!), nunca por índice de filho de <w:body> — mesma regra de trim_body!.
+    #
+    # Mecânica de seção OOXML: um parágrafo com <w:sectPr> fecha a seção que TERMINA nele (não a
+    # que começa depois). Bastam 2 parágrafos novos — um retrato (fecha a seção 1, tudo que já
+    # existia, sem mudar nada nela) e um paisagem (fecha a seção 2, as tabelas) — o resto do
+    # documento (VALIDADE DA PROPOSTA em diante, até o bloco de assinatura) volta pro retrato
+    # sozinho, herdando do <w:sectPr> final que já existe no corpo (seção 3, implícita).
+    def insert_schedule_tables!(doc, schedules)
+      return if schedules.blank?
+
+      xml = schedule_block_xml(schedules)
+      return if xml.blank?
+
+      anchor = doc.xpath("//w:t[contains(text(), '{{PRAZO_EXECUCAO}}')]", NS).first
+      paragraph = anchor&.at_xpath("ancestor::w:p", NS)
+      return unless paragraph
+
+      paragraph.add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
+    end
+
+    def schedule_block_xml(schedules)
+      quadro_number = 0
+      tables_xml = +""
+
+      SCHEDULE_TYPES_IN_ORDER.each do |type|
+        payload = schedules[type]
+        next unless payload
+
+        quadro_number += 1
+        tables_xml << schedule_caption_xml("Quadro #{SECAO_PRAZO_NUMERO}-#{quadro_number}: #{SCHEDULE_CAPTIONS.fetch(type)}")
+        tables_xml << ScheduleTableBuilder.new(payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type)).build_xml
+      end
+
+      return "" if tables_xml.blank?
+
+      "#{section_break_paragraph_xml(PORTRAIT_SECT_XML)}#{tables_xml}#{section_break_paragraph_xml(LANDSCAPE_SECT_XML)}"
+    end
+
+    def schedule_caption_xml(text)
+      "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" \
+      "<w:pPr><w:jc w:val=\"both\"/><w:rPr><w:rFonts w:ascii=\"Metropolis\" w:hAnsi=\"Metropolis\"/><w:b/></w:rPr></w:pPr>" \
+      "<w:r><w:rPr><w:rFonts w:ascii=\"Metropolis\" w:hAnsi=\"Metropolis\"/><w:b/></w:rPr>" \
+      "<w:t xml:space=\"preserve\">#{CGI.escapeHTML(text)}</w:t></w:r></w:p>"
+    end
+
+    def section_break_paragraph_xml(sect_xml)
+      "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:pPr><w:sectPr>#{sect_xml}</w:sectPr></w:pPr></w:p>"
     end
 
     def fill_simple_placeholders!(doc, values, remove_paragraph_if_blank: [])

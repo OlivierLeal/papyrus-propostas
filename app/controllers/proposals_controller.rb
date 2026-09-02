@@ -98,8 +98,10 @@ class ProposalsController < ApplicationController
     def pricing_params
       params.require(:project_pricing).permit(
         :bdi, :tax_multiplier, :distance_km, :logistics_days, :rental_per_day, :meal_per_day, :fuel_total,
+        :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
-        proposal_professionals_attributes: %i[ id hours_office hours_field ]
+        proposal_professionals_attributes: %i[ id hours_office hours_field ],
+        schedule_items_attributes: %i[ id phase_name activity_name start_period duration_periods milestone ]
       )
     end
 

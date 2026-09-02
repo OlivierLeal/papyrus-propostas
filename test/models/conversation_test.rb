@@ -82,6 +82,15 @@ class ConversationTest < ActiveSupport::TestCase
     assert_equal study_types(:eia_rima), stale_copy.study_type
   end
 
+  test "ensure_proposal! also builds the AI-suggested schedule, right after the team" do
+    conversation = conversations(:reviewing_conversation)
+    ai_response = { cronograma_servico: [ { fase: "Mobilização", atividade: "Assinatura do Contrato", periodo_inicio: 1, duracao: 1, marco: false } ] }.to_json
+
+    proposal = stub_ai_complete(ai_response) { conversation.ensure_proposal! }
+
+    assert_equal [ "Assinatura do Contrato" ], proposal.project_pricing.schedule_items.for_type("servico").map(&:activity_name)
+  end
+
   test "ensure_proposal! returns nil (without reloading forever) when the study_type still isn't set anywhere" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Tipo Nenhum", status: "reviewing")
 

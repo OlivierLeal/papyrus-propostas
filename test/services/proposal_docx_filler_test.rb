@@ -318,6 +318,89 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     end
   end
 
+  test "fill without schedules: leaves the document exactly as before this feature existed (only 1 sectPr, no Cronograma)" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    doc = parsed_document(bytes)
+
+    assert_equal 1, doc.xpath("//w:sectPr", NS).size
+    assert_not_includes document_xml(bytes), "Cronograma"
+  end
+
+  test "fill inserts a landscape schedule table right after PRAZO DE EXECUÇÃO, restoring portrait afterwards" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+    doc = parsed_document(bytes)
+
+    sect_prs = doc.xpath("//w:sectPr", NS)
+    assert_equal 3, sect_prs.size # fecha a seção original + fecha a paisagem + a final do corpo
+
+    assert_nil sect_prs[0].at_xpath("w:pgSz", NS)["w:orient"] # seção 1 continua retrato, sem mudar nada dela
+    assert_equal "landscape", sect_prs[1].at_xpath("w:pgSz", NS)["w:orient"]
+    assert_nil sect_prs[2].at_xpath("w:pgSz", NS)["w:orient"] # volta pro retrato sozinha, herdando o sectPr final
+
+    xml = document_xml(bytes)
+    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Mobilização"
+    # O resto do documento continua intacto depois da tabela.
+    assert_includes xml, "VALIDADE DA PROPOSTA"
+    assert_includes xml, "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
+  end
+
+  # REGRESSÃO: a tabela nova nasce ENTRE a de equipe (índice 2) e a de desembolso (índice 3) no
+  # corpo do documento — inserida ANTES de tables.each rodar, "//w:tbl"[3] passava a apontar pra
+  # ela em vez do Desembolso, e fill_table! reescrevia o cronograma por cima com as linhas de
+  # pagamento. As duas tabelas (desembolso E cronograma) têm que sair certas ao mesmo tempo.
+  test "the schedule table never steals the position-indexed Desembolso table's content" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+    doc = parsed_document(bytes)
+    # No documento final a tabela de cronograma (nova) fica ENTRE a de equipe (2) e a de
+    # desembolso — que por isso passa a ser a 5ª (índice 4), não mais a 4ª (índice 3).
+    data_rows = doc.xpath("//w:tbl", NS)[4].xpath(".//w:tr", NS)[1..]
+
+    assert_equal 1, data_rows.size
+    assert_equal [ "1", "Assinatura do contrato", "13.473,00", "25/03/2026" ], cell_texts(data_rows[0])
+    assert_includes document_xml(bytes), "Mobilização"
+  end
+
+  test "fill numbers both quadros in order when both schedule types are present" do
+    bytes = @filler.fill(
+      placeholders: @placeholders, tables: @tables,
+      schedules: { "servico" => schedule_payload("servico"), "implantacao" => schedule_payload("implantacao") }
+    )
+    xml = document_xml(bytes)
+
+    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 9-2: Cronograma de Implantação do Empreendimento."
+    assert_operator xml.index("Quadro 9-1"), :<, xml.index("Quadro 9-2")
+  end
+
+  test "fill_split only keeps the schedule table in the technical variant (PRAZO DE EXECUÇÃO is section 9)" do
+    result = @filler.fill_split(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+
+    technical_xml = document_xml(result[:technical])
+    commercial_xml = document_xml(result[:commercial])
+
+    assert_includes technical_xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_not_includes commercial_xml, "Quadro 9-1: Cronograma do Serviço."
+    # A técnica não fica truncada no meio do bloco novo — a validade (seção seguinte) continua lá.
+    assert_includes technical_xml, "VALIDADE DA PROPOSTA"
+  end
+
+  test "fill_split still produces openable docx files with a schedule table" do
+    result = @filler.fill_split(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+
+    result.each_value do |bytes|
+      Tempfile.create([ "split", ".docx" ], binmode: true) do |tmp|
+        tmp.write(bytes)
+        tmp.flush
+
+        Zip::File.open(tmp.path) do |zip|
+          assert zip.find_entry("[Content_Types].xml")
+          assert zip.find_entry("word/document.xml")
+        end
+      end
+    end
+  end
+
   private
     def document_xml(bytes)
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
@@ -349,6 +432,16 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
         tmp.flush
         Zip::File.open(tmp.path) { |zip| return zip.read(entry_name).force_encoding("UTF-8") }
       end
+    end
+
+    def schedule_payload(schedule_type)
+      {
+        start_date: Date.new(2026, 9, 1),
+        items: [
+          ScheduleItem.new(schedule_type: schedule_type, phase_name: "Mobilização", activity_name: "Assinatura do Contrato",
+            start_period: 1, duration_periods: 1, position: 0)
+        ]
+      }
     end
 
 

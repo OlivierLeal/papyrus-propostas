@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_02_131230) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_135137) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -313,6 +313,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_131230) do
     t.jsonb "payment_schedule", default: [{"label"=>"Assinatura do contrato", "percentage"=>30}, {"label"=>"Protocolo no órgão ambiental", "percentage"=>60}, {"label"=>"Vistoria", "percentage"=>5}, {"label"=>"Emissão da licença", "percentage"=>5}], null: false
     t.bigint "proposal_id", null: false
     t.decimal "rental_per_day", precision: 10, scale: 2, default: "0.0", null: false
+    t.date "schedule_empreendimento_start_date"
+    t.date "schedule_papyrus_start_date"
     t.decimal "tax_multiplier", precision: 6, scale: 4, default: "1.25", null: false
     t.decimal "total_value", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
@@ -343,6 +345,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_131230) do
     t.datetime "updated_at", null: false
     t.integer "version", default: 0, null: false
     t.index ["conversation_id"], name: "index_proposals_on_conversation_id", unique: true
+  end
+
+  create_table "schedule_items", force: :cascade do |t|
+    t.string "activity_name", null: false
+    t.datetime "created_at", null: false
+    t.integer "duration_periods", null: false
+    t.boolean "milestone", default: false, null: false
+    t.string "phase_name", null: false
+    t.integer "position", null: false
+    t.bigint "project_pricing_id", null: false
+    t.string "schedule_type", null: false
+    t.integer "start_period", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_pricing_id", "position"], name: "index_schedule_items_on_project_pricing_id_and_position"
+    t.index ["project_pricing_id"], name: "index_schedule_items_on_project_pricing_id"
   end
 
   create_table "sessions", force: :cascade do |t|
@@ -571,6 +588,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_131230) do
   add_foreign_key "proposal_professionals", "professionals"
   add_foreign_key "proposal_professionals", "project_pricings"
   add_foreign_key "proposals", "conversations"
+  add_foreign_key "schedule_items", "project_pricings"
   add_foreign_key "sessions", "users"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_claimed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

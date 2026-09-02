@@ -25,6 +25,7 @@ Rails.application.routes.draw do
       post :add_external_cost
       delete "external_costs/:index", action: :remove_external_cost, as: :remove_external_cost
       resources :proposal_professionals, only: %i[create destroy]
+      resources :schedule_items, only: %i[create destroy]
     end
   end
 

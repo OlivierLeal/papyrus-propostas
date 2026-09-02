@@ -248,6 +248,94 @@ precisar de um placeholder por tópico, já que a quantidade varia por proposta.
 temática (estudo simples) pode deixar `topicos_escopo` de fora e escrever tudo em
 `escopo_e_metodologia`, como antes.
 
+**Cronograma (Gantt) em página paisagem, 2 tipos (2026-09):** toda proposta pode ter um
+cronograma visual no `.docx`, baseado num exemplo real da Papyrus (`Quadro 9-1`, tabela nativa do
+Word com colunas de período agrupadas e barras coloridas por atividade). Dois tipos, sempre
+independentes:
+1. **Cronograma do Serviço** (`schedule_type: "servico"`) — as atividades do próprio
+   estudo/licenciamento (reuniões, campo, protocolos, emissão da licença). Em **semanas**.
+2. **Cronograma de Implantação do Empreendimento** (`"implantacao"`) — o cronograma da OBRA/
+   operação do CLIENTE, não da Papyrus. Em **meses** (pode durar anos — semana ficaria
+   ilegível). Só existe quando o ET/TR pede explicitamente, não é padrão em toda proposta.
+
+- **`ScheduleItem`** (`app/models/schedule_item.rb`) — uma linha (fase + atividade) por registro,
+  `belongs_to :project_pricing`. Nunca existe uma linha de "fase" separada: o renderer do docx
+  detecta troca de `phase_name` entre itens CONSECUTIVOS (por `position`) e insere a linha de fase
+  sozinho — mesma convenção já usada pra agrupar produtos por fase de licenciamento
+  (`"Licença Prévia (LP):"` em `GenerateProposalDocumentTool#build_tables`).
+- **Data de início**: `project_pricing.schedule_papyrus_start_date` /
+  `schedule_empreendimento_start_date` — sempre digitada pelo consultor na Tela de Precificação
+  (igual `distance_km`/`bdi`, campo escalar direto na tabela — não é o caso de N datas pra N
+  parcelas do `payment_schedule`, aqui é só 1 data por tipo). A IA nunca sugere essa data.
+- **A IA sugere, o consultor ajusta** — mesmo padrão de equipe técnica
+  (`Proposal#build_with_ai_suggested_team!`), mas sem "menu" fechado (não existe cadastro de fases
+  por tipo de estudo, é conteúdo livre). `Proposal#build_with_ai_suggested_schedule!` roda logo
+  depois da sugestão de equipe, dentro de `Conversation#ensure_proposal!` — pede um JSON com
+  `cronograma_servico`/`cronograma_implantacao` (fase, atividade, período de início, duração,
+  `marco: true/false`), grava direto via `ScheduleItem.create!`, sem fallback determinístico (não
+  existe "template padrão" de cronograma) — falha ou resposta vazia só significa proposta sem
+  cronograma nenhum, o consultor monta na mão se quiser. A Tela de Precificação ganhou uma grade
+  editável por tipo (`app/views/proposals/_schedule_section.html.erb`), mesmo padrão de
+  fields_for/mini-form de "adicionar linha" da grade de Equipe/Custos externos —
+  `ScheduleItemsController` checa `status != "approved"` no próprio controller (diferente de
+  `ProposalProfessionalsController`/custos externos, que só escondem os controles na view; decisão
+  consciente de não repetir esse gap num controller novo).
+- **`ScheduleTableBuilder`** (`app/services/schedule_table_builder.rb`) — gera o XML de UM
+  `<w:tbl>` a partir de `items` (já ordenados por `position`) + `start_date` + `unit` (`:week`/
+  `:month`). Cores/estrutura exatas do exemplo real: cabeçalho de 2 linhas (grupo de mês/ano em
+  `1F4E79`, período em `2F5597`), linha de fase em `D9E1F2` (sem barra, cor de texto `1F4E79`),
+  linha de atividade com zebra `auto`/`F2F5F9` nas células sem barra e `2E75B6` (ou `C65911` se
+  `milestone`) nas células dentro de `[start_period, start_period+duration_periods)`.
+
+  **Muitos períodos numa página só (2026-09, achado ao vivo):** um cronograma de serviço real de
+  ~2 anos (104 semanas, sugerido pela própria IA pra um monitoramento contínuo) deixava cada
+  coluna tão fina que o cabeçalho ("Sem 1"/"Setembro 2026") quebrava letra por letra, empilhado —
+  ilegível. Duas camadas de correção, as duas testadas ao vivo (LibreOffice headless → PDF →
+  captura de tela, não só o XML):
+  1. **Gira o cabeçalho 90°** (`ROTATE_BELOW_WIDTH = 500` dxa) quando a coluna fica estreita
+     demais pra ficar horizontal — célula mantém a largura, só o texto passa a correr de baixo
+     pra cima (`<w:textDirection w:val="btLr"/>`).
+  2. **Consolida períodos em blocos** (`MIN_COLUMN_WIDTH = 400` dxa, ver `bucket_size`/
+     `display_periods`) quando nem girado um período sozinho caberia — 4 semanas viram 1 coluna
+     ("Sem 1-4"), o `start_period`/`duration_periods` de cada atividade é remapeado pro(s)
+     bucket(s) que cobre. Sem isso, mesmo com o texto girado, o LibreOffice simplesmente **não
+     desenhava nada** abaixo de ~300dxa — largura mínima real pra QUALQUER texto rotacionado
+     numa célula, giro não é de graça.
+  3. **Pegadinha que mascarou a correção nº 1 por um tempo**: `w:textDirection` segue uma ORDEM
+     fixa dentro de `<w:tcPr>` no schema OOXML (depois de `tcBorders`/`shd`, antes de `vAlign`)
+     — fora de ordem, o Word/LibreOffice **ignora o elemento em silêncio**, sem erro nenhum; o
+     cabeçalho continuava quebrando letra por letra como se `rotate:` nunca tivesse sido passado.
+  4. **Pegadinha que mascarou a nº 2**: mesmo com largura/ordem corretas, o texto girado saía em
+     branco no documento REAL (mas funcionava num `.docx` isolado de teste, sem o modelo da
+     Papyrus). Causa: o modelo define `w:pPrDefault` com `spacing after="160"` — invisível num
+     parágrafo normal, mas depois de girar 90° essa folga vertical vira LARGURA extra que a
+     célula não tem. `cell_xml` agora sempre escreve `<w:spacing before="0" after="0" line="240"
+     lineRule="auto"/>` explícito, nunca herda o padrão do documento.
+- **Inserção no `.docx`** (`ProposalDocxFiller#insert_schedule_tables!`) — âncora pelo token
+  `{{PRAZO_EXECUCAO}}` (ainda intacto, roda antes de `fill_simple_placeholders!`), nunca por
+  índice de `<w:body>`. Mecânica de seção OOXML: um parágrafo com `<w:sectPr>` fecha a seção que
+  TERMINA nele (não a que começa depois) — bastam 2 parágrafos novos (um retrato, fecha a seção
+  que já existia sem mudar nada nela; um paisagem, fecha a seção das tabelas) pra abrir e fechar o
+  bloco paisagem; o resto do documento (VALIDADE DA PROPOSTA em diante, até o bloco de assinatura)
+  volta pro retrato sozinho, herdando do `<w:sectPr>` final que já existe no corpo. "PRAZO DE
+  EXECUÇÃO" é sempre a 9ª seção de nível 1 do modelo (estrutura fixa, mesmo princípio de
+  `SECAO_ESCOPO_NUMERO`), por isso o número do quadro (`Quadro 9-1`/`Quadro 9-2`) é calculado no
+  backend, nunca pela IA.
+  **Achado ao vivo, corrigido**: a tabela nova nasce ENTRE a de equipe (índice posicional 2) e a
+  de desembolso (índice 3) — inseri-la ANTES do `tables.each` de `build` deslocava `//w:tbl[3]`
+  pra apontar pra ela em vez do Desembolso, e `fill_table!` reescrevia o cronograma por cima com
+  as linhas de pagamento. Corrigido preenchendo as tabelas originais por posição PRIMEIRO, com a
+  tabela de cronograma entrando só depois — a ordem de inserção deixa de importar pros índices.
+- **`GenerateProposalDocumentTool#build_schedules`** lê `project_pricing.schedule_items` +
+  `schedule_*_start_date` direto do banco (igual equipe/desembolso, nunca um parâmetro que a IA
+  preenche a cada geração) e passa pra `ProposalDocxFiller#fill`/`fill_split` como `schedules:`.
+  Um tipo com itens mas sem data (ou vice-versa) fica de fora silenciosamente — a página só existe
+  quando os dois estão presentes. Sai igual em qualquer status da proposta (draft/priced/
+  approved), sempre na parte técnica — não é dado de preço.
+- **Bloco de assinatura em negrito** no fim do documento (Papyrus + cliente, CNPJ) já existia no
+  modelo e já saía em negrito antes desta funcionalidade — confirmado ao vivo que continua intacto
+  depois da página paisagem nova, sem precisar de nenhuma mudança própria.
+
 ---
 
 ## 9. Prompts do sistema (2 prompts principais)

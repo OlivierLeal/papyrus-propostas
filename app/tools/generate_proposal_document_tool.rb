@@ -122,6 +122,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     filler = ProposalDocxFiller.new(Rails.root.join("app/templates/docx/proposta_tecnica_comercial.docx"))
     images = build_images
+    schedules = build_schedules
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS
@@ -129,11 +130,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
     # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
     # sugerida pela IA já existe nesse ponto (Proposal#build_with_ai_suggested_team!), então o
-    # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa.
+    # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa. O cronograma
+    # (seção 9, sempre técnica) sai igual em qualquer status — não é dado de preço.
     if @proposal.status == "draft"
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank,
+        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
@@ -145,7 +147,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank,
+        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") },
         commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("comercial") }
       )
@@ -155,7 +157,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
     else
       combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
-      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, remove_paragraph_if_blank: remove_paragraph_if_blank)
+      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
       { success: true, version: @proposal.version, filenames: [ combined_filename ],
         message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação." }.to_json
@@ -191,6 +193,29 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       return {} unless area_image&.attached? && area_image.content_type == "image/png"
 
       { "MAPA_AREA_ESTUDO" => area_image.download }
+    end
+
+    # Cronograma (ver ScheduleItem/ScheduleTableBuilder/ProposalDocxFiller#insert_schedule_
+    # tables!) — já mora no banco desde a criação da proposta (Proposal#build_with_ai_suggested_
+    # schedule!) e é ajustável na Tela de Precificação, então não é a IA quem manda isso pro
+    # gerador, é lido direto daqui, igual equipe e desembolso. Um tipo sem data de início setada
+    # (ou sem nenhum item) fica de fora silenciosamente — a página só existe quando os dois estão
+    # presentes.
+    def build_schedules
+      pricing = @proposal.project_pricing
+      return {} unless pricing
+
+      {
+        "servico" => schedule_payload(pricing, "servico", pricing.schedule_papyrus_start_date),
+        "implantacao" => schedule_payload(pricing, "implantacao", pricing.schedule_empreendimento_start_date)
+      }.compact
+    end
+
+    def schedule_payload(pricing, type, start_date)
+      items = pricing.schedule_items.select { |item| item.schedule_type == type }
+      return nil if items.empty? || start_date.blank?
+
+      { start_date: start_date, items: items }
     end
 
     def build_placeholders(args, images)

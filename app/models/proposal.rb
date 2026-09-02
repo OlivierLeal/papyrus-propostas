@@ -135,6 +135,30 @@ class Proposal < ApplicationRecord
     finalize!(pricing)
   end
 
+  # Sugere fases/atividades do cronograma a partir do que já foi extraído do ET/TR nesta
+  # conversa (CLAUDE.md seção 8). Diferente da equipe técnica, não existe "menu" de fases por
+  # tipo de estudo — é conteúdo livre, então não passa por catálogo/apply_lines!, só parse +
+  # persistência direta. Chamado depois de build_with_ai_suggested_team!/build_from_template!
+  # (precisa de project_pricing já criado).
+  #
+  # A IA nunca sugere a DATA de início (schedule_*_start_date) — isso é sempre o consultor quem
+  # digita na Tela de Precificação, é ele quem sabe a data combinada com o cliente.
+  #
+  # Sem fallback determinístico: não existe "template padrão" de cronograma. Falha ou resposta
+  # vazia só significa que a proposta nasce sem cronograma nenhum — o consultor monta na mão se
+  # quiser (mesmo botão "Adicionar linha" que já existe pra equipe/custos externos). Nunca
+  # bloqueia a criação da proposta.
+  def build_with_ai_suggested_schedule!
+    pricing = project_pricing
+    return unless pricing
+
+    suggestion = fetch_ai_schedule_suggestion
+    apply_schedule_lines!(pricing, "servico", Array(suggestion["cronograma_servico"]))
+    apply_schedule_lines!(pricing, "implantacao", Array(suggestion["cronograma_implantacao"]))
+  rescue StandardError => e
+    Rails.logger.error("build_with_ai_suggested_schedule! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
+  end
+
   private
     def standard_filename_base(kind, municipio, estado)
       cliente = sanitize_for_filename(conversation.client_name)
@@ -216,6 +240,68 @@ class Proposal < ApplicationRecord
           "justificativa_documentos_separados": "..."
         }
       TEXT
+    end
+
+    def fetch_ai_schedule_suggestion
+      conversation.ask_internally(schedule_suggestion_prompt, hide_response: true)
+      response = conversation.messages.where(role: "assistant").order(:created_at).last
+      AiJsonResponse.parse(response.content) || {}
+    end
+
+    def schedule_suggestion_prompt
+      <<~TEXT
+        Com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, documentos
+        complementares e propostas anteriores semelhantes, se houver), sugira o cronograma desta
+        proposta.
+
+        Existem DOIS tipos de cronograma, independentes:
+
+        1. "cronograma_servico" — as atividades do PRÓPRIO SERVIÇO da Papyrus (o estudo/
+           licenciamento em si): reuniões, campanhas de campo, elaboração dos estudos, protocolos
+           junto ao órgão, emissão da licença. Praticamente toda proposta tem este. Períodos em
+           SEMANAS (1, 2, 3...), contadas a partir de uma data de início que o consultor ainda vai
+           definir — você não sabe essa data, só a ORDEM e a DURAÇÃO relativa das atividades.
+
+        2. "cronograma_implantacao" — o cronograma de IMPLANTAÇÃO DO EMPREENDIMENTO do CLIENTE
+           (obra, construção, entrada em operação) — não é serviço da Papyrus, é do empreendimento
+           em si. SÓ preencha isso quando o ET ou o TR pedir explicitamente um cronograma de
+           implantação como parte do escopo/produto — não é padrão em toda proposta, deixe a lista
+           vazia quando não houver essa exigência. Períodos em MESES (pode durar anos).
+
+        Cada item de cada lista: fase (nome do agrupamento, ex.: "Mobilização"), atividade (nome
+        específico, ex.: "Assinatura do Contrato e Kick-Off"), período de início (1-based, semana
+        ou mês conforme o tipo), duração (quantos períodos a atividade ocupa, mínimo 1), e se é um
+        marco (marco: true/false — um evento pontual, não uma atividade com duração, ex.:
+        "Emissão da Licença Prévia"). Agrupe as atividades da mesma fase em sequência na lista.
+        Não invente números de dias de campo/vistorias fora do que já está definido nesta
+        proposta — se não souber a duração exata, estime de forma razoável a partir do escopo.
+
+        Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
+        neste formato:
+
+        {
+          "cronograma_servico": [
+            { "fase": "Mobilização", "atividade": "Assinatura do Contrato e Kick-Off", "periodo_inicio": 1, "duracao": 1, "marco": false }
+          ],
+          "cronograma_implantacao": []
+        }
+      TEXT
+    end
+
+    def apply_schedule_lines!(pricing, schedule_type, lines)
+      lines.each_with_index do |line, index|
+        fase = line["fase"].to_s.strip
+        atividade = line["atividade"].to_s.strip
+        periodo_inicio = line["periodo_inicio"].to_i
+        duracao = line["duracao"].to_i
+        next if fase.blank? || atividade.blank? || periodo_inicio < 1 || duracao < 1
+
+        pricing.schedule_items.create!(
+          schedule_type: schedule_type, phase_name: fase, activity_name: atividade,
+          start_period: periodo_inicio, duration_periods: duracao,
+          milestone: line["marco"] == true, position: index
+        )
+      end
     end
 
     def apply_lines!(pricing, lines, templates)

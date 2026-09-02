@@ -76,7 +76,15 @@
       </div>
 
       <% if editable %>
-        <%= form_with url: conversation_proposal_proposal_professionals_path(@conversation), class: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-base-300" do |add_form| %>
+        <%# scope: obrigatório — sem ele os campos saem sem aninhar (name="deliverable_name" em
+            vez de "proposal_professional[deliverable_name]"), e ProposalProfessionalsController
+            #line_params (params.require(:proposal_professional)) levanta ParameterMissing.
+            wrap_parameters não resolve isso sozinho: Rails 8.1 desliga wrap_parameters_by_default
+            (só embrulha JSON quando configurado explicitamente), e este projeto não tem
+            config/initializers/wrap_parameters.rb — achado ao vivo simulando o POST real desta
+            tela. %>
+        <%= form_with url: conversation_proposal_proposal_professionals_path(@conversation), scope: :proposal_professional,
+              class: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-base-300" do |add_form| %>
           <div class="form-control">
             <div class="label"><span class="label-text text-xs">Profissional</span></div>
             <%= add_form.select :professional_id, @professionals.map { |p| [ p.name, p.id ] },
@@ -165,6 +173,17 @@
       <% if editable %>
         <%= form.submit "Recalcular preço", class: "btn btn-primary btn-sm mt-4" %>
       <% end %>
+    </div>
+
+    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+      <h2 class="font-semibold text-base-content mb-1">Cronograma</h2>
+      <p class="text-xs text-base-content/50">
+        Sugerido pela IA a partir do ET/TR ao avançar pra precificação — ajuste aqui se precisar.
+        Sem cronograma nenhum (nem data de início), a página não sai no documento.
+      </p>
+
+      <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "servico", editable: editable %>
+      <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "implantacao", editable: editable %>
     </div>
   <% end %>
 
