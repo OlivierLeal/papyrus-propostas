@@ -24,6 +24,43 @@ class ConversationTest < ActiveSupport::TestCase
     assert_equal "Em revisão", conversation.status_label
   end
 
+  test "search with a blank query returns everything" do
+    assert_equal Conversation.count, Conversation.search(nil).size
+    assert_equal Conversation.count, Conversation.search("  ").size
+  end
+
+  test "search matches by client_name, case-insensitively and by substring" do
+    conversation = conversations(:reviewing_conversation) # client_name: Serra Verde Energias Renováveis S.A.
+
+    assert_includes Conversation.search("serra verde"), conversation
+    assert_includes Conversation.search("VERDE"), conversation
+    assert_not_includes Conversation.search("nome que não bate com nada"), conversation
+  end
+
+  test "search matches by the proposal's docx_numero_proposta (PTC + 2-digit year + zero-padded id)" do
+    proposal = proposals(:priced_proposal)
+    codigo = proposal.docx_numero_proposta
+
+    assert_includes Conversation.search(codigo), proposal.conversation
+    assert_includes Conversation.search(codigo.downcase), proposal.conversation
+    assert_includes Conversation.search(codigo[3..]), proposal.conversation # sem o prefixo PTC
+  end
+
+  test "search matches by year (2 or 4 digits), from created_at, even without a proposal yet" do
+    conversation = conversations(:processing_conversation) # sem proposal
+    year = conversation.created_at.strftime("%Y")
+
+    assert_includes Conversation.search(year), conversation
+    assert_includes Conversation.search(conversation.created_at.strftime("%y")), conversation
+  end
+
+  test "search does not raise for a conversation without a proposal yet" do
+    conversation = conversations(:processing_conversation)
+    assert_nil conversation.proposal
+
+    assert_nothing_raised { Conversation.search("qualquer coisa") }
+  end
+
   # REGRESSÃO — achado em produção (chat 30, 2026-09-01): o consultor marcou o tipo de estudo pela
   # tela ENQUANTO o RespondToMessageJob da mensagem "gere a proposta" já estava rodando com a
   # Conversation carregada no início do job — a resposta da IA levou dezenas de segundos, tempo de

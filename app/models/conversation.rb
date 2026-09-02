@@ -224,6 +224,34 @@ class Conversation < ApplicationRecord
     STATUS_LABELS.fetch(status, status)
   end
 
+  # Busca na tela de Propostas por cliente, código (ex.: "PTC26098") ou ano — um campo só, porque
+  # o código já embute o ano (ver Proposal#docx_numero_proposta) e a maioria digita só um dos três
+  # de cada vez. Filtra em Ruby, não em SQL: código não é coluna nenhuma, é calculado a partir de
+  # created_at + id, então não dá pra fazer WHERE nele — aceitável na escala deste app (poucos
+  # usuários, sem paginação ainda). `includes(:proposal)` no chamador evita N+1 ao calcular o
+  # código de cada conversa.
+  def self.search(query)
+    normalized = query.to_s.strip.downcase
+    return order(created_at: :desc).includes(:user, :study_type, :proposal) if normalized.blank?
+
+    # Acha os ids em duas passadas: a 1ª só decide quem bate (com o mínimo de includes pra
+    # calcular o código sem N+1), a 2ª carrega o que a tela realmente precisa — SÓ para os ids que
+    # sobraram. Um includes só, aplicado antes do filtro, dispara "eager load não usado" no Bullet
+    # sempre que a busca não bate com nada (nenhuma associação chega a ser lida da lista vazia).
+    ids = includes(:proposal).select { |conversation| conversation.matches_search?(normalized) }.map(&:id)
+    return none if ids.empty?
+
+    where(id: ids).order(created_at: :desc).includes(:user, :study_type, :proposal)
+  end
+
+  def matches_search?(normalized_query)
+    return true if client_name.to_s.downcase.include?(normalized_query)
+    return true if created_at.strftime("%Y").include?(normalized_query) || created_at.strftime("%y") == normalized_query
+    return true if proposal.present? && proposal.docx_numero_proposta.downcase.include?(normalized_query)
+
+    false
+  end
+
   # Cria a proposta (e a equipe sugerida pela IA) sob demanda — chamado tanto pelo botão "Avançar
   # para Precificação" quanto pelo chat, na primeira vez que o consultor pede pra gerar algo.
   # Antes disso só existia via clique no botão, e a IA acabava respondendo "clique em Avançar pra

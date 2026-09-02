@@ -2,8 +2,9 @@ class ConversationsController < ApplicationController
   before_action :set_conversation, only: %i[ show update ]
 
   def index
-    @conversations = Conversation.includes(:user, :study_type, :proposal).order(created_at: :desc)
-   end
+    @query = params[:q]
+    @conversations = Conversation.search(@query)
+  end
 
   def new
     @conversation = Conversation.new

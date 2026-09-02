@@ -11,6 +11,22 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "index filters by the q param and shows it back in the search field" do
+    get conversations_path, params: { q: "Serra Verde" }
+
+    assert_response :success
+    assert_match conversations(:reviewing_conversation).client_name, response.body
+    assert_no_match conversations(:priced_conversation).client_name, response.body
+    assert_select "input[name=?][value=?]", "q", "Serra Verde"
+  end
+
+  test "index shows a specific empty-state message when the search matches nothing" do
+    get conversations_path, params: { q: "nome que não existe de jeito nenhum" }
+
+    assert_response :success
+    assert_match "Nenhuma proposta encontrada", response.body
+  end
+
   test "index redirects a guest to the login screen" do
     sign_out
     get conversations_path
