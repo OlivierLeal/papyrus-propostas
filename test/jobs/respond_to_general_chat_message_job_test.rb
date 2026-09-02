@@ -36,7 +36,7 @@ class RespondToGeneralChatMessageJobTest < ActiveSupport::TestCase
 
   test "registers the historical archive tool only when there is embedded acervo, and the CAL tool only when configured" do
     with_tool_calls = without_cal_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } }
-    assert_empty with_tool_calls
+    assert_equal [ RememberForFutureProposalsTool ], with_tool_calls
 
     historical_proposal = HistoricalProposal.create!(
       client_name: "Petrobras", filename: "proposta.docx", job_number: "25001", year: 2025,
@@ -50,6 +50,29 @@ class RespondToGeneralChatMessageJobTest < ActiveSupport::TestCase
     with_tool_calls = with_cal_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } }
     assert_includes with_tool_calls, SearchHistoricalArchiveTool
     assert_includes with_tool_calls, SearchLegalNormsTool
+  end
+
+  # Achado ao vivo nesta sessão: RememberForFutureProposalsTool grava uma mensagem assistant
+  # PRÓPRIA pro card de aprovação, separada da resposta em texto da IA — sem broadcastar as duas,
+  # o card só aparecia depois de um F5 na página.
+  test "broadcasts every new visible assistant message from the turn, not just the last" do
+    note = @general_chat.knowledge_notes.create!(category: "escopo_metodologia", content: "Regra de teste")
+
+    original_method = GeneralChat.instance_method(:complete)
+    GeneralChat.define_method(:complete) do
+      messages.create!(role: "assistant", content: { knowledge_note_id: note.id }.to_json)
+      messages.create!(role: "assistant", content: "Guardei isso para você.")
+    end
+
+    turbo_streams = capture_turbo_stream_broadcasts(@general_chat) { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) }
+
+    assert_equal 3, turbo_streams.size
+    assert_equal "remove", turbo_streams.first["action"]
+    assert_equal [ "append", "append" ], turbo_streams[1..].map { |s| s["action"] }
+    assert_includes turbo_streams[1].to_s, "Regra de teste"
+    assert_includes turbo_streams[2].to_s, "Guardei isso para você."
+  ensure
+    GeneralChat.define_method(:complete, original_method)
   end
 
   test "broadcasts a friendly error bubble and does not raise when the AI call errors out" do

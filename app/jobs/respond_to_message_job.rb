@@ -4,6 +4,8 @@ class RespondToMessageJob < ApplicationJob
   def perform(conversation_id)
     conversation = Conversation.find(conversation_id)
     conversation.refresh_proposal_state_snapshot!
+    before_message_ids = conversation.messages.ids
+
     # Sempre registrada, mesmo sem proposal ainda — ela cria a proposta sozinha na primeira vez
     # que é chamada de verdade (ver GenerateProposalDocumentTool#execute/Conversation#ensure_
     # proposal!), então não depende mais do consultor clicar em "Avançar para Precificação" antes.
@@ -19,12 +21,20 @@ class RespondToMessageJob < ApplicationJob
     conversation.with_tool(RememberForFutureProposalsTool.new(conversation: conversation))
     conversation.complete
 
-    message = conversation.messages.where(role: "assistant", internal: false).order(:created_at).last
-    return unless message
+    # Não só a última: RememberForFutureProposalsTool (e qualquer ferramenta que crie um card, ver
+    # ProjectConflict) grava uma mensagem assistant PRÓPRIA para o card, separada da resposta em
+    # texto — sem broadcast dela aqui, o card só aparecia depois de um F5 na página. animate só na
+    # última (o texto que a IA realmente escreveu); um card não precisa do efeito de máquina de
+    # escrever.
+    new_messages = conversation.messages.where(role: "assistant", internal: false)
+      .where.not(id: before_message_ids).order(:created_at)
+    return if new_messages.none?
 
     conversation.broadcast_remove_to conversation, target: "typing_indicator"
-    conversation.broadcast_append_to conversation, target: "messages", partial: "conversations/message",
-      locals: { message: message, animate: true }
+    new_messages.each do |message|
+      conversation.broadcast_append_to conversation, target: "messages", partial: "conversations/message",
+        locals: { message: message, animate: message == new_messages.last }
+    end
   rescue StandardError => e
     Rails.logger.error("RespondToMessageJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
     return unless conversation

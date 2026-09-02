@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_02_110402) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_131230) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -185,17 +185,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_110402) do
     t.string "client_name"
     t.text "content", null: false
     t.text "context"
-    t.bigint "conversation_id", null: false
+    t.bigint "conversation_id"
     t.datetime "created_at", null: false
     t.datetime "embedded_at"
     t.vector "embedding", limit: 1024
     t.string "embedding_model"
+    t.bigint "general_chat_id"
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false
     t.index ["approved_by_id"], name: "index_knowledge_notes_on_approved_by_id"
     t.index ["category"], name: "index_knowledge_notes_on_category"
     t.index ["conversation_id"], name: "index_knowledge_notes_on_conversation_id"
     t.index ["embedding"], name: "index_knowledge_notes_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
+    t.index ["general_chat_id"], name: "index_knowledge_notes_on_general_chat_id"
     t.index ["status", "client_name"], name: "index_knowledge_notes_on_status_and_client_name"
   end
 
@@ -553,6 +555,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_110402) do
   add_foreign_key "historical_proposal_chunks", "historical_proposals"
   add_foreign_key "historical_proposals", "conversations"
   add_foreign_key "knowledge_notes", "conversations"
+  add_foreign_key "knowledge_notes", "general_chats"
   add_foreign_key "knowledge_notes", "users", column: "approved_by_id"
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"

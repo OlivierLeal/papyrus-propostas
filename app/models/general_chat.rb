@@ -5,6 +5,7 @@ class GeneralChat < ApplicationRecord
   acts_as_chat messages: :messages, message_class: "GeneralMessage"
 
   belongs_to :user
+  has_many :knowledge_notes, dependent: :destroy
 
   # Prompt de sistema do chat geral (CLAUDE.md, seção "Chat geral de dúvidas") — diferente do
   # SYSTEM_INSTRUCTIONS de Conversation: não fala de uma proposta específica (sem ET/TR/KMZ, sem
@@ -32,6 +33,15 @@ class GeneralChat < ApplicationRecord
     - Consultar o CAL (ferramenta search_legal_norms, quando disponível) para fundamentar uma
       referência legal específica — qual norma exige um diagnóstico, rege um procedimento, ou se
       aplica a determinado tipo de empreendimento/área.
+    - Guardar aprendizado para o futuro (ferramenta remember_for_future_proposals) quando o
+      consultor disser algo que vai se repetir e que hoje só existe nesta conversa: exigência
+      recorrente de um cliente, decisão de escopo que vale repetir, condicionante de um órgão, ou
+      uma prática/regra da Papyrus. A ferramenta NÃO guarda na hora — ela propõe, e o consultor
+      aprova no card. Seja seletivo: só o que for realmente reaproveitável, nunca um fato pontual
+      desta conversa nem algo que você deduziu sem confirmação. Quando der pra identificar de qual
+      CLIENTE aquilo é (o consultor mencionou o nome), informe — é o que faz a nota reaparecer
+      sozinha numa proposta futura desse cliente. Sem cliente identificável, guarde mesmo assim
+      como regra geral, mas deixe claro pro consultor que ela não é atrelada a nenhum cliente.
 
     SEMPRE que usar qualquer informação vinda do acervo ou do CAL, cite a origem no texto (cada
     resultado das ferramentas já traz o campo "referencia" pronto para isso) — o consultor precisa

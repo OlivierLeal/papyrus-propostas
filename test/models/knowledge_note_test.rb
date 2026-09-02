@@ -61,6 +61,31 @@ class KnowledgeNoteTest < ActiveSupport::TestCase
     assert_includes note.errors[:category], "não está incluído na lista"
   end
 
+  test "pode nascer de um general_chat, sem conversation nenhuma" do
+    general_chat = general_chats(:with_messages)
+    note = general_chat.knowledge_notes.create!(category: "escopo_metodologia", content: "regra geral")
+
+    assert_nil note.conversation
+    assert_equal general_chat, note.general_chat
+  end
+
+  test "recusa nascer sem conversation nem general_chat" do
+    note = KnowledgeNote.new(category: "escopo_metodologia", content: "órfã")
+
+    assert_not note.valid?
+    assert_includes note.errors[:base], "precisa vir de uma conversation ou de um general_chat, nunca dos dois"
+  end
+
+  test "recusa nascer com conversation E general_chat ao mesmo tempo" do
+    note = KnowledgeNote.new(
+      category: "escopo_metodologia", content: "duplicada",
+      conversation: @conversation, general_chat: general_chats(:with_messages)
+    )
+
+    assert_not note.valid?
+    assert_includes note.errors[:base], "precisa vir de uma conversation ou de um general_chat, nunca dos dois"
+  end
+
   private
 
   def build_note(content: "Coordenador temático precisa ter doutorado", client_name: "Petrobras")

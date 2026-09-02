@@ -387,6 +387,32 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
      Fica com `origin: "sistema"` (o acervo em disco é `origin: "acervo"`), e a ferramenta de
      busca cita "proposta gerada no sistema" em vez de "acervo Papyrus". Indexar rascunho faria
      o RAG ensinar a IA a repetir o que o consultor descartou.
+   - **Também nasce fora de proposta, no chat geral (seção 14, 2026-09):** `KnowledgeNote` agora
+     tem `conversation_id` OU `general_chat_id` (nunca os dois — validado em `belongs_to_exactly_
+     one_origin`), porque uma exigência de cliente pode aparecer numa conversa avulsa de dúvidas,
+     não só dentro de uma proposta em andamento. `RememberForFutureProposalsTool` ganhou
+     `initialize(conversation: nil, general_chat: nil)` e ganha `@owner` = o que veio; como
+     `GenerateSummaryJob` busca notas aprovadas por `client_name` direto na tabela (nunca via
+     `conversation.knowledge_notes`), uma nota nascida no chat geral já reaparece sozinha numa
+     proposta futura do mesmo cliente, sem nenhuma outra mudança. Fora de uma proposta não há
+     cliente pra herdar — a ferramenta ganhou um parâmetro `cliente` (opcional, ignorado dentro de
+     uma proposta, onde o cliente já é um fato do sistema) pra IA informar quando identificar de
+     quem se trata; sem cliente identificável, a nota fica salva mas não amarrada a nenhum (regra
+     geral da Papyrus), e só reaparece se for buscada.
+   - **Bug achado ao vivo nesta sessão, corrigido:** o card "Guardar"/"Descartar" nunca aparecia
+     no chat de verdade. Causa: o retorno da ferramenta vira uma mensagem `role: "tool"`, e
+     `Message#hide_tool_result!`/`GeneralMessage#hide_tool_result!` sempre esconde mensagens desse
+     role — sem querer, isso também escondia o JSON que alimentava o card (mesmo problema afeta
+     `GenerateProposalDocumentTool` e `AddExternalCostTool`, ainda não corrigidos). Corrigido só
+     para `RememberForFutureProposalsTool`: ela agora grava uma mensagem PRÓPRIA, direta,
+     `role: "assistant"` (`@owner.messages.create!(content: { knowledge_note_id: note.id }.to_json)`),
+     mesmo padrão que já funcionava pro card de `ProjectConflict` (`GenerateSummaryJob`, mensagem
+     criada fora de qualquer tool call). Isso por si só não bastava: `RespondToMessageJob`/
+     `RespondToGeneralChatMessageJob` só faziam `broadcast_append_to` da ÚLTIMA mensagem assistant
+     do turno — o card (mais antigo que a resposta em texto da IA) nunca era transmitido ao vivo,
+     só aparecia depois de um F5. Os dois jobs agora rastreiam os ids de mensagem de ANTES da
+     chamada à IA e fazem broadcast de TODAS as mensagens assistant novas do turno, em ordem
+     (`animate` só na última — um card não precisa do efeito de máquina de escrever).
 
 **Decisão de design:** não adotar a arquitetura genérica de "tipos de conhecimento" proposta no estudo — o domínio deste projeto é estreito e já bem modelado (`study_types`, `professionals`, `study_templates`, parâmetros de logística direto em `project_pricings`). Preferir estender essas tabelas concretas conforme a necessidade aparecer, em vez de construir uma camada de abstração genérica antecipadamente.
 
@@ -606,8 +632,9 @@ falhou antes de qualquer resposta.
 
 `RespondToGeneralChatMessageJob` é a versão enxuta de `RespondToMessageJob`: registra só
 `SearchHistoricalArchiveTool` (quando há acervo indexado) e `SearchLegalNormsTool` (quando o CAL
-está configurado) — nunca `GenerateProposalDocumentTool`, `AddExternalCostTool` nem
-`RememberForFutureProposalsTool`, que não fazem sentido sem proposta.
+está configurado) e `RememberForFutureProposalsTool` (ver seção 11.1, item 4 — algo dito aqui pode
+valer pra propostas futuras, mesma memória por cliente de sempre) — nunca `GenerateProposalDocumentTool`
+nem `AddExternalCostTool`, que não fazem sentido sem proposta.
 
 **Anexar um documento avulso e tirar dúvida sobre ele (2026-09):** o composer deste chat aceita
 upload de PDF/DOCX (`documents[]`, mesmo campo de arquivo do chat de proposta), anexado à mensagem
@@ -620,3 +647,10 @@ de "só a mensagem de usuário mais recente reenvia o anexo bruto pra IA" que `M
 chamada seguinte da conversa até estourar o limite de 5 documentos por request da Anthropic. Sem
 sidebar de documentos aqui (diferente de `conversations/show.html.erb`) — o anexo aparece como um
 chip de download dentro da própria bolha da mensagem (`general_chats/_message.html.erb`).
+
+**Guardar aprendizado pra propostas futuras (2026-09):** o consultor pode dizer, sem nenhuma
+proposta aberta, algo que vale a pena lembrar ("a Petrobras sempre exige ART em anexo") — a IA usa
+`remember_for_future_proposals` igual faria dentro de uma proposta, e o card de aprovação
+(`knowledge_notes/_note.html.erb`) aparece direto na bolha da mensagem, com rota própria
+(`GeneralChatKnowledgeNotesController`, `approve_general_chat_knowledge_note_path`). Ver seção
+11.1, item 4, pro detalhe de como `KnowledgeNote` passou a nascer de um `GeneralChat` também.

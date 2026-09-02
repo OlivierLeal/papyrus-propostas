@@ -1,4 +1,6 @@
 # Deixa a IA PROPOR que algo aprendido nesta conversa seja guardado para as próximas propostas.
+# Usada tanto numa proposta (Conversation) quanto no chat geral de dúvidas (GeneralChat, sem
+# proposta nenhuma) — o mesmo tipo de informação vale nos dois lugares, ver KnowledgeNote.
 #
 # A ferramenta não grava conhecimento: ela cria uma nota PENDENTE e devolve isso ao chat, onde o
 # consultor decide com um clique. A diferença importa — o valor do acervo vem de tudo nele ter
@@ -33,13 +35,22 @@ class RememberForFutureProposalsTool < RubyLLM::Tool
   param :contexto,
     desc: "O que na conversa originou isso (1 frase), para o consultor julgar sem reabrir o chat",
     required: false
+  param :cliente,
+    desc: "Nome do cliente a que isso se refere, se der pra identificar (só use fora de uma " \
+          "proposta — dentro de uma proposta o cliente já é conhecido e este parâmetro é ignorado). " \
+          "Sem cliente identificável, a nota fica salva mas só reaparece se um projeto futuro " \
+          "mencionar o mesmo cliente explicitamente — deixe em branco pra uma regra geral da Papyrus.",
+    required: false
 
-  def initialize(conversation:)
+  def initialize(conversation: nil, general_chat: nil)
     super()
-    @conversation = conversation
+    @owner = conversation || general_chat
+    # Dentro de uma proposta o cliente já é um fato do sistema — nunca aceitar o palpite da IA por
+    # cima disso. Fora dela (chat geral), não há cliente nenhum a herdar; só o que a IA identificar.
+    @client_name_from_owner = conversation&.client_name
   end
 
-  def execute(categoria:, informacao:, contexto: nil)
+  def execute(categoria:, informacao:, contexto: nil, cliente: nil)
     categoria = categoria.to_s.strip
     informacao = informacao.to_s.strip
 
@@ -52,10 +63,17 @@ class RememberForFutureProposalsTool < RubyLLM::Tool
       return { aviso: "Essa informação já foi registrada nesta conversa; não registrei de novo." }.to_json
     end
 
-    note = @conversation.knowledge_notes.create!(
+    note = @owner.knowledge_notes.create!(
       category: categoria, content: informacao, context: contexto.presence,
-      client_name: @conversation.client_name
+      client_name: @client_name_from_owner || cliente.presence
     )
+
+    # Card de aprovação — mensagem própria, separada da resposta em texto da IA, pelo mesmo motivo
+    # do card de divergência (ProjectConflict, ver GenerateSummaryJob): o resultado bruto da tool
+    # call vira uma mensagem role "tool" e essa nasce sempre oculta (Message#hide_tool_result!/
+    # GeneralMessage#hide_tool_result!), então sem isso o card de "Guardar"/"Descartar" nunca
+    # chegava a aparecer no chat — achado ao vivo nesta sessão.
+    @owner.messages.create!(role: "assistant", content: { knowledge_note_id: note.id }.to_json)
 
     {
       success: true, knowledge_note_id: note.id, status: "aguardando aprovação do consultor",
@@ -63,7 +81,7 @@ class RememberForFutureProposalsTool < RubyLLM::Tool
       instrucao: "Diga ao consultor o que você propôs guardar e que ele precisa aprovar no card acima."
     }.to_json
   rescue StandardError => e
-    Rails.logger.error("RememberForFutureProposalsTool falhou para conversation #{@conversation.id}: #{e.class} #{e.message}")
+    Rails.logger.error("RememberForFutureProposalsTool falhou para #{@owner.class.name} #{@owner.id}: #{e.class} #{e.message}")
     { error: "Não consegui registrar essa informação agora." }.to_json
   end
 
@@ -72,6 +90,6 @@ class RememberForFutureProposalsTool < RubyLLM::Tool
   # A IA repete a mesma proposta de nota quando o assunto volta no chat; sem isso o consultor
   # recebe o mesmo card várias vezes na mesma conversa.
   def duplicate?(informacao)
-    @conversation.knowledge_notes.where(content: informacao).exists?
+    @owner.knowledge_notes.where(content: informacao).exists?
   end
 end

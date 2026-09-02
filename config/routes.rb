@@ -31,6 +31,16 @@ Rails.application.routes.draw do
   # Chat geral de dúvidas — não amarrado a nenhuma proposta (ver GeneralChat).
   resources :general_chats, only: %i[index create show] do
     resources :general_messages, only: :create
+
+    # controller próprio (não "knowledge_notes") porque o mesmo nome de rota aninhada sob dois
+    # pais diferentes (conversations e general_chats) exigiria um controller capaz de resolver
+    # ambos os param — mais simples espelhar o padrão já usado pra general_chats/general_messages.
+    resources :knowledge_notes, controller: "general_chat_knowledge_notes", only: [] do
+      member do
+        post :approve
+        post :reject
+      end
+    end
   end
 
   namespace :settings do

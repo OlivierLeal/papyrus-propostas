@@ -11,8 +11,15 @@
 # "acervo Papyrus", o que faz uma invenção parecer verificável. Quem promove a nota a
 # conhecimento consultável é o consultor.
 class KnowledgeNote < ApplicationRecord
-  belongs_to :conversation
+  # Nasce de uma proposta (conversation) OU do chat geral de dúvidas (general_chat, sem proposta
+  # nenhuma) — nunca das duas. GenerateSummaryJob busca por client_name direto na tabela toda
+  # (não por conversation.knowledge_notes), então uma nota nascida no chat geral já reaparece
+  # sozinha em propostas futuras do mesmo cliente, sem precisar de nenhuma outra mudança.
+  belongs_to :conversation, optional: true
+  belongs_to :general_chat, optional: true
   belongs_to :approved_by, class_name: "User", optional: true
+
+  validate :belongs_to_exactly_one_origin
 
   has_neighbors :embedding
 
@@ -78,4 +85,9 @@ class KnowledgeNote < ApplicationRecord
     "memória da Papyrus: #{REFERENCE_LABELS.fetch(category, category)}#{" · #{client_name}" if client_name.present?}" \
     "#{" (#{quando})" if quando}"
   end
+
+  private
+    def belongs_to_exactly_one_origin
+      errors.add(:base, "precisa vir de uma conversation ou de um general_chat, nunca dos dois") if conversation.present? == general_chat.present?
+    end
 end
