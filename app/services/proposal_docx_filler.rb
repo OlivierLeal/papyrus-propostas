@@ -104,7 +104,16 @@ class ProposalDocxFiller
           insert_schedule_tables!(doc, schedules)
           fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
 
-          yield doc if block_given?
+          # O bloco de assinatura técnico (ver TECHNICAL_SIGNATURE_*) só faz sentido separado do
+          # comercial quando o documento REALMENTE sai em dois arquivos (fill_split, com bloco —
+          # trim_body! mantém só o pedaço certo em cada um). Sem split (fill, documento único),
+          # os dois blocos (esse + o original no fim do corpo) sobreviveriam juntos no mesmo
+          # arquivo — o cliente veria a assinatura duas vezes, achado ao vivo gerando o combinado.
+          if block_given?
+            yield doc
+          else
+            remove_technical_signature_duplicate!(doc)
+          end
           zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
         end
 
@@ -130,6 +139,30 @@ class ProposalDocxFiller
       children.each_with_index do |node, i|
         node.remove unless keep_indices.include?(i) || node.name == "sectPr"
       end
+    end
+
+    # Bloco de assinatura duplicado no modelo (Papyrus + cliente, em negrito) logo depois de
+    # "VALIDADE DA PROPOSTA" — pra a proposta TÉCNICA (arquivo separado, ou o único gerado
+    # enquanto a proposta ainda é draft) também terminar com assinatura, e não só a comercial
+    # (que já tinha o bloco original no fim do corpo, ver CLAUDE.md seção 8). Âncora por texto,
+    # nunca por índice — mesma regra de FIRST_TECHNICAL_HEADING/FIRST_COMMERCIAL_HEADING.
+    TECHNICAL_SIGNATURE_ANCHOR = "Data do aceite da proposta:"
+
+    # Sem split (fill, documento único), os dois blocos de assinatura — este e o original no fim
+    # do corpo — sobreviveriam juntos no mesmo arquivo, e o cliente veria a assinatura duas
+    # vezes. Só faz sentido manter os dois quando trim_body! vai cortar o documento em dois
+    # arquivos de verdade (fill_split): cada um fica só com o bloco do seu próprio lado.
+    def remove_technical_signature_duplicate!(doc)
+      body = doc.at_xpath("//w:body", NS)
+      children = body.children.to_a
+
+      accept_index = children.each_index.find do |i|
+        children[i].name == "p" && children[i].xpath(".//w:t", NS).map(&:text).join.include?(TECHNICAL_SIGNATURE_ANCHOR)
+      end
+      return unless accept_index
+
+      commercial_index = heading_index(children, FIRST_COMMERCIAL_HEADING)
+      children[(accept_index + 1)...commercial_index].each(&:remove)
     end
 
     def heading_index(children, text)

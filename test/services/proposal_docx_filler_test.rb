@@ -252,6 +252,32 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_not_includes commercial_xml, "Só na Técnica"
   end
 
+  # O modelo tem o bloco de assinatura (Papyrus + cliente) duplicado — uma cópia logo depois de
+  # "VALIDADE DA PROPOSTA", pra a proposta TÉCNICA também terminar assinada quando sai separada
+  # (ou sozinha, ainda em draft); a original, no fim do corpo, é da COMERCIAL. Achado ao vivo: sem
+  # remover a duplicata no documento ÚNICO (fill, sem split), o cliente via a assinatura 2 vezes
+  # no mesmo arquivo. Cada bloco carrega o token "{{NOME_CLIENTE_ASSINATURA}}" (não preenchido
+  # nestes testes), que serve de contador confiável de quantos blocos sobraram.
+  test "fill (documento único) keeps only the ORIGINAL signature block, removing the duplicate near VALIDADE DA PROPOSTA" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    xml = document_xml(bytes)
+
+    assert_equal 1, xml.scan("{{NOME_CLIENTE_ASSINATURA}}").size
+    # a única cópia que sobra vem DEPOIS de "Data do aceite" (a duplicata que foi removida)
+    assert_operator xml.index("Data do aceite"), :<, xml.index("{{NOME_CLIENTE_ASSINATURA}}")
+  end
+
+  test "fill_split keeps a signature block in EACH file — técnica logo após 'Data do aceite', comercial no fim do corpo" do
+    result = @filler.fill_split(placeholders: @placeholders, tables: @tables)
+
+    technical_xml = document_xml(result[:technical])
+    commercial_xml = document_xml(result[:commercial])
+
+    assert_equal 1, technical_xml.scan("{{NOME_CLIENTE_ASSINATURA}}").size
+    assert_equal 1, commercial_xml.scan("{{NOME_CLIENTE_ASSINATURA}}").size
+    assert_operator technical_xml.index("Data do aceite"), :<, technical_xml.index("{{NOME_CLIENTE_ASSINATURA}}")
+  end
+
   test "fill embeds a real image when images: is given, and the placeholder text disappears" do
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables, images: { "MAPA_AREA_ESTUDO" => PNG_1X1 })
     xml = document_xml(bytes)

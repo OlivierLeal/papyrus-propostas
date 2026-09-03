@@ -196,6 +196,46 @@ aceito: a validade deixou de aparecer no documento COMERCIAL quando gerado separ
 commercial, `document_split == "separated"`) — ela existe no técnico e no combinado, não mais
 sozinha do lado comercial.
 
+**Assinatura também no fim da proposta TÉCNICA (2026-09):** o bloco de assinatura em negrito
+(Papyrus + CNPJ, cliente + CNPJ, com `{{NOME_CLIENTE_ASSINATURA}}`/`{{CNPJ_CLIENTE}}`) só existia
+uma vez no modelo, no fim do corpo — ou seja, só saía no arquivo COMERCIAL (ou no combinado); a
+proposta TÉCNICA (draft, ou separada) terminava sem assinatura nenhuma. O modelo ganhou uma
+SEGUNDA cópia do mesmo bloco, logo depois de "Data do aceite da proposta:" (fim da seção
+VALIDADE, ainda do lado técnico) — mesma técnica de sempre, string crua copiada do bloco
+original, `w14:paraId` trocado só por higiene.
+
+Como os dois blocos usam os MESMOS placeholders, `fill_simple_placeholders!` preenche as duas
+cópias sem precisar de nada novo — mas isso criava um problema no documento ÚNICO (`fill`, sem
+split): sem nenhum corte, as DUAS cópias sobrevivem juntas no mesmo arquivo, e o cliente via a
+assinatura duas vezes (achado ao vivo gerando o combinado). `ProposalDocxFiller#build` agora
+distingue: quando SEM split (`fill`, `block_given?` falso), roda
+`remove_technical_signature_duplicate!` — apaga só a cópia nova (entre "Data do aceite" e
+`FIRST_COMMERCIAL_HEADING`), sobra só a original no fim. Quando COM split (`fill_split`,
+`trim_body!` já vai cortar o documento em dois arquivos de qualquer forma), não remove nada: cada
+arquivo (técnica/comercial) fica só com a cópia do seu próprio lado, naturalmente.
+
+**Fonte padronizada: 11 no corpo, 10 em legenda/quadro (2026-09):** pedido do consultor — o
+documento inteiro segue fonte Metropolis tamanho 11 (`w:sz="22"`), exceto legendas/quadros e
+figuras, que ficam em tamanho 10 (`w:sz="20"`). Isso já era a regra de fato no modelo (herdada de
+`w:rPrDefault` em `styles.xml` pro corpo, e run-level explícito pras legendas), então a
+"padronização" foi auditar o modelo inteiro contra essa regra em vez de reescrevê-la — achadas
+duas inconsistências pontuais, as duas corrigidas por substituição de string crua no
+`word/document.xml` (nunca `Nokogiri#to_xml`), sem alterar a contagem de filhos de `<w:body>`
+(216→216, só `rPr`, nenhum parágrafo novo/removido):
+- A legenda "Quadro 6-1: Produtos a serem entregues." estava sem `w:sz`/`w:szCs` nenhum (saía no
+  tamanho herdado de 11, igual corpo) — ganhou `w:sz="20"`/`w:szCs="20"` explícitos nos dois runs,
+  igual as legendas irmãs "Quadro 8-1:"/"Quadro 11-1:", que já vinham certas.
+- A frase de corpo "Os membros da equipe estão descritos no Quadro 8-1." (parágrafo
+  `w14:paraId="63F4339F"`) estava inteira em `w:sz="20"` (10, errado) — era pra ser corpo normal,
+  igual a frase irmã "Os produtos... Quadro 6-1." Removido o `w:sz`/`w:szCs` do `pPr` e dos 3
+  runs do parágrafo, voltando a herdar o tamanho 11 do documento.
+
+Verificado ao vivo (mesma metodologia de sempre: gerar proposta real via
+`GenerateProposalDocumentTool`, converter com LibreOffice headless → PDF → captura de tela) —
+confirmado visualmente que a legenda do Quadro 6-1 agora sai visivelmente menor que o corpo (igual
+Quadro 8-1/11-1), e que a frase do Quadro 8-1 na seção 8 (EQUIPE TÉCNICA) voltou a sair no mesmo
+tamanho das frases ao redor.
+
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
 1 = produtos, 2 = equipe, 3 = desembolso) e têm que ser remapeados se alguma tabela for
