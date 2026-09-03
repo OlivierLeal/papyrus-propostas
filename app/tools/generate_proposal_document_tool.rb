@@ -26,6 +26,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     chame depois de confirmar que não falta nenhuma informação que bloqueia a proposta (ver
     passo a passo interno). Nomes/CNPJ que você não tiver certeza, escreva "A confirmar" em vez
     de inventar.
+
+    NUNCA escreva códigos de citação "[F12]" em nenhum parâmetro de texto desta ferramenta —
+    esse formato só existe pra virar link no CHAT (bloco [ACHADOS DESTA PROPOSTA]), não tem
+    nenhum sentido no documento final que o CLIENTE lê. Se for relevante citar de onde uma
+    informação veio, escreva por extenso dentro da própria frase (ex.: "conforme informado no
+    ET", "conforme o Termo de Referência", "conforme condicionante do IPHAN") — nunca a marca
+    entre colchetes.
   DESC
 
   param :nome_cliente, desc: "Razão social do cliente/contratante"
@@ -112,6 +119,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   def execute(**args)
+    # Rede de segurança: mesmo com a instrução no prompt, a IA às vezes "vaza" os códigos de
+    # citação do chat ([F12], ver Message::CITATION_PATTERN) pro texto da proposta — fazem
+    # sentido na CONVERSA (ApplicationHelper#render_markdown transforma em link), mas no .docx
+    # do cliente aparecem crus, sem sentido nenhum pra quem lê (achado ao vivo em produção).
+    args = args.transform_values { |value| strip_citation_codes(value) }
+
     @proposal = @conversation.proposal || @conversation.ensure_proposal!
     return { error: blocked_reason }.to_json if @proposal.nil?
 
@@ -269,6 +282,21 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(args[:obrigacoes_contratante_adicionais]),
         "OBRIGACOES_PAPYRUS_ADICIONAIS" => join_lines(args[:obrigacoes_papyrus_adicionais])
       }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }
+    end
+
+    # Remove qualquer "[F12]" residual (recursivo — topicos_escopo/produtos/itens_nao_previstos
+    # etc. chegam como array) e limpa o espaço duplo que sobra no lugar. Mesmo padrão de citação
+    # do chat (Message::CITATION_PATTERN) — reaproveitado aqui só pra DETECTAR e apagar, nunca
+    # pra virar link (isso não existe no .docx).
+    def strip_citation_codes(value)
+      case value
+      when String
+        value.gsub(Message::CITATION_PATTERN, "").gsub(/[ \t]{2,}/, " ").strip
+      when Array
+        value.map { |item| strip_citation_codes(item) }
+      else
+        value
+      end
     end
 
     # Cada item vira um parágrafo/item de lista próprio no modelo (ver expand_into_paragraphs!);

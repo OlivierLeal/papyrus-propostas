@@ -660,6 +660,18 @@ código ao afirmar algo. `ApplicationHelper#render_markdown` troca o código por
 trecho e o documento de origem, **depois** do sanitize. **Código sem achado correspondente é
 removido do texto**: marca inventada renderizada como fonte é pior que nenhuma fonte.
 
+**Só existe no CHAT — nunca pode ir pro `.docx` (2026-09, achado ao vivo em produção):** o chip
+é coisa de `render_markdown`, que só roda na conversa; `GenerateProposalDocumentTool` não passa
+o texto da IA por nenhum tratamento parecido antes de escrever no documento. Uma proposta real
+saiu pro cliente com "mediante elaboração de [F681] Estudo Ambiental..." cru no meio da frase —
+a IA reaproveitou o hábito de citar achados também nos parâmetros de texto da ferramenta de
+geração. Duas camadas de correção: a `description` da ferramenta agora proíbe explicitamente o
+formato `[F12]` em qualquer parâmetro (pede citação por extenso, tipo "conforme informado no
+ET", quando fizer sentido); e `GenerateProposalDocumentTool#execute` passa todo `args` (strings e
+arrays, ex.: `topicos_escopo`/`produtos`) por `strip_citation_codes` antes de usar — rede de
+segurança que roda mesmo se a IA ignorar a instrução, reaproveitando `Message::CITATION_PATTERN`
+só pra apagar, nunca pra virar link.
+
 ### `project_conflicts` — divergência entre documentos
 
 `ProjectFindings::ConflictDetector` roda no `GenerateSummaryJob` (único ponto depois de ET, TR, KMZ e

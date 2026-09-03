@@ -490,6 +490,43 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal [ "Estudo de Médio Impacto (EMI)", "Word e PDF" ], linhas.second
   end
 
+  # Achado ao vivo em produção: a IA "vazou" códigos de citação do chat ([F12], só fazem
+  # sentido lá — ver Message::CITATION_PATTERN) pro texto de uma proposta real, e eles saíram
+  # crus no .docx que o cliente lê ("mediante elaboração de [F681] Estudo Ambiental...").
+  test "strips leftover [F12]-style citation codes from any text param, collapsing the extra space" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(
+      objetivo_dos_servicos: "Assessorar mediante elaboração de [F681] Estudo Ambiental Intermediário (EAI), " \
+        "incluindo [F680] [F686] avaliação arqueológica Nível 3 com Anuência Final do IPHAN."
+    ))
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_not_includes xml, "[F681]"
+    assert_not_includes xml, "[F680]"
+    assert_not_includes xml, "[F686]"
+    assert_includes document_texts(@proposal.generated_documents.first).join(" "),
+      "Assessorar mediante elaboração de Estudo Ambiental Intermediário (EAI), incluindo avaliação arqueológica " \
+      "Nível 3 com Anuência Final do IPHAN."
+  end
+
+  test "strips citation codes from array params too (topicos_escopo, produtos, itens_nao_previstos)" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(
+      topicos_escopo: [ "Diagnóstico [F12] | Levantamento de campo conforme [F13] estabelecido." ],
+      produtos: [ "Relatório [F14] | Digital (PDF)" ],
+      itens_nao_previstos: [ "Regularização fundiária [F15]" ]
+    ))
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_not_includes xml, "[F12]"
+    assert_not_includes xml, "[F13]"
+    assert_not_includes xml, "[F14]"
+    assert_not_includes xml, "[F15]"
+    assert_includes document_texts(@proposal.generated_documents.first).join(" "), "Regularização fundiária"
+  end
+
   test "includes the schedule table when the pricing has items and a start date" do
     pricing = @proposal.project_pricing
     pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1))
