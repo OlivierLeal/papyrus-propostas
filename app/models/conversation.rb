@@ -205,9 +205,9 @@ class Conversation < ApplicationRecord
   TEXT
 
   belongs_to :user
-  # Não é escolhido no setup — a IA identifica lendo o ET (ver ProcessEtJob#assign_study_type!,
-  # e ProcessTrJob#assign_study_type! quando houver TR e o ET não tiver definido antes), restrito
-  # ao menu real de StudyType. Fica nil até isso acontecer (ou se não houver ET nem TR).
+  # Não é escolhido no setup — a IA identifica lendo o ET (ver #assign_study_type_from_findings!,
+  # chamado por ProcessEtJob e, quando houver TR e o ET não tiver definido antes, por ProcessTrJob),
+  # restrito ao menu real de StudyType. Fica nil até isso acontecer (ou se não houver ET nem TR).
   belongs_to :study_type, optional: true
   has_one :geospatial_result, dependent: :destroy
   has_one :proposal, dependent: :destroy
@@ -261,6 +261,34 @@ class Conversation < ApplicationRecord
   # GenerateProposalDocumentTool); só o gatilho de criação deixou de exigir a tela.
   # Retorna nil (sem criar nada) se faltar pré-requisito real (revisão concluída, tipo de estudo
   # identificado) — quem chama decide o que fazer com isso.
+  # Marcador do achado que registra "a IA identificou um tipo de estudo que não existe no
+  # cadastro" — usado pra não duplicar o aviso quando ET e TR passam por aqui na mesma conversa.
+  STUDY_TYPE_OUT_OF_CATALOG = "tipo de estudo fora do cadastro".freeze
+
+  # Define o tipo de estudo a partir dos achados já extraídos (ET, e TR como reforço).
+  #
+  # Antes isto vivia duplicado em ProcessEtJob/ProcessTrJob e era um `find_by(code:)` seco: código
+  # que não batesse com nenhum cadastro não fazia NADA — nem gravava, nem avisava ninguém. A
+  # conversa 31 (produção, VSZ Energy) travou exatamente aí: a IA respondeu "eai" (Estudo
+  # Ambiental Intermediário), que a Papyrus nunca cadastrou, study_type ficou nil, e a partir daí
+  # generate_proposal_document recusou gerar a proposta pra sempre — sem que o consultor nem a IA
+  # tivessem como saber o motivo. A IA chamou a ferramenta quatro vezes e acabou mandando o
+  # consultor "falar com o Molina ou o Pedro".
+  #
+  # Duas mudanças: o casamento tolera a IA devolver o nome no lugar do código (StudyType
+  # .match_ai_value), e o que não casa vira um achado visível — mesma regra da sugestão de equipe
+  # fora do cadastro (Proposal#flag_out_of_catalog): ou falta cadastro, ou a IA inventou, e as duas
+  # coisas são informação pro consultor.
+  def assign_study_type_from_findings!
+    return if study_type_id.present?
+
+    values = project_findings.active.where(field: "tipo_estudo").pluck(:value)
+    match = values.filter_map { |value| StudyType.match_ai_value(value) }.first
+    return update!(study_type: match) if match
+
+    flag_study_type_out_of_catalog(values)
+  end
+
   def ensure_proposal!
     # Recarrega antes de checar: quem chama isso pelo chat (RespondToMessageJob) carregou este
     # Conversation no início do job, e a resposta da IA pode levar dezenas de segundos — achado
@@ -301,7 +329,7 @@ class Conversation < ApplicationRecord
   def refresh_proposal_state_snapshot!
     messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
     text = [ proposal.present? ? proposal_state_text : no_proposal_state_text,
-             findings_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
+             study_type_blocker_text, findings_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
     snapshot = create_user_message(text)
     snapshot.update!(internal: true)
   end
@@ -385,6 +413,25 @@ class Conversation < ApplicationRecord
   end
 
   private
+    # O valor que a IA respondeu continua registrado como achado normal (source_kind "et"/"tr") —
+    # este aqui é o aviso do SISTEMA de que ele não casa com nada cadastrado. Fica visível no
+    # resumo, no snapshot que a IA lê a cada turno e na tela de achados.
+    def flag_study_type_out_of_catalog(values)
+      return if values.blank?
+      return if project_findings.where(field: "outro", source_kind: "sistema")
+                                .where("value LIKE ?", "#{STUDY_TYPE_OUT_OF_CATALOG}%").exists?
+
+      project_findings.create!(
+        field: "outro", nature: "sugestao", source_kind: "sistema",
+        value: "#{STUDY_TYPE_OUT_OF_CATALOG}: #{values.uniq.join(', ')}",
+        excerpt: "A IA identificou este tipo de estudo nos documentos, mas ele não existe em " \
+                 "Configurações > Tipos de Estudo. Enquanto o consultor não escolher um tipo " \
+                 "equivalente (ou cadastrar este), nenhuma proposta pode ser criada."
+      )
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.warn("[Conversation] não consegui registrar tipo de estudo fora do cadastro: #{e.message}")
+    end
+
     # pg_advisory_xact_lock bloqueia outras chamadas com a MESMA chave (id da conversa) até a
     # transação atual terminar — libera sozinho no commit/rollback, sem risco de esquecer um
     # unlock manual (e sem o problema de pg_advisory_lock/unlock exigirem a mesma conexão, que o
@@ -398,6 +445,33 @@ class Conversation < ApplicationRecord
 
     def merge_processing_steps!(patch)
       self.class.where(id: id).update_all([ "processing_steps = processing_steps || ?::jsonb", patch.to_json ])
+    end
+
+    # Sem tipo de estudo não existe menu de horas (study_templates) — logo não existe equipe, não
+    # existe proposta, nem a técnica. Isso PRECISA estar escrito no snapshot: a IA só enxerga o
+    # chat, e o erro que a ferramenta devolve sozinho não diz onde o consultor resolve. Na conversa
+    # 31 ela concluiu que era falha do backend e mandou o consultor procurar o time de
+    # desenvolvimento — quatro chamadas de ferramenta depois, a proposta continuava sem sair.
+    def study_type_blocker_text
+      return "" if study_type.present?
+      return "" if status.in?(%w[setup processing])
+
+      suggested = project_findings.active.where(field: "tipo_estudo").pluck(:value).uniq
+      cadastrados = StudyType.order(:name).pluck(:name).join(", ").presence || "nenhum"
+
+      <<~TEXT
+        [BLOQUEIO: TIPO DE ESTUDO] (gerado pelo sistema, reflete o estado real):
+        - O tipo de estudo desta proposta NÃO está definido no sistema. Sem ele não há como montar
+          a equipe nem criar a proposta — nem a técnica. O processamento dos documentos JÁ terminou:
+          isto não é questão de esperar, nem falha do backend.
+        #{suggested.any? ? "- Você identificou #{suggested.map(&:inspect).join(' / ')} nos documentos, mas isso não corresponde a nenhum tipo cadastrado. Cadastrados hoje: #{cadastrados}." : "- Nenhum tipo de estudo foi identificado nos documentos. Cadastrados hoje: #{cadastrados}."}
+        - O QUE FAZER: não chame generate_proposal_document (ela vai recusar de novo, com o mesmo
+          erro). Diga ao consultor que ele precisa escolher o tipo de estudo no painel "Tipo de
+          estudo", no alto da coluna à esquerda desta tela, e clicar em "Salvar" — ou, se nenhum
+          dos cadastrados servir, cadastrar o que falta em Configurações > Tipos de Estudo.
+          Sugira qual dos cadastrados mais se aproxima do que você leu nos documentos. Assim que
+          ele salvar, este bloco some e você gera a proposta normalmente.
+      TEXT
     end
 
     # O que foi extraído dos documentos desta proposta, com o código de citação de cada item.
@@ -440,10 +514,10 @@ class Conversation < ApplicationRecord
           pela IA) na hora que você a chama de verdade, sem precisar que o consultor clique em nada
           na tela antes. Se ele pedir a proposta técnica, siga o passo a passo normal (itens 1, 3,
           4, 9) e chame a ferramenta — ela cuida do resto. O único caso em que isso NÃO funciona é
-          se o tipo de estudo ainda não foi identificado (ET ainda em processamento) ou a revisão
-          ainda não foi concluída — nesse caso a ferramenta devolve um erro explicando; só então
-          diga ao consultor o que falta (não invente "clique em Avançar para Precificação" fora
-          desse caso específico).
+          o tipo de estudo não estar definido no sistema — e quando for esse o caso, o bloco
+          [BLOQUEIO: TIPO DE ESTUDO] aparece logo abaixo dizendo exatamente o que fazer. Sem esse
+          bloco, não existe pendência: chame a ferramenta (não invente "clique em Avançar para
+          Precificação").
       TEXT
     end
 

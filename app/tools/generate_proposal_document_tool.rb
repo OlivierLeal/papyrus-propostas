@@ -113,8 +113,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
   def execute(**args)
     @proposal = @conversation.proposal || @conversation.ensure_proposal!
-    return { error: "Ainda não dá pra criar a proposta — falta o tipo de estudo ser identificado " \
-      "(ET ainda em processamento) ou a revisão ser concluída." }.to_json if @proposal.nil?
+    return { error: blocked_reason }.to_json if @proposal.nil?
 
     apply_filename_override!(args[:nome_arquivo])
     @proposal.increment!(:version)
@@ -168,6 +167,28 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
+    # A mensagem antiga ("falta o tipo de estudo ser identificado (ET ainda em processamento) ou a
+    # revisão ser concluída") juntava duas causas diferentes e apontava pra uma terceira que
+    # normalmente já não é verdade. Na conversa 31 (produção) o ET estava "done" havia 15 minutos e
+    # o que faltava era cadastro de tipo de estudo — a IA leu "ET ainda em processamento", concluiu
+    # que era falha do backend, repetiu a chamada quatro vezes e mandou o consultor procurar o time
+    # de desenvolvimento. Cada causa agora diz o que ela é e onde se resolve.
+    def blocked_reason
+      if @conversation.study_type.blank?
+        cadastrados = StudyType.order(:name).pluck(:name).join(", ").presence || "nenhum tipo cadastrado"
+        "Não dá pra criar a proposta: o TIPO DE ESTUDO desta conversa não está definido no sistema " \
+        "(sem ele não existe menu de horas, logo não existe equipe nem proposta). Isso não se " \
+        "resolve tentando de novo — NÃO repita esta chamada. Peça ao consultor que escolha o tipo " \
+        "de estudo no painel \"Tipo de estudo\", na coluna à esquerda da tela da proposta, e clique " \
+        "em Salvar; se nenhum servir, ele cadastra o que falta em Configurações > Tipos de Estudo. " \
+        "Tipos cadastrados hoje: #{cadastrados}."
+      else
+        "Não dá pra criar a proposta agora: os documentos ainda estão sendo processados " \
+        "(situação atual: #{@conversation.status_label}). Avise o consultor e tente de novo quando " \
+        "o processamento terminar."
+      end
+    end
+
     # Item de lista opcional no modelo (7.1/7.2 — ver ProposalDocxFiller#fill_simple_placeholders!)
     # — some o parágrafo inteiro em vez de deixar um "●" sem texto quando não há nada extra.
     OBRIGACOES_ADICIONAIS_TOKENS = %w[OBRIGACOES_CONTRATANTE_ADICIONAIS OBRIGACOES_PAPYRUS_ADICIONAIS].freeze

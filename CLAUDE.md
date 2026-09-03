@@ -680,6 +680,28 @@ e o rastro da divergência não se perde.
 mas agora registra um achado `sugestao` dizendo o que foi descartado — ou falta cadastro, ou a IA
 inventou, e as duas coisas são informação para o consultor.
 
+**O mesmo vale para o tipo de estudo (2026-09, achado na conversa 31, em produção).** A IA
+respondeu `"eai"` (Estudo Ambiental Intermediário) num ET real; a Papyrus nunca cadastrou esse
+tipo, o `find_by(code:)` não achou nada e `study_type` ficou `nil` **em silêncio**. A partir daí
+`GenerateProposalDocumentTool` recusou gerar a proposta para sempre, com uma mensagem que juntava
+duas causas e apontava para uma terceira já resolvida ("ET ainda em processamento", com o ET
+`done` havia 15 minutos) — a IA concluiu que era falha de backend, repetiu a chamada quatro vezes e
+mandou o consultor procurar o time de desenvolvimento. Quatro correções, uma por camada:
+- `StudyType.match_ai_value` tolera a IA devolver o NOME no lugar do código (`"EIA-RIMA"` →
+  `eia_rima`) — isso é ruído de formato, o sistema resolve sozinho. O que não casa é falta de
+  cadastro e precisa de gente.
+- `Conversation#assign_study_type_from_findings!` (uma cópia só, era duplicado em `ProcessEtJob`/
+  `ProcessTrJob`) registra um achado `sugestao`/`sistema` quando nada casa, mesma regra do
+  `flag_out_of_catalog` acima. Não duplica quando ET e TR passam os dois.
+- O snapshot que a IA lê a cada turno ganhou o bloco `[BLOQUEIO: TIPO DE ESTUDO]`
+  (`Conversation#study_type_blocker_text`), dizendo que o processamento já terminou, o que ela
+  identificou, quais tipos existem, e para **não** chamar a ferramenta — e sim mandar o consultor
+  escolher na tela. Erro de ferramenta sozinho não basta: ele não diz ONDE se resolve.
+- Na tela, o `collection_select` sem `include_blank` mostrava o primeiro tipo da lista como se
+  estivesse selecionado — o consultor olhava o painel e via um tipo definido. Agora tem
+  "Não identificado", moldura de aviso, e o botão "Avançar para Precificação" desabilitado diz
+  por quê.
+
 ---
 
 ## 14. Chat geral de dúvidas (`GeneralChat`, implementado)

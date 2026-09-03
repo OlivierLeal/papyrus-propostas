@@ -17,6 +17,23 @@ class StudyTypeTest < ActiveSupport::TestCase
     assert_includes study_type.errors[:code], "já está em uso"
   end
 
+  test "match_ai_value matches the exact code the prompt asked for" do
+    assert_equal study_types(:eia_rima), StudyType.match_ai_value("eia_rima")
+  end
+
+  test "match_ai_value tolerates the AI answering with the name instead of the code" do
+    # A IA recebe o menu de códigos mas às vezes devolve o rótulo ("EIA-RIMA", "EIA/RIMA").
+    # Isso é ruído de formato, não falta de cadastro — o sistema resolve sozinho.
+    assert_equal study_types(:eia_rima), StudyType.match_ai_value("EIA-RIMA")
+    assert_equal study_types(:eia_rima), StudyType.match_ai_value("EIA / RIMA")
+  end
+
+  test "match_ai_value returns nil for a code that simply isn't registered" do
+    # "eai" (Estudo Ambiental Intermediário) foi o caso real da conversa 31, em produção.
+    assert_nil StudyType.match_ai_value("eai")
+    assert_nil StudyType.match_ai_value("")
+  end
+
   test "has many study_templates" do
     assert_includes study_types(:eia_rima).study_templates, study_templates(:coordenacao_eia_rima)
   end

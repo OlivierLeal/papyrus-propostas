@@ -251,6 +251,76 @@ class ConversationTest < ActiveSupport::TestCase
     end
   end
 
+  test "assign_study_type_from_findings! accepts the study type name when the AI doesn't answer with the code" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.update!(study_type: nil)
+    conversation.project_findings.create!(field: "tipo_estudo", value: "EIA-RIMA", nature: "fato", source_kind: "et")
+
+    conversation.assign_study_type_from_findings!
+
+    assert_equal study_types(:eia_rima), conversation.reload.study_type
+  end
+
+  test "assign_study_type_from_findings! flags a type that isn't registered instead of failing silently" do
+    # Conversa 31, em produção: a IA respondeu "eai" (Estudo Ambiental Intermediário, nunca
+    # cadastrado), o study_type ficou nil sem nenhum aviso e a geração da proposta travou pra
+    # sempre — a IA acabou mandando o consultor procurar o time de desenvolvimento.
+    conversation = conversations(:reviewing_conversation)
+    conversation.update!(study_type: nil)
+    conversation.project_findings.create!(field: "tipo_estudo", value: "eai", nature: "fato", source_kind: "et")
+
+    conversation.assign_study_type_from_findings!
+
+    assert_nil conversation.reload.study_type
+    flag = conversation.project_findings.find_by(source_kind: "sistema", field: "outro")
+    assert flag.present?
+    assert_includes flag.value, "eai"
+    assert_equal "sugestao", flag.nature
+  end
+
+  test "assign_study_type_from_findings! doesn't flag the same missing type twice (ET and TR both run)" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.update!(study_type: nil)
+    conversation.project_findings.create!(field: "tipo_estudo", value: "eai", nature: "fato", source_kind: "et")
+
+    conversation.assign_study_type_from_findings!
+    conversation.assign_study_type_from_findings!
+
+    assert_equal 1, conversation.project_findings.where(source_kind: "sistema", field: "outro").count
+  end
+
+  test "assign_study_type_from_findings! never overwrites a type already decided" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.project_findings.create!(field: "tipo_estudo", value: "rap", nature: "fato", source_kind: "tr")
+
+    conversation.assign_study_type_from_findings!
+
+    assert_equal study_types(:eia_rima), conversation.reload.study_type
+  end
+
+  test "refresh_proposal_state_snapshot! spells out the study type blocker instead of leaving the AI to guess" do
+    # Sem esse bloco a IA leu o erro genérico da ferramenta ("ET ainda em processamento"), concluiu
+    # que era falha de backend e repetiu a chamada quatro vezes (conversa 31).
+    conversation = conversations(:reviewing_conversation)
+    conversation.update!(study_type: nil)
+
+    conversation.refresh_proposal_state_snapshot!
+
+    marker = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%").last
+    assert_includes marker.content, "[BLOQUEIO: TIPO DE ESTUDO] (gerado pelo sistema"
+    assert_includes marker.content, "Configurações > Tipos de Estudo"
+    assert_includes marker.content, "não chame generate_proposal_document"
+  end
+
+  test "refresh_proposal_state_snapshot! has no blocker block once the study type is set" do
+    conversation = conversations(:reviewing_conversation)
+
+    conversation.refresh_proposal_state_snapshot!
+
+    marker = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%").last
+    assert_not_includes marker.content, "[BLOQUEIO: TIPO DE ESTUDO] (gerado pelo sistema"
+  end
+
   test "refresh_proposal_state_snapshot! without a proposal tells the AI the proposal doesn't exist yet, not to fake calling the tool" do
     # Achado num caso real: sem essa mensagem, a IA não tinha como saber que a proposta ainda não
     # existe (GenerateProposalDocumentTool nem está registrada nesse ponto) e inventava que tinha

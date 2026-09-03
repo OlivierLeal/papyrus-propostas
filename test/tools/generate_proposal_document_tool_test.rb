@@ -231,6 +231,23 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     result = JSON.parse(tool.execute(**@args))
 
     assert result["error"].present?
+    assert_includes result["error"], "processados"
+    assert_nil conversation.reload.proposal
+  end
+
+  test "a missing study type says so, and where to fix it, instead of blaming document processing" do
+    # Conversa 31, em produção: o ET estava "done" havia 15 minutos e o que faltava era cadastro de
+    # tipo de estudo, mas o erro dizia "ET ainda em processamento" — a IA leu isso como falha de
+    # backend, repetiu a chamada quatro vezes e mandou o consultor procurar o time de desenvolvimento.
+    conversation = conversations(:reviewing_conversation)
+    conversation.update!(study_type: nil)
+    tool = GenerateProposalDocumentTool.new(conversation: conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_includes result["error"], "TIPO DE ESTUDO"
+    assert_includes result["error"], "NÃO repita esta chamada"
+    assert_not_includes result["error"], "processamento"
     assert_nil conversation.reload.proposal
   end
 

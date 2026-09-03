@@ -24,14 +24,24 @@
   <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:h-[80vh]">
       <div class="lg:col-span-1 flex flex-col gap-4 lg:overflow-y-auto lg:min-h-0 lg:pr-1">
-        <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
+        <div class="bg-base-100 rounded-box border shadow-sm p-6 <%= @conversation.study_type.present? ? "border-base-300" : "border-warning" %>">
           <h2 class="font-semibold text-base-content mb-4">Tipo de estudo</h2>
 
           <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, class: "flex items-center gap-2" do |form| %>
-            <%= form.collection_select :study_type_id, StudyType.order(:name), :id, :name, {}, class: "select select-bordered select-sm flex-1" %>
+            <%= form.collection_select :study_type_id, StudyType.order(:name), :id, :name,
+                  { include_blank: "Não identificado" },
+                  class: "select select-bordered select-sm flex-1 #{"select-warning" if @conversation.study_type.blank?}" %>
             <%= form.submit "Salvar", class: "btn btn-ghost btn-sm" %>
           <% end %>
-          <p class="text-xs text-base-content/50 mt-2">Identificado pela IA a partir do ET — troque aqui se achar que ela errou.</p>
+          <% if @conversation.study_type.present? %>
+            <p class="text-xs text-base-content/50 mt-2">Identificado pela IA a partir do ET — troque aqui se achar que ela errou.</p>
+          <% else %>
+            <p class="text-xs text-warning mt-2">
+              A IA não identificou um tipo de estudo cadastrado neste ET. Escolha um aqui (ou
+              <%= link_to "cadastre o que falta", settings_study_types_path, class: "link" %>) —
+              sem isso a proposta não pode ser gerada.
+            </p>
+          <% end %>
         </div>
 
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
@@ -123,6 +133,7 @@
           <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
         <% elsif @conversation.status == "reviewing" %>
           <button class="btn btn-primary w-full" disabled>Avançar para Precificação</button>
+          <p class="text-xs text-warning mt-2 text-center">Escolha o tipo de estudo acima para liberar.</p>
         <% elsif @conversation.status.in?(%w[pricing completed]) %>
           <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
         <% end %>

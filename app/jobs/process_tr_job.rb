@@ -20,7 +20,7 @@ class ProcessTrJob < ApplicationJob
       hide_response: true
     )
     record_findings!(conversation, attachments)
-    assign_study_type!(conversation)
+    conversation.assign_study_type_from_findings!
     conversation.mark_step!("tr", "done")
   rescue StandardError => e
     Rails.logger.error("ProcessTrJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
@@ -101,15 +101,5 @@ class ProcessTrJob < ApplicationJob
       ProjectFindings::Recorder.new(
         conversation, source_kind: "tr", source_blob: attachments.first&.blob
       ).call(AiJsonResponse.parse(reply.content))
-    end
-
-    # O TR é opcional e pode terminar de processar antes ou depois do ET — só define o tipo de
-    # estudo se o ET (ou uma decisão do consultor) ainda não tiver definido um.
-    def assign_study_type!(conversation)
-      return if conversation.study_type_id.present?
-
-      codes = conversation.project_findings.active.where(field: "tipo_estudo").pluck(:value)
-      study_type = codes.filter_map { |code| StudyType.find_by(code: code.to_s.strip) }.first
-      conversation.update!(study_type: study_type) if study_type
     end
 end

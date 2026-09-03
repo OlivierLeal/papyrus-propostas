@@ -19,7 +19,7 @@ class ProcessEtJob < ApplicationJob
       hide_response: true
     )
     record_findings!(conversation, attachments)
-    assign_study_type!(conversation)
+    conversation.assign_study_type_from_findings!
     conversation.mark_step!("et", "done")
   rescue StandardError => e
     Rails.logger.error("ProcessEtJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
@@ -110,14 +110,6 @@ class ProcessEtJob < ApplicationJob
       ProjectFindings::Recorder.new(
         conversation, source_kind: "et", source_blob: attachments.first&.blob
       ).call(AiJsonResponse.parse(reply.content))
-    end
-
-    def assign_study_type!(conversation)
-      return if conversation.study_type_id.present?
-
-      codes = conversation.project_findings.active.where(field: "tipo_estudo").pluck(:value)
-      study_type = codes.filter_map { |code| StudyType.find_by(code: code.to_s.strip) }.first
-      conversation.update!(study_type: study_type) if study_type
     end
 
     # TR nunca dispara em paralelo com ET — só depois que o ET termina (seja qual for o
