@@ -15,6 +15,9 @@ FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 WORKDIR /rails
 
 # Install base packages
+# default-jre-headless: só pra rodar o helper Java do cronograma em MSPDI (ScheduleMspdiExporter,
+# CLAUDE.md seção 8) — o .class já vem compilado no repo (lib/java/build/), então JRE basta, não
+# precisa de JDK/javac na imagem.
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
     curl \
@@ -24,7 +27,8 @@ RUN apt-get update -qq && \
     libproj25 \
     proj-bin \
     poppler-utils \
-    libreoffice-writer-nogui && \
+    libreoffice-writer-nogui \
+    default-jre-headless && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
