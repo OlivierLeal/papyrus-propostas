@@ -140,7 +140,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     @proposal = @conversation.proposal || @conversation.ensure_proposal!
     return { error: blocked_reason }.to_json if @proposal.nil?
 
-    ensure_schedule_suggested!
+    schedule_suggestion_enqueued = ensure_schedule_suggested!
     apply_schedule_start_date_overrides!(args)
     defaulted_schedule_types = default_missing_schedule_dates!
 
@@ -171,7 +171,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types)}" }.to_json
+          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
@@ -185,14 +185,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types)}" }.to_json
+          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
       schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -429,7 +429,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       end
     end
 
-    def schedule_message(schedule_filenames, defaulted_schedule_types)
+    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)
       parts = []
       parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}), " \
         "pronto pra abrir no MS Project (Arquivo > Abrir)." if schedule_filenames.present?
@@ -440,21 +440,35 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "(início do mês que vem) — se não for essa a data certa, é só falar a data no chat ou " \
           "corrigir na Tela de Precificação e gerar de novo."
       end
+      if schedule_suggestion_enqueued
+        parts << " Estou sugerindo o cronograma desta proposta em segundo plano — peça pra gerar " \
+          "de novo em alguns instantes pra ele já sair incluído."
+      end
       parts.join
     end
 
-    # Garante uma primeira tentativa de sugestão de cronograma (Proposal#build_with_ai_suggested_
-    # schedule!) mesmo quando Conversation#ensure_proposal! não é quem cria a proposta agora —
-    # ex.: a proposta já existia (segunda geração da conversa), ou a primeira tentativa (na
-    # criação) falhou ou veio vazia porque faltava informação que só chegou depois (TR, um
-    # complementar, o acervo histórico). Idempotente: só tenta quando ainda não há NENHUM item —
-    # não reescreve um cronograma que o consultor já ajustou na Tela de Precificação.
+    # Garante uma primeira tentativa de sugestão de cronograma mesmo quando Conversation#ensure_
+    # proposal! não é quem cria a proposta agora — ex.: a proposta já existia (segunda geração da
+    # conversa), ou a primeira tentativa (na criação) falhou ou veio vazia porque faltava
+    # informação que só chegou depois (TR, um complementar, o acervo histórico). Idempotente: só
+    # tenta quando ainda não há NENHUM item — não reescreve um cronograma que o consultor já
+    # ajustou na Tela de Precificação.
+    #
+    # SEMPRE em background (SuggestScheduleJob), NUNCA `@proposal.build_with_ai_suggested_
+    # schedule!` direto aqui — esta ferramenta só é chamada como tool call DENTRO de
+    # Conversation#complete (RespondToMessageJob), e isso reentraria complete/ask_internally
+    # enquanto o de fora ainda está no meio da própria tool call. Achado ao vivo (conversa 32/
+    # proposta 18): a chamada de verdade pro Bedrock falhava sozinha ("RubyLLM: API call failed,
+    # destroying message"), sem soltar exceção nenhuma pro rescue de build_with_ai_suggested_
+    # schedule! pegar — o cronograma ficava vazio pra sempre, mesmo tentando de novo a cada
+    # geração. Devolve true quando enfileirou (pra avisar o consultor, ver #schedule_message).
     def ensure_schedule_suggested!
       pricing = @proposal.project_pricing
-      return unless pricing
-      return if pricing.schedule_items.exists?
+      return false unless pricing
+      return false if pricing.schedule_items.exists?
 
-      @proposal.build_with_ai_suggested_schedule!
+      SuggestScheduleJob.perform_later(@proposal.id)
+      true
     end
 
     # O consultor pode ditar a data de início no CHAT (mesmo padrão de nome_arquivo/

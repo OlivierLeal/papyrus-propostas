@@ -403,7 +403,10 @@ momento; TR/complementar chegou depois), a proposta ficava sem cronograma pra se
 ninguém saber por quê. `GenerateProposalDocumentTool#ensure_schedule_suggested!` agora tenta de
 novo TODA vez que o consultor pede pra gerar o documento, mas só quando ainda não existe NENHUM
 item — idempotente, nunca reescreve por cima do que o consultor já ajustou na Tela de
-Precificação. `fetch_ai_schedule_suggestion` também passou a registrar `SearchHistoricalArchiveTool`
+Precificação. **Enfileira `SuggestScheduleJob` em vez de chamar a IA direto** — ver "Sugestão de
+cronograma tem que rodar em BACKGROUND" mais abaixo pro porquê (reentrância em `Conversation#
+complete`), achado ao vivo depois da primeira versão desta funcionalidade. `fetch_ai_schedule_
+suggestion` também passou a registrar `SearchHistoricalArchiveTool`
 quando há acervo indexado (`HistoricalProposalChunk.embedded.exists?`), mesmo padrão do
 `ProcessLegalNormsJob` (`conversation.with_tool(...)` direto, antes de `ask_internally` — dali em
 diante `Conversation#ask_internally` já registra sozinho) — a IA pode consultar como a Papyrus
@@ -427,6 +430,52 @@ cronograma sempre entra (com a data que tiver: já cadastrada, ditada agora, ou 
 pra IA repassar ao consultor no chat — nunca uma pergunta livre da IA, sempre o mesmo aviso
 determinístico, e sempre corrigível gerando de novo (com a data certa no chat, ou editando na
 Tela de Precificação).
+
+**Sugestão de cronograma tem que rodar em BACKGROUND, nunca síncrona dentro da tool call
+(2026-09, achado ao vivo na conversa 32/proposta 18):** `GenerateProposalDocumentTool` só é
+chamada como tool call DENTRO de `Conversation#complete` (`RespondToMessageJob#perform` chama
+`conversation.complete` direto, sem `with_ai_lock`). A primeira versão de
+`ensure_schedule_suggested!` chamava `Proposal#build_with_ai_suggested_schedule!` (que por sua
+vez chama `conversation.ask_internally` → `with_ai_lock` → `complete`) **de dentro** dessa tool
+call — ou seja, reentrava `Conversation#complete` enquanto a chamada de fora ainda estava no meio
+da PRÓPRIA tool call. Sintoma reproduzido ao vivo: a chamada de verdade pro Bedrock falhava
+sozinha (`WARN -- RubyLLM: RubyLLM: API call failed, destroying message: <id>`), **sem soltar
+nenhuma exceção** que o `rescue StandardError` de `build_with_ai_suggested_schedule!` pudesse
+pegar — o cronograma ficava com 0 itens pra sempre, e como não existe fallback determinístico pra
+cronograma (diferente da equipe, que cai em `build_from_template!`), o problema nunca foi mascarado:
+4 gerações seguidas na conversa 32, todas com `schedule_items.count == 0`.
+
+**Correção**: `ensure_schedule_suggested!` nunca mais chama a IA direto — só enfileira
+`SuggestScheduleJob` (`app/jobs/suggest_schedule_job.rb`, idempotente, mesma checagem de "só
+tenta se ainda não há item nenhum") e devolve `true`/`false` dizendo se enfileirou, pra
+`schedule_message` avisar o consultor ("Estou sugerindo o cronograma em segundo plano — peça pra
+gerar de novo em instantes"). O job roda inteiramente FORA do turno de chat que o disparou — sem
+nenhum `complete()` em andamento no meio do caminho — e testado ao vivo com o Solid Queue de
+verdade rodando (não só `perform_now` isolado): o job pegou a fila sozinho, a chamada ao Bedrock
+teve sucesso, os 14 itens saíram certos.
+
+**Suspeita ainda não confirmada, mesma causa-raiz:** `Conversation#ensure_proposal!` (chamado de
+dentro da MESMA tool call, na primeira geração de cada proposta) também chama
+`Proposal#build_with_ai_suggested_team!` de forma síncrona — sujeito ao mesmo problema de
+reentrância. A diferença é que equipe TEM fallback determinístico
+(`build_from_template!`, no `rescue`), então uma falha aqui não aparece como "nada acontece" — ela
+aparece como "a equipe saiu com as horas padrão do template em vez da sugestão inteligente da
+IA", silenciosa, muito mais difícil de notar do que cronograma vazio. Não corrigido nesta
+sessão — decisão consciente de não mudar um fluxo que já "funciona" (via fallback) sem
+confirmar com o consultor primeiro, já que a correção (mover `build_with_ai_suggested_team!`
+também pra um job em background) muda a experiência de quem clica "Avançar para Precificação"
+pelo chat: a Tela de Precificação abriria com equipe zerada por alguns segundos até o job
+terminar, em vez de já vir preenchida.
+
+**Efeito colateral achado ao limpar o teste ao vivo:** a checklist interna
+(`Conversation::PROPOSAL_CHECKLIST_INSTRUCTIONS`, item 12) ainda dizia "não temos suporte
+estruturado" pra cronograma — texto de antes desta funcionalidade existir, nunca atualizado.
+Isso fazia a IA ativamente EVITAR mencionar/pedir cronograma pro consultor, mesmo com o sistema já
+suportando. Corrigido o texto do item 12 pra descrever o fluxo automático atual. Como esse texto
+vira uma `Message` gravada no início de CADA conversa (não é recalculado depois), conversas já
+existentes continuam com a versão antiga até serem recriadas — não há como "atualizar" uma
+conversa já em andamento a não ser editando a mensagem na mão (feito manualmente na conversa 32
+pra verificação).
 
 **Exportação em MSPDI pro MS Project (2026-09):** todo cronograma presente também sai como um
 arquivo `.xml` à parte, no formato **MSPDI** (o XML de intercâmbio do MS Project — Arquivo > Abrir

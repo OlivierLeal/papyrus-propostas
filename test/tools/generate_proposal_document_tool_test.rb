@@ -623,6 +623,29 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     refute_match(/MS Project/, result["message"])
   end
 
+  # Achado ao vivo (conversa 32/proposta 18): chamar Proposal#build_with_ai_suggested_schedule!
+  # SÍNCRONO daqui reentrava Conversation#complete/#ask_internally — esta ferramenta só é chamada
+  # como tool call DENTRO de Conversation#complete (RespondToMessageJob) — e a chamada de verdade
+  # pro Bedrock falhava sozinha, sem soltar exceção nenhuma. Nunca mais síncrono: sempre enfileira
+  # SuggestScheduleJob (CLAUDE.md seção 8).
+  test "suggests the schedule in the BACKGROUND (never synchronously) when there is no schedule yet" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_enqueued_with(job: SuggestScheduleJob, args: [ @proposal.id ]) do
+      tool.execute(**@args)
+    end
+
+    assert_equal 0, @proposal.project_pricing.schedule_items.count
+  end
+
+  test "does not enqueue SuggestScheduleJob when a schedule already exists" do
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args) }
+  end
+
   test "defaults the start date to the 1st of next month when there are items but no date at all, and warns about it" do
     pricing = @proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",

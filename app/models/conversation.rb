@@ -153,9 +153,14 @@ class Conversation < ApplicationRecord
         num projeto semelhante e siga o mesmo padrão de estrutura e linguagem, adaptando o
         conteúdo a este projeto. Nunca copie dados do projeto antigo (área, município, prazo,
         valores) — só a forma. Diga ao consultor qual projeto você usou como referência.
-    12. Se a proposta exigir cronograma, histograma ou organograma de execução, incluir — ainda não
-        temos suporte estruturado pra isso no sistema, avise o consultor que precisa ser montado à
-        parte por enquanto.
+    12. Cronograma (Gantt) do serviço — e, quando o ET/TR pedir explicitamente, de implantação do
+        empreendimento — o sistema já sugere e monta sozinho, você não precisa fazer nada demais:
+        ao chamar generate_proposal_document ele tenta sugerir automaticamente (se ainda não
+        houver nenhum item) e gera junto do .docx um arquivo pronto pra abrir no MS Project. Se o
+        consultor disser a data de início no chat (ex.: "o cronograma começa em 15/10"), passe em
+        data_inicio_cronograma_servico/data_inicio_cronograma_implantacao; se ele não disser nada
+        e não houver data nenhuma cadastrada, o sistema mesmo presume o início do mês que vem e
+        avisa disso na resposta — nunca bloqueia a geração por causa do cronograma.
     13. Enviar para Sara ou Charlene revisar — acontece depois de gerado o rascunho, é lembrete pro
         consultor, nunca bloqueia a geração.
 
