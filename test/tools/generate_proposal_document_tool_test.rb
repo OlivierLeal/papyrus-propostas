@@ -557,7 +557,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "Mobilização"
   end
 
-  test "leaves out a schedule type that has items but no start date set" do
+  test "includes a schedule type that has items but no start date set, defaulting to next month" do
     pricing = @proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Assinatura do Contrato",
       start_period: 1, duration_periods: 1, position: 0)
@@ -565,7 +565,8 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     tool.execute(**@args)
 
-    assert_not_includes document_xml(@proposal.generated_documents.first), "Cronograma"
+    assert_includes document_xml(@proposal.generated_documents.first), "Cronograma"
+    assert_equal Date.current.next_month.beginning_of_month, pricing.reload.schedule_papyrus_start_date
   end
 
   test "leaves out a schedule type that has a start date but no items" do
@@ -620,5 +621,44 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert_equal 1, @proposal.generated_documents.count
     refute_match(/MS Project/, result["message"])
+  end
+
+  test "defaults the start date to the 1st of next month when there are items but no date at all, and warns about it" do
+    pricing = @proposal.project_pricing
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    expected = Date.current.next_month.beginning_of_month
+    assert_equal expected, pricing.reload.schedule_papyrus_start_date
+    assert_match(/presumi #{Regexp.escape(expected.strftime('%d/%m/%Y'))}/, result["message"])
+    assert_includes result["filenames"].join, "Cronograma_Servico.xml"
+  end
+
+  test "uses a start date dictated in the chat instead of defaulting, and persists it for next time" do
+    pricing = @proposal.project_pricing
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, data_inicio_cronograma_servico: "2026-10-15"))
+
+    assert_equal Date.new(2026, 10, 15), pricing.reload.schedule_papyrus_start_date
+    refute_match(/presumi/, result["message"])
+  end
+
+  test "never overwrites a start date the consultant already set on the Tela de Precificação" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 11, 1))
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_equal Date.new(2026, 11, 1), pricing.reload.schedule_papyrus_start_date
+    refute_match(/presumi/, result["message"])
   end
 end

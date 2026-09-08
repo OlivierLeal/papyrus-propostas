@@ -317,9 +317,15 @@ independentes:
   sozinho — mesma convenção já usada pra agrupar produtos por fase de licenciamento
   (`"Licença Prévia (LP):"` em `GenerateProposalDocumentTool#build_tables`).
 - **Data de início**: `project_pricing.schedule_papyrus_start_date` /
-  `schedule_empreendimento_start_date` — sempre digitada pelo consultor na Tela de Precificação
-  (igual `distance_km`/`bdi`, campo escalar direto na tabela — não é o caso de N datas pra N
-  parcelas do `payment_schedule`, aqui é só 1 data por tipo). A IA nunca sugere essa data.
+  `schedule_empreendimento_start_date` (igual `distance_km`/`bdi`, campo escalar direto na
+  tabela — não é o caso de N datas pra N parcelas do `payment_schedule`, aqui é só 1 data por
+  tipo). Três formas de chegar lá, nessa ordem de prioridade — ver "Sugestão automática..."
+  abaixo pro detalhe de cada uma: (1) já digitada na Tela de Precificação; (2) ditada pelo
+  consultor no CHAT, capturada por `GenerateProposalDocumentTool`; (3) sem nenhuma das duas,
+  o SISTEMA presume o início do mês que vem. A IA nunca INVENTA essa data a partir do
+  contexto — ela só repassa a data (2) quando o consultor disse explicitamente, igual
+  `nome_arquivo`/`docx_filename_override`; o default (3) é conta determinística em Ruby, não
+  IA.
 - **A IA sugere, o consultor ajusta** — mesmo padrão de equipe técnica
   (`Proposal#build_with_ai_suggested_team!`), mas sem "menu" fechado (não existe cadastro de fases
   por tipo de estudo, é conteúdo livre). `Proposal#build_with_ai_suggested_schedule!` roda logo
@@ -402,11 +408,25 @@ quando há acervo indexado (`HistoricalProposalChunk.embedded.exists?`), mesmo p
 `ProcessLegalNormsJob` (`conversation.with_tool(...)` direto, antes de `ask_internally` — dali em
 diante `Conversation#ask_internally` já registra sozinho) — a IA pode consultar como a Papyrus
 estruturou o cronograma em projetos parecidos antes de sugerir fases/durações, sempre como
-referência, nunca fonte de datas (a data de início continua sempre digitada pelo consultor).
-**Continua sem bloquear a geração do documento** — quando existe item de cronograma mas falta a
-data de início, `GenerateProposalDocumentTool` gera o resto normalmente e devolve um aviso na
-mensagem de retorno, pra IA repassar ao consultor no chat (`missing_schedule_dates`/
-`schedule_message`) — nunca uma pergunta livre da IA, sempre o mesmo aviso determinístico.
+referência, nunca fonte de datas.
+
+**Data de início: ditada no chat, ou presumida (2026-09):** antes, sem data na Tela de
+Precificação o tipo simplesmente saía do documento em silêncio (só um aviso no retorno da
+ferramenta). Dois parâmetros novos em `GenerateProposalDocumentTool` —
+`data_inicio_cronograma_servico`/`data_inicio_cronograma_implantacao` — deixam o consultor
+DITAR a data no chat ("o cronograma começa em 15/10"); `apply_schedule_start_date_overrides!`
+grava direto em `project_pricing` quando a IA manda o parâmetro (mesmo padrão de
+`nome_arquivo`/`docx_filename_override` — só quando ele disse algo explicitamente, nunca
+inventado). Se depois disso ainda não houver data pra um tipo que TEM itens,
+`default_missing_schedule_dates!` presume o **início do mês que vem** (`Date.current.next_month.
+beginning_of_month`) — conta determinística do sistema, não a IA "adivinhando" pelo contexto,
+mesma distinção de sempre entre motor de regras e IA. Nunca sobrescreve uma data que já existe
+(nem a da Tela, nem uma dita antes). **Continua sem bloquear a geração do documento** — o
+cronograma sempre entra (com a data que tiver: já cadastrada, ditada agora, ou presumida), e
+`schedule_message` avisa na mensagem de retorno quando presumiu, com a data usada por extenso,
+pra IA repassar ao consultor no chat — nunca uma pergunta livre da IA, sempre o mesmo aviso
+determinístico, e sempre corrigível gerando de novo (com a data certa no chat, ou editando na
+Tela de Precificação).
 
 **Exportação em MSPDI pro MS Project (2026-09):** todo cronograma presente também sai como um
 arquivo `.xml` à parte, no formato **MSPDI** (o XML de intercâmbio do MS Project — Arquivo > Abrir

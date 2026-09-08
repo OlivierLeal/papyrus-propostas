@@ -96,6 +96,18 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "padrão da Papyrus. Envie \"padrão\" se ele pedir para voltar ao nome automático.",
     required: false
 
+  param :data_inicio_cronograma_servico,
+    desc: "SÓ quando o consultor disser no chat a data de início do Cronograma do Serviço (ex.: \"o cronograma " \
+          "começa em 15/10\"). Formato AAAA-MM-DD. Fica gravado e vale pra esta e pras próximas gerações — se ele " \
+          "não disse nada sobre isso, NÃO envie este parâmetro: o sistema usa o que já está na Tela de " \
+          "Precificação, ou presume o início do mês que vem se ainda não houver nenhuma data definida.",
+    required: false
+  param :data_inicio_cronograma_implantacao,
+    desc: "Mesma ideia de data_inicio_cronograma_servico, mas pro Cronograma de Implantação do Empreendimento " \
+          "(a obra/operação do CLIENTE, não o serviço da Papyrus) — só quando o consultor falar essa data " \
+          "especificamente. Formato AAAA-MM-DD.",
+    required: false
+
   param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
@@ -129,6 +141,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     return { error: blocked_reason }.to_json if @proposal.nil?
 
     ensure_schedule_suggested!
+    apply_schedule_start_date_overrides!(args)
+    defaulted_schedule_types = default_missing_schedule_dates!
 
     apply_filename_override!(args[:nome_arquivo])
     @proposal.increment!(:version)
@@ -140,7 +154,6 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS
-    schedule_types_missing_date = missing_schedule_dates
 
     # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
     # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
@@ -158,7 +171,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação.#{schedule_message(schedule_filenames, schedule_types_missing_date)}" }.to_json
+          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
@@ -172,14 +185,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, schedule_types_missing_date)}" }.to_json
+          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
       schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, schedule_types_missing_date)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -416,14 +429,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       end
     end
 
-    def schedule_message(schedule_filenames, schedule_types_missing_date)
+    def schedule_message(schedule_filenames, defaulted_schedule_types)
       parts = []
       parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}), " \
         "pronto pra abrir no MS Project (Arquivo > Abrir)." if schedule_filenames.present?
-      if schedule_types_missing_date.present?
-        nomes = schedule_types_missing_date.map { |type| SCHEDULE_NAMES.fetch(type) }.join(" e ")
-        parts << " Aviso: sugeri um #{nomes}, mas falta a data de início na Tela de Precificação — " \
-          "peça ao consultor pra preencher lá pra ele entrar no documento e no arquivo do MS Project."
+      if defaulted_schedule_types.present?
+        nomes = defaulted_schedule_types.map { |type| SCHEDULE_NAMES.fetch(type) }.join(" e ")
+        data = Date.current.next_month.beginning_of_month.strftime("%d/%m/%Y")
+        parts << " Aviso: o consultor não informou a data de início do #{nomes}, então presumi #{data} " \
+          "(início do mês que vem) — se não for essa a data certa, é só falar a data no chat ou " \
+          "corrigir na Tela de Precificação e gerar de novo."
       end
       parts.join
     end
@@ -442,19 +457,55 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       @proposal.build_with_ai_suggested_schedule!
     end
 
-    # Tipos que têm algum item de cronograma mas ainda não têm data de início (ScheduleTableBuilder/
-    # ProposalDocxFiller já deixam esse tipo de fora do documento em silêncio — aqui é onde o
-    # consultor fica sabendo por quê, em vez de só notar a ausência mais tarde).
-    def missing_schedule_dates
+    # O consultor pode ditar a data de início no CHAT (mesmo padrão de nome_arquivo/
+    # docx_filename_override) — a IA só passa o parâmetro quando ele disse algo explicitamente,
+    # nunca inventa. Formato livre tolerado (Date.parse aceita "2026-10-15" e várias variações);
+    # data ilegível é ignorada em silêncio, não derruba a geração.
+    def apply_schedule_start_date_overrides!(args)
+      pricing = @proposal.project_pricing
+      return unless pricing
+
+      updates = {}
+      updates[:schedule_papyrus_start_date] = parsed_date(args[:data_inicio_cronograma_servico])
+      updates[:schedule_empreendimento_start_date] = parsed_date(args[:data_inicio_cronograma_implantacao])
+      pricing.update!(updates.compact) if updates.compact.present?
+    end
+
+    def parsed_date(value)
+      return nil if value.blank?
+
+      Date.parse(value.to_s)
+    rescue Date::Error, TypeError
+      nil
+    end
+
+    # Quando existe item de cronograma mas ainda não há data de início (nem já cadastrada, nem
+    # dita agora no chat — ver #apply_schedule_start_date_overrides!), presume o INÍCIO DO MÊS QUE
+    # VEM em vez de deixar a página de fora do documento em silêncio (CLAUDE.md seção 8). É um
+    # padrão determinístico do sistema, não a IA "adivinhando" a partir do contexto — a mesma
+    # distinção de sempre (motor de preço/regras determinísticas, nunca a IA, decidindo o que não
+    # é conteúdo). Nunca sobrescreve uma data que já existe. Devolve os tipos que foram
+    # presumidos, pra avisar o consultor na mensagem de retorno (#schedule_message).
+    def default_missing_schedule_dates!
       pricing = @proposal.project_pricing
       return [] unless pricing
 
+      default = Date.current.next_month.beginning_of_month
+
       ScheduleItem::SCHEDULE_TYPES.select do |type|
-        pricing.schedule_items.any? { |item| item.schedule_type == type } && schedule_start_date(pricing, type).blank?
+        next false unless pricing.schedule_items.any? { |item| item.schedule_type == type }
+        next false if schedule_start_date(pricing, type).present?
+
+        pricing.update!(schedule_start_date_column(type) => default)
+        true
       end
     end
 
     def schedule_start_date(pricing, type)
-      type == "servico" ? pricing.schedule_papyrus_start_date : pricing.schedule_empreendimento_start_date
+      pricing.public_send(schedule_start_date_column(type))
+    end
+
+    def schedule_start_date_column(type)
+      type == "servico" ? :schedule_papyrus_start_date : :schedule_empreendimento_start_date
     end
 end
