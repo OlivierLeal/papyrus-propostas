@@ -128,6 +128,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     @proposal = @conversation.proposal || @conversation.ensure_proposal!
     return { error: blocked_reason }.to_json if @proposal.nil?
 
+    ensure_schedule_suggested!
+
     apply_filename_override!(args[:nome_arquivo])
     @proposal.increment!(:version)
     description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
@@ -138,6 +140,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS
+    schedule_types_missing_date = missing_schedule_dates
 
     # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
     # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
@@ -151,10 +154,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
-      { success: true, version: @proposal.version, filenames: [ technical_filename ],
+      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
+      { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação." }.to_json
+          "Precificação.#{schedule_message(schedule_filenames, schedule_types_missing_date)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
@@ -165,14 +169,17 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       attach!(files[:commercial], commercial_filename, "comercial", description)
-      { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename ],
-        message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), disponíveis na Tela de Precificação." }.to_json
+      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
+      { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
+        message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
+          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, schedule_types_missing_date)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
-      { success: true, version: @proposal.version, filenames: [ combined_filename ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação." }.to_json
+      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
+      { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, schedule_types_missing_date)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -377,5 +384,77 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         metadata: { kind: kind, version: @proposal.version, description: description }
       )
       @conversation.broadcast_refresh
+    end
+
+    # MSPDI (XML do MS Project) por tipo de cronograma presente — ver ScheduleMspdiExporter/
+    # CLAUDE.md seção 8. Sai igual em qualquer status da proposta (não é dado de preço), mesmo
+    # critério do cronograma dentro do .docx. Falha aqui (ex.: JRE ausente no servidor) não pode
+    # derrubar a geração do .docx inteiro — só fica sem o arquivo extra, logado pra investigar.
+    SCHEDULE_UNITS = { "servico" => :week, "implantacao" => :month }.freeze
+    SCHEDULE_NAMES = {
+      "servico" => "Cronograma do Serviço",
+      "implantacao" => "Cronograma de Implantação do Empreendimento"
+    }.freeze
+
+    def attach_schedule_mspdi_files!(schedules, args, description)
+      schedules.filter_map do |type, payload|
+        bytes = ScheduleMspdiExporter.new(
+          items: payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type),
+          name: "#{SCHEDULE_NAMES.fetch(type)} - #{args[:nome_cliente]}"
+        ).call
+        next if bytes.blank?
+
+        filename = @proposal.schedule_filename(type, municipio: args[:municipios], estado: args[:estado])
+        @proposal.generated_documents.attach(
+          io: StringIO.new(bytes), filename: filename, content_type: "application/xml",
+          metadata: { kind: "schedule_mspdi_#{type}", version: @proposal.version, description: description }
+        )
+        filename
+      rescue ScheduleMspdiExporter::JavaHelperError => e
+        Rails.logger.error("attach_schedule_mspdi_files! falhou pra tipo #{type} na proposal #{@proposal.id}: #{e.message}")
+        nil
+      end
+    end
+
+    def schedule_message(schedule_filenames, schedule_types_missing_date)
+      parts = []
+      parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}), " \
+        "pronto pra abrir no MS Project (Arquivo > Abrir)." if schedule_filenames.present?
+      if schedule_types_missing_date.present?
+        nomes = schedule_types_missing_date.map { |type| SCHEDULE_NAMES.fetch(type) }.join(" e ")
+        parts << " Aviso: sugeri um #{nomes}, mas falta a data de início na Tela de Precificação — " \
+          "peça ao consultor pra preencher lá pra ele entrar no documento e no arquivo do MS Project."
+      end
+      parts.join
+    end
+
+    # Garante uma primeira tentativa de sugestão de cronograma (Proposal#build_with_ai_suggested_
+    # schedule!) mesmo quando Conversation#ensure_proposal! não é quem cria a proposta agora —
+    # ex.: a proposta já existia (segunda geração da conversa), ou a primeira tentativa (na
+    # criação) falhou ou veio vazia porque faltava informação que só chegou depois (TR, um
+    # complementar, o acervo histórico). Idempotente: só tenta quando ainda não há NENHUM item —
+    # não reescreve um cronograma que o consultor já ajustou na Tela de Precificação.
+    def ensure_schedule_suggested!
+      pricing = @proposal.project_pricing
+      return unless pricing
+      return if pricing.schedule_items.exists?
+
+      @proposal.build_with_ai_suggested_schedule!
+    end
+
+    # Tipos que têm algum item de cronograma mas ainda não têm data de início (ScheduleTableBuilder/
+    # ProposalDocxFiller já deixam esse tipo de fora do documento em silêncio — aqui é onde o
+    # consultor fica sabendo por quê, em vez de só notar a ausência mais tarde).
+    def missing_schedule_dates
+      pricing = @proposal.project_pricing
+      return [] unless pricing
+
+      ScheduleItem::SCHEDULE_TYPES.select do |type|
+        pricing.schedule_items.any? { |item| item.schedule_type == type } && schedule_start_date(pricing, type).blank?
+      end
+    end
+
+    def schedule_start_date(pricing, type)
+      type == "servico" ? pricing.schedule_papyrus_start_date : pricing.schedule_empreendimento_start_date
     end
 end

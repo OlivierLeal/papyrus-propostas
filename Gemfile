@@ -66,6 +66,12 @@ gem "rails-i18n"
 # Renderiza o markdown que a IA devolve (negrito, listas, títulos) como HTML no chat. [https://github.com/vmg/redcarpet]
 gem "redcarpet"
 
+# Só usada pro JAR do MPXJ (vem embutido na gem) — exportação do cronograma em MSPDI (XML do
+# MS Project), via um helper Java próprio (lib/java/), ver CLAUDE.md seção 8. A gem em si só lê
+# arquivos (MPXJ::Reader); grava-se com o próprio JAR direto. Requer JRE no ambiente (dev e
+# produção) — `java -version` precisa funcionar.
+gem "mpxj", require: false
+
 group :development, :test do
   # Loads environment variables from .env into ENV [https://github.com/bkeepers/dotenv]
   gem "dotenv-rails"

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Compila os helpers Java em lib/java/*.java para lib/java/build/*.class (versionado — produção
+# só precisa de JRE, não de JDK, ver CLAUDE.md seção 8). Rodar de novo sempre que
+# lib/java/ScheduleToMspdi.java mudar.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+MPXJ_JARS=$(bundle show mpxj)/lib/mpxj
+BUILD_DIR=lib/java/build
+
+mkdir -p "$BUILD_DIR"
+javac -cp "${MPXJ_JARS}/*" -d "$BUILD_DIR" lib/java/*.java
+echo "Compilado em ${BUILD_DIR}"

@@ -211,6 +211,24 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal [ "01", "Ajuste de escopo", "18/08/2026" ], cell_texts(data_rows[0])
   end
 
+  test "fill removes the Papyrus logo from the header of page 1 only, keeping it from page 2 on" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    doc = parsed_document(bytes)
+    sect_pr = doc.at_xpath("//w:body/w:sectPr", NS)
+
+    assert sect_pr.at_xpath("w:titlePg", NS), "sectPr precisa de <w:titlePg/> pra página 1 usar um header diferente"
+    first_header_rel = sect_pr.at_xpath('w:headerReference[@w:type="first"]', NS)
+    default_header_rel = sect_pr.at_xpath('w:headerReference[@w:type="default"]', NS)
+    assert first_header_rel, "sectPr precisa de headerReference w:type=\"first\""
+    refute_equal first_header_rel["r:id"], default_header_rel["r:id"], "o header da página 1 tem que ser um arquivo diferente do das demais páginas"
+
+    first_header_xml = zip_entry_content(bytes, "word/header2.xml")
+    default_header_xml = zip_entry_content(bytes, "word/header1.xml")
+
+    refute_match(/<w:drawing>/, first_header_xml, "header da página 1 não pode ter a logo")
+    assert_match(/<w:drawing>/, default_header_xml, "header das demais páginas continua com a logo")
+  end
+
   test "fill_split produces two documents that only share the front matter" do
     result = @filler.fill_split(placeholders: @placeholders, tables: @tables)
 

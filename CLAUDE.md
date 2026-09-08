@@ -236,6 +236,19 @@ confirmado visualmente que a legenda do Quadro 6-1 agora sai visivelmente menor 
 Quadro 8-1/11-1), e que a frase do Quadro 8-1 na seção 8 (EQUIPE TÉCNICA) voltou a sair no mesmo
 tamanho das frases ao redor.
 
+**Logo fora do cabeçalho só na página 1 (2026-09):** pedido do consultor — a página 1 (capa, fundo
+azul-escuro com a logo grande centralizada no corpo) também carregava a logo pequena do cabeçalho
+corrido (`word/header1.xml`, a mesma que aparece em toda página a partir da 2ª). Mecanismo OOXML
+padrão do Word pra "primeira página diferente": `<w:titlePg/>` no `<w:sectPr>` do documento, mais
+um `<w:headerReference w:type="first">` apontando pra um header PRÓPRIO da primeira página — sem
+isso, a página 1 herda o mesmo `type="default"` de todas as outras. Criado `word/header2.xml` (só
+usado no `type="first"`) como cópia de `header1.xml` sem o `<w:r>` da logo (`<w:drawing>`), sem
+relacionamento de imagem próprio (não precisa, não tem imagem nenhuma) — registrado em
+`word/_rels/document.xml.rels` (`rId19`) e `[Content_Types].xml`. Igual toda edição de modelo:
+substituição de string crua, nunca `Nokogiri#to_xml`; `<w:sectPr>` continua único (1→1), só ganhou
+os dois atributos novos. Teste em `proposal_docx_filler_test.rb` trava que `header2.xml` (página 1)
+não tem `<w:drawing>` e `header1.xml` (demais páginas) continua tendo.
+
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
 1 = produtos, 2 = equipe, 3 = desembolso) e têm que ser remapeados se alguma tabela for
@@ -369,12 +382,64 @@ independentes:
 - **`GenerateProposalDocumentTool#build_schedules`** lê `project_pricing.schedule_items` +
   `schedule_*_start_date` direto do banco (igual equipe/desembolso, nunca um parâmetro que a IA
   preenche a cada geração) e passa pra `ProposalDocxFiller#fill`/`fill_split` como `schedules:`.
-  Um tipo com itens mas sem data (ou vice-versa) fica de fora silenciosamente — a página só existe
-  quando os dois estão presentes. Sai igual em qualquer status da proposta (draft/priced/
-  approved), sempre na parte técnica — não é dado de preço.
+  Um tipo com itens mas sem data fica de fora do `.docx` (a página só existe quando os dois estão
+  presentes) — mas deixou de ser silencioso pro consultor, ver "Sugestão automática" abaixo.
+  Sai igual em qualquer status da proposta (draft/priced/approved), sempre na parte técnica — não
+  é dado de preço.
 - **Bloco de assinatura em negrito** no fim do documento (Papyrus + cliente, CNPJ) já existia no
   modelo e já saía em negrito antes desta funcionalidade — confirmado ao vivo que continua intacto
   depois da página paisagem nova, sem precisar de nenhuma mudança própria.
+
+**Sugestão automática na hora de gerar + acervo histórico como referência (2026-09):** antes,
+`build_with_ai_suggested_schedule!` só rodava UMA VEZ, na criação da proposta
+(`Conversation#ensure_proposal!`) — se falhasse ou viesse vazia (faltava informação naquele
+momento; TR/complementar chegou depois), a proposta ficava sem cronograma pra sempre, sem
+ninguém saber por quê. `GenerateProposalDocumentTool#ensure_schedule_suggested!` agora tenta de
+novo TODA vez que o consultor pede pra gerar o documento, mas só quando ainda não existe NENHUM
+item — idempotente, nunca reescreve por cima do que o consultor já ajustou na Tela de
+Precificação. `fetch_ai_schedule_suggestion` também passou a registrar `SearchHistoricalArchiveTool`
+quando há acervo indexado (`HistoricalProposalChunk.embedded.exists?`), mesmo padrão do
+`ProcessLegalNormsJob` (`conversation.with_tool(...)` direto, antes de `ask_internally` — dali em
+diante `Conversation#ask_internally` já registra sozinho) — a IA pode consultar como a Papyrus
+estruturou o cronograma em projetos parecidos antes de sugerir fases/durações, sempre como
+referência, nunca fonte de datas (a data de início continua sempre digitada pelo consultor).
+**Continua sem bloquear a geração do documento** — quando existe item de cronograma mas falta a
+data de início, `GenerateProposalDocumentTool` gera o resto normalmente e devolve um aviso na
+mensagem de retorno, pra IA repassar ao consultor no chat (`missing_schedule_dates`/
+`schedule_message`) — nunca uma pergunta livre da IA, sempre o mesmo aviso determinístico.
+
+**Exportação em MSPDI pro MS Project (2026-09):** todo cronograma presente também sai como um
+arquivo `.xml` à parte, no formato **MSPDI** (o XML de intercâmbio do MS Project — Arquivo > Abrir
+importa como projeto completo: fases, atividades, datas, marcos). **Não é o binário `.mpp` de
+verdade** — gravar esse formato não é viável em nenhuma linguagem fora de produtos pagos .NET/Java
+(a Microsoft nunca documentou escrita, só engenharia reversa parcial pra leitura); MSPDI é o
+caminho padrão de qualquer integração séria.
+- **`app/services/schedule_mspdi_exporter.rb`** monta o payload (fase = tarefa-resumo, atividades
+  = tarefas-filhas, 1 nível só, mesmo agrupamento por `phase_name` consecutivo do
+  `ScheduleTableBuilder`) e delega a montagem do `org.mpxj.ProjectFile`/gravação pra um helper Java
+  próprio — **`lib/java/ScheduleToMspdi.java`**, compilado por `bin/build_java_helpers` e
+  **versionado já compilado** (`lib/java/build/ScheduleToMspdi.class`, mesmo princípio do `.docx`
+  do modelo: binário íntegro no repo) — produção só precisa de JRE (`java`), nunca de JDK/`javac`.
+  Reaproveita os `.jar` que a gem `mpxj` (Jon Iles, o próprio autor/mantenedor da biblioteca MPXJ)
+  já vendoriza — essa gem em si só tem API de LEITURA em Ruby (`MPXJ::Reader`), escrita usa os
+  mesmos `.jar` chamados direto via `java -cp`.
+- Datas em dias corridos (sem calendário de dias úteis) — mesma convenção do
+  `ScheduleTableBuilder`, nenhuma conta de dia útil entra em lugar nenhum do cronograma. A fase
+  (tarefa-resumo) tem `start`/`finish` calculados no Ruby a partir do min/max das atividades —
+  MPXJ não faz rollup sozinho aqui, o Java só recebe datas já prontas.
+- `GenerateProposalDocumentTool#attach_schedule_mspdi_files!` roda DEPOIS do(s) `attach!` do
+  `.docx` (pra `generated_documents.first` continuar sendo o `.docx` — testes e a própria Tela de
+  Precificação assumem essa ordem), um arquivo por tipo presente, nomeado a partir de
+  `Proposal#schedule_filename` (mesma base do nome da proposta técnica + sufixo
+  `_Cronograma_Servico`/`_Cronograma_Implantacao` + `.xml`). Falha do helper Java (ex.: JRE
+  ausente no servidor) não derruba a geração do `.docx` — só fica sem o arquivo extra, logado.
+  Aparece sozinho na lista de "Documentos gerados" da Tela de Precificação (`generated_documents`
+  é genérico, qualquer content-type).
+- Verificado com round-trip de verdade (não só "o XML parece certo"): gera o MSPDI e relê com o
+  próprio `MPXJ::Reader` da gem, conferindo hierarquia/datas/marcos batendo — mesma disciplina de
+  testar via LibreOffice pro `.docx`, aqui o "abridor de referência" é a própria MPXJ.
+- **CI** (`.github/workflows/ci.yml`, jobs `test`/`system-test`) ganhou `default-jre-headless` no
+  `apt-get install` — só JRE, o `.class` já vem pronto do repo.
 
 ---
 

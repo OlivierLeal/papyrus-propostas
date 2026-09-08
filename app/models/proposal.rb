@@ -42,6 +42,16 @@ class Proposal < ApplicationRecord
     "#{base}.docx"
   end
 
+  # Nome do arquivo MSPDI (cronograma pro MS Project, ver ScheduleMspdiExporter/CLAUDE.md seção
+  # 8) — mesma base do nome da proposta TÉCNICA (o cronograma nunca é dado de preço, sai igual em
+  # qualquer status), só com sufixo do tipo e extensão .xml em vez de .docx.
+  SCHEDULE_FILENAME_LABELS = { "servico" => "Cronograma_Servico", "implantacao" => "Cronograma_Implantacao" }.freeze
+
+  def schedule_filename(type, municipio: nil, estado: nil)
+    base = docx_filename("tecnica", municipio: municipio, estado: estado).sub(/\.docx\z/, "")
+    "#{base}_#{SCHEDULE_FILENAME_LABELS.fetch(type)}.xml"
+  end
+
   # Nome/qualificação da Equipe Técnica no DOCX vêm de dados reais do sistema (proposal_
   # professionals + professionals.registration), nunca da IA — ela não deve inventar nome ou
   # registro profissional de alguém. "Líder do projeto" = quem tem mais horas de escritório
@@ -242,7 +252,13 @@ class Proposal < ApplicationRecord
       TEXT
     end
 
+    # Mesmo padrão do ProcessLegalNormsJob: registra a ferramenta ANTES de ask_internally (é essa
+    # chamada que efetivamente a usa pela primeira vez — dali em diante Conversation#ask_internally
+    # já registra sozinho, sempre que detectar histórico de uso de tool). Só quando há acervo
+    # indexado, mesmo motivo de RespondToMessageJob: ferramenta que sempre volta vazia vira algo
+    # que a IA acha que tentou.
     def fetch_ai_schedule_suggestion
+      conversation.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
       conversation.ask_internally(schedule_suggestion_prompt, hide_response: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
       AiJsonResponse.parse(response.content) || {}
@@ -252,7 +268,9 @@ class Proposal < ApplicationRecord
       <<~TEXT
         Com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, documentos
         complementares e propostas anteriores semelhantes, se houver), sugira o cronograma desta
-        proposta.
+        proposta. Se a ferramenta search_historical_archive estiver disponível, use-a pra ver como
+        a Papyrus estruturou o cronograma em projetos anteriores parecidos (mesmo tipo de estudo,
+        mesmo tipo de empreendimento) — é referência de fases/duração típicas, não fonte de datas.
 
         Existem DOIS tipos de cronograma, independentes:
 

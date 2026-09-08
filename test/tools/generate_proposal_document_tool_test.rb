@@ -20,6 +20,22 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       produtos: [ "EIA - Estudo de Impacto Ambiental", "RIMA - Relatório de Impacto Ambiental" ],
       descricao_revisao: "Ajuste de escopo conforme pedido do consultor"
     }
+
+    # A ferramenta agora tenta sugerir cronograma sozinha quando a proposta ainda não tem nenhum
+    # item (GenerateProposalDocumentTool#ensure_schedule_suggested!, CLAUDE.md seção 8) — sem
+    # isso, todo teste que chama tool.execute numa proposta sem schedule_items faria uma chamada
+    # de IA de verdade. Mesma técnica de AiStubHelper#stub_ai_complete, só que instalada pro
+    # arquivo inteiro (setup/teardown) em vez de por teste, já que a maioria não se importa com o
+    # que a sugestão de cronograma devolve — quem se importa (schedule tests) já cria os itens
+    # antes de chamar execute, o que faz ensure_schedule_suggested! nem tentar.
+    @original_complete_method = Conversation.instance_method(:complete)
+    Conversation.define_method(:complete) do
+      messages.create!(role: "assistant", content: '{"cronograma_servico": [], "cronograma_implantacao": []}')
+    end
+  end
+
+  teardown do
+    Conversation.define_method(:complete, @original_complete_method)
   end
 
   test "generates only the technical docx when the proposal is still a draft (pricing not approved yet)" do
@@ -575,5 +591,34 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     xml = document_xml(@proposal.generated_documents.first)
     assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
     assert_includes xml, "Quadro 9-2: Cronograma de Implantação do Empreendimento."
+  end
+
+  test "also attaches an MSPDI (.xml) file per schedule type present, alongside the docx" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1), schedule_empreendimento_start_date: Date.new(2026, 9, 1))
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    pricing.schedule_items.create!(schedule_type: "implantacao", phase_name: "Construção", activity_name: "Obras civis",
+      start_period: 1, duration_periods: 6, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert result["success"]
+    assert_equal 3, @proposal.generated_documents.count # docx + 2 cronogramas
+    schedule_docs = @proposal.generated_documents.select { |d| d.blob.metadata["kind"].to_s.start_with?("schedule_mspdi_") }
+    assert_equal %w[schedule_mspdi_servico schedule_mspdi_implantacao].sort, schedule_docs.map { |d| d.blob.metadata["kind"] }.sort
+    schedule_docs.each { |d| assert_equal "application/xml", d.content_type }
+    assert_equal schedule_docs.map { |d| d.filename.to_s }.sort, (result["filenames"] - [ result["filenames"].first ]).sort
+    assert_match(/formato MS Project/, result["message"])
+  end
+
+  test "does not attach any MSPDI file, or mention MS Project, when there is no schedule at all" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_equal 1, @proposal.generated_documents.count
+    refute_match(/MS Project/, result["message"])
   end
 end

@@ -98,7 +98,10 @@ jobs:
 
     steps:
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips
+        # default-jre-headless: só pra rodar o helper Java do cronograma em MSPDI (ScheduleMspdiExporter,
+        # CLAUDE.md seção 8) — o .class já vem compilado no repo (lib/java/build/), então JRE basta,
+        # não precisa de JDK/javac aqui.
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips default-jre-headless
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -137,7 +140,10 @@ jobs:
 
     steps:
       - name: Install packages
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips
+        # default-jre-headless: só pra rodar o helper Java do cronograma em MSPDI (ScheduleMspdiExporter,
+        # CLAUDE.md seção 8) — o .class já vem compilado no repo (lib/java/build/), então JRE basta,
+        # não precisa de JDK/javac aqui.
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips default-jre-headless
 
       - name: Checkout code
         uses: actions/checkout@v6
