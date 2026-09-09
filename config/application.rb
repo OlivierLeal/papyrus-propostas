@@ -21,7 +21,14 @@ module PapyrusPropostas
     # These settings can be overridden in specific environments using the files
     # in config/environments, which are processed later.
     #
-    # config.time_zone = "Central Time (US & Canada)"
+    # Sem isso, Time.zone fica em UTC (default do Rails) — mas `created_at`/`updated_at` das
+    # mensagens (e qualquer outro timestamp mostrado na tela) ficam com hora ADIANTADA 3h da
+    # hora real do consultor (Brasil inteiro é UTC-3, sem horário de verão desde 2019 — "Brasilia"
+    # é o nome amigável do Rails pra essa zona, TZInfo "America/Sao_Paulo"). Como
+    # `time_zone_aware_attributes` já vem `true` por padrão (Rails 7+), só setar isso aqui já
+    # corrige a exibição em qualquer view que usa `created_at` direto (ex.: `conversations/
+    # _message.html.erb`), sem precisar converter timestamp por timestamp na view.
+    config.time_zone = "Brasilia"
     # config.eager_load_paths << Rails.root.join("extras")
 
     # Internationalization
