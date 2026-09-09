@@ -58,6 +58,48 @@ class Rag::SimilarJobFinderTest < ActiveSupport::TestCase
     assert_equal "aproveitável em parte", parcial.first.confidence_label
   end
 
+  # Achado ao vivo (2026-09): com o acervo maior, um assunto pode ter VÁRIOS precedentes reais
+  # (BESS tinha 4 jobs) — nenhum sozinho domina a cabeça do ranking, mas juntos são sinal de
+  # verdade. Ver Rag::SimilarJobFinder#clustered_match?.
+  test "vários jobs sem dominar a cabeça sozinhos, mas cada um com força boa, produzem sugestão (precedente múltiplo)" do
+    hits = [
+      hit("26098", "Newave", 0.60, "4. ESCOPO"), hit("26098", "Newave", 0.58, "3. OBJETIVOS"),
+      hit("26095", "COBRA", 0.55, "4. ESCOPO"), hit("26095", "COBRA", 0.52, "3. OBJETIVOS"),
+      hit("26089", "PAE", 0.50, "4. ESCOPO"), hit("26089", "PAE", 0.48, "3. OBJETIVOS"),
+      hit("26063", "RioEnergy", 0.45, "4. ESCOPO"), hit("26063", "RioEnergy", 0.42, "3. OBJETIVOS")
+    ]
+
+    # limit: 4 pra provar que os QUATRO passam no filtro — MAX_JOBS (3) já trunca a exibição
+    # normal, o que este teste quer verificar é o filtro em si, não o corte de exibição.
+    matches = find(hits, limit: 4)
+
+    assert_equal %w[26098 26095 26089 26063], matches.map(&:job_number)
+    assert matches.all? { |m| m.strength >= 0 }, "cada job do cluster precisa ter força própria boa, não só domínio combinado"
+  end
+
+  # Mesmo domínio combinado do cluster de cima, mas com força ruim em todos — é o caso
+  # "consultoria ambiental vaga" (frase genérica de domínio, sem dizer nada específico):
+  # domínio combinado não basta sozinho, cada job precisa de força própria boa.
+  test "vários jobs com domínio combinado mas força ruim continuam sem sugestão" do
+    hits = [
+      hit("A", "Cliente A", 0.28, "1. SEÇÃO"), hit("A", "Cliente A", 0.27, "2. SEÇÃO"),
+      hit("B", "Cliente B", 0.26, "1. SEÇÃO"), hit("B", "Cliente B", 0.25, "2. SEÇÃO"),
+      hit("C", "Cliente C", 0.24, "1. SEÇÃO"), hit("C", "Cliente C", 0.23, "2. SEÇÃO")
+    ]
+
+    assert_empty find(hits), "domínio combinado não basta sem força própria boa em pelo menos dois jobs"
+  end
+
+  test "um job só com força boa, sem outro no cluster, não basta (precisa de pelo menos dois jobs)" do
+    hits = [
+      hit("A", "Cliente A", 0.60, "1. SEÇÃO"), hit("A", "Cliente A", 0.58, "2. SEÇÃO"),
+      hit("B", "Cliente B", 0.32, "1. SEÇÃO"),
+      hit("C", "Cliente C", 0.31, "1. SEÇÃO")
+    ]
+
+    assert_empty find(hits)
+  end
+
   test "contexto vazio não chega a consultar o acervo" do
     retriever = SpyRetriever.new([])
 

@@ -748,6 +748,37 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
        direta" ou "aproveitável em parte", porque a faixa útil inteira cabe entre 0,68 e 0,75 e
        o número comunicava uma precisão inexistente.
 
+       **Segunda calibragem — precedente MÚLTIPLO (2026-09, achado ao vivo).** O acervo cresceu
+       de ~400 pra ~3.000 documentos, e passou a existir mais de um job parecido pra assunto que
+       antes tinha só um (BESS: 4 propostas reais no acervo, `26098`/`26095`/`26089`/`26063`).
+       `MIN_DOMINANCE` pressupõe UM job só ocupando a cabeça do ranking — com 4 jobs dividindo a
+       cabeça, nenhum sozinho passava de ~0,3, e "projetos semelhantes" saía vazio numa proposta
+       de BESS de verdade, com força positiva (+0,06 a +0,11) sentada bem ali. Medido de novo com
+       o descritor REAL de conversas (não frase solta — o formato da consulta importa) contra o
+       acervo atual:
+       ```
+       consulta (formato real)              domínio(top3)  força do 1º   deve achar?
+       conversa 34 (BESS Newave)                  0,7          +0,06     sim — 4 jobs de BESS
+       "bolo de fubá" (formato descritor)         0,4          -0,02     não
+       "migração de PostgreSQL" (formato descr.)  0,4          -0,11     não
+       "consultoria ambiental" vaga (descritor)   0,7          -0,08     não
+       ```
+       O que separa o positivo dos três negativos não é o domínio combinado (todos entre 0,4 e
+       0,7) — é ter pelo menos DOIS jobs distintos com força PRÓPRIA boa (>= piso do acervo, não
+       só "não catastrófica"). `Rag::SimilarJobFinder#clustered_match?` — novo caminho somado ao
+       estrito de sempre (que continua intacto): job entra sem dominar sozinho a cabeça se tiver
+       força própria >= 0 (`CLUSTER_MIN_STRENGTH`) E não estiver isolado (pelo menos
+       `CLUSTER_MIN_JOBS` = 2 jobs com dominância >= `CLUSTER_MIN_DOMINANCE` = 0,2). O teste
+       "cabeça espalhada entre muitos jobs não produz sugestão nenhuma" (já existia) continua
+       batendo — cada job isolado ali nem chega em 0,2 de dominância.
+
+       **Achado junto, não corrigido ainda:** a mesma consulta vaga "consultoria ambiental" ainda
+       encontra um job pelo caminho ESTRITO (não o novo) — `MIN_STRENGTH = -0.20` também ficou
+       datado com o acervo maior, mas não tenho hoje um caso positivo real o bastante perto desse
+       limite pra reapertar sem risco de cortar um precedente bom de verdade junto. Fica registrado
+       pra próxima calibragem, quando aparecer mais um caso real (positivo perto do limite, ou um
+       falso positivo pego em produção).
+
        Ainda **não implementado**: ranquear também por facetas determinísticas (mesmo órgão,
        mesmo enquadramento, mesma tecnologia) extraídas dos jobs do acervo, e mostrar esses
        motivos no lugar do rótulo. Depende de uma passada de classificação sobre o acervo

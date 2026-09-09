@@ -42,7 +42,7 @@ module Rag
 
     # Os cortes abaixo foram medidos contra oito consultas de resposta conhecida — quatro que
     # DEVEM achar um job específico e quatro que não devem achar nada. Nenhum dos dois sinais
-    # separa sozinho; juntos, separam os oito casos:
+    # separa sozinho; juntos, separam os oito casos (medição original, acervo menor):
     #
     #   consulta                    domínio  força    deve achar?
     #   bolo de fubá                   0,3   -0,05    não
@@ -58,6 +58,45 @@ module Rag
     # são empíricos, não têm significado fora dessas medições.
     MIN_DOMINANCE = 0.5
     MIN_STRENGTH = -0.20
+
+    # SEGUNDA CALIBRAGEM (2026-09, achado ao vivo): o acervo cresceu (de ~400 pra ~3.000
+    # documentos) e passou a ter MAIS DE UM job parecido pra assuntos que antes tinham só um —
+    # ex.: BESS, que hoje tem 4 propostas reais no acervo (26098, 26095, 26089, 26063). Isso é
+    # bom (mais precedente), mas quebra a premissa original de MIN_DOMINANCE: com 4 jobs
+    # dividindo a cabeça do ranking, nenhum sozinho passa de ~0,3 — o filtro estrito rejeitava os
+    # 4, e "projetos semelhantes" saía vazio numa proposta de BESS de verdade, com precedente
+    # real e bom (força positiva: +0,06 a +0,11) sentado bem ali.
+    #
+    # Medido de novo, agora com o descritor REAL de conversas de verdade (não frase solta — o
+    # formato importa: uma consulta de uma palavra só distorce o sinal) contra o acervo atual:
+    #
+    #   consulta (formato real)              domínio(top3)  força do 1º   deve achar?
+    #   conversa 34 (BESS Newave)                  0,7          +0,06     sim — 4 jobs de BESS
+    #   "bolo de fubá" (formato descritor)         0,4          -0,02     não
+    #   "migração de PostgreSQL" (formato descr.)  0,4          -0,11     não
+    #   "consultoria ambiental" vaga (descritor)   0,7          -0,08     não — mesma força negativa de sempre
+    #
+    # O que separa o caso de BESS dos três negativos não é o domínio combinado (os quatro ficam
+    # entre 0,4 e 0,7, não dá pra cortar aí) — é ter PELO MENOS DOIS jobs distintos com força
+    # POSITIVA (igual ou acima do piso do acervo) cada. Nos três negativos, mesmo o job mais forte
+    # de cada um fica com força negativa; no BESS, quatro jobs diferentes passam de 0.
+    #
+    # Novo caminho (`clustered?`), somado ao caminho estrito de sempre (que continua intacto —
+    # "seminários"/"quilombola" seguem passando por ele, um job só dominando a cabeça): um job
+    # entra mesmo sem dominar sozinho a cabeça se ELE MESMO tiver força boa (>= 0, não só acima do
+    # piso mínimo de sempre) E não estiver sozinho — pelo menos outro job também com uma fatia
+    # razoável da cabeça e força boa. Não é "dois jobs bastam" — é "job fraco isolado não conta",
+    # exatamente o teste que já existia ("cabeça espalhada entre muitos jobs não produz sugestão
+    # nenhuma") continua batendo, porque cada job sozinho ali nem chega em CLUSTER_MIN_DOMINANCE.
+    #
+    # Nota de honestidade: só tenho UM caso confirmado de "deveria achar" com dado real desta
+    # rodada (BESS/conversa 34) — os outros três exemplos "positivos" da tabela original (25051/
+    # 25010/25015) não foram re-testados porque não tenho mais o texto exato das consultas
+    # usadas. Vale revisar este corte de novo assim que aparecer outro caso real de precedente
+    # múltiplo ou um falso positivo pego em produção.
+    CLUSTER_MIN_DOMINANCE = 0.2
+    CLUSTER_MIN_JOBS = 2
+    CLUSTER_MIN_STRENGTH = 0.0
 
     # Acima disto o job é referência direta: manda em quase toda a cabeça do ranking E está
     # praticamente no nível do acervo médio. Abaixo, é ponto de partida parcial, e a mensagem
@@ -106,10 +145,30 @@ module Rag
     def group(hits, floor)
       head = hits.first(HEAD_CHUNKS).map { |hit| job_key(hit) }
 
-      hits.group_by { |hit| job_key(hit) }
+      candidates = hits.group_by { |hit| job_key(hit) }
         .filter_map { |key, group| build_match(group, floor, head.count(key) / HEAD_CHUNKS.to_f) }
-        .select { |match| match.dominance >= MIN_DOMINANCE && match.strength >= MIN_STRENGTH }
+
+      # Pelo menos CLUSTER_MIN_JOBS jobs DISTINTOS precisam ter uma fatia razoável da cabeça pra
+      # "vários precedentes parecidos" contar como sinal — um job isolado com dominância baixa
+      # continua sendo coincidência de parágrafo (mesmo caso de sempre), não sinal de acervo.
+      clustered = candidates.count { |match| match.dominance >= CLUSTER_MIN_DOMINANCE } >= CLUSTER_MIN_JOBS
+
+      candidates
+        .select { |match| strict_match?(match) || (clustered && clustered_match?(match)) }
         .sort_by { |match| [ -match.dominance, -match.strength ] }
+    end
+
+    def strict_match?(match)
+      match.dominance >= MIN_DOMINANCE && match.strength >= MIN_STRENGTH
+    end
+
+    # Sem dominar sozinho a cabeça do ranking, mas fazendo parte de um grupo de jobs no mesmo
+    # assunto — só entra se a força PRÓPRIA deste job já for boa (>= piso do acervo), não só
+    # "não catastrófica" (MIN_STRENGTH, o corte do caminho estrito) — é o que distingue "vários
+    # precedentes de verdade" (BESS: força +0,03 a +0,11) de "vários jobs aleatórios com o mesmo
+    # blá-blá genérico" (consultoria ambiental vaga: força -0,08 a -0,14 mesmo no melhor deles).
+    def clustered_match?(match)
+      match.dominance >= CLUSTER_MIN_DOMINANCE && match.strength >= CLUSTER_MIN_STRENGTH
     end
 
     # Um job pode ter mais de uma proposta (revisões, propostas por frente de serviço), então a
