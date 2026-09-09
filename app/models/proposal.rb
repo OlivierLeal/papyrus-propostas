@@ -22,11 +22,11 @@ class Proposal < ApplicationRecord
     "#{DOCX_NUMERO_PREFIXES.fetch(kind, "PTC")}#{created_at.strftime("%y")}#{id.to_s.rjust(3, "0")}"
   end
 
-  # Nome de arquivo no padrão real da Papyrus (passo a passo interno, item 1 — exemplo deles:
-  # PTC21089_Rural e CIA Eng e Geotec_IF_Prado_BA_Rev.00.docx): número + cliente + escopo (tipo de
-  # estudo + município/UF, quando a IA já os identificou) + revisão atual. municipio/estado vêm de
-  # fora (só existem como texto solto que a IA extraiu na hora de gerar — ver
-  # GenerateProposalDocumentTool) porque hoje não são persistidos em nenhuma coluna própria.
+  # Nome de arquivo no padrão pedido pelo consultor (2026-09): número / cliente / ato de
+  # licenciamento (LP, LI, RLP, LO, ASV, AMF etc.) / nome do projeto / revisão. Município/UF
+  # SAÍRAM do nome de propósito — não fazem parte deste padrão. "Ato" e "nome do projeto" vêm dos
+  # achados `tipo_licenca`/`empreendimento` já extraídos do ET/TR (ver ProjectFinding) — não são
+  # parâmetro novo nenhum, só passaram a alimentar o nome do arquivo também.
   # "Rev.00", "Rev 1", "rev.02" — qualquer forma de revisão que o consultor tenha escrito à mão
   # no nome que ele ditou. Se ele escreveu uma, é a dele que vale.
   REVISION_MARKER = /rev\.?\s*\d+/i
@@ -35,8 +35,8 @@ class Proposal < ApplicationRecord
   # técnica de comercial na convenção da Papyrus.
   NUMBER_PREFIX = /\A(PTC|PT|PC)\d/i
 
-  def docx_filename(kind, municipio: nil, estado: nil)
-    base = docx_filename_override.presence ? custom_filename_base(kind) : standard_filename_base(kind, municipio, estado)
+  def docx_filename(kind)
+    base = docx_filename_override.presence ? custom_filename_base(kind) : standard_filename_base(kind)
     base += "_Rev.#{format("%02d", version - 1)}" unless base.match?(REVISION_MARKER)
 
     "#{base}.docx"
@@ -47,8 +47,8 @@ class Proposal < ApplicationRecord
   # qualquer status), só com sufixo do tipo e extensão .xml em vez de .docx.
   SCHEDULE_FILENAME_LABELS = { "servico" => "Cronograma_Servico", "implantacao" => "Cronograma_Implantacao" }.freeze
 
-  def schedule_filename(type, municipio: nil, estado: nil)
-    base = docx_filename("tecnica", municipio: municipio, estado: estado).sub(/\.docx\z/, "")
+  def schedule_filename(type)
+    base = docx_filename("tecnica").sub(/\.docx\z/, "")
     "#{base}_#{SCHEDULE_FILENAME_LABELS.fetch(type)}.xml"
   end
 
@@ -170,12 +170,54 @@ class Proposal < ApplicationRecord
   end
 
   private
-    def standard_filename_base(kind, municipio, estado)
-      cliente = sanitize_for_filename(conversation.client_name)
-      escopo = [ conversation.study_type&.name, sanitize_for_filename(municipio), estado.presence&.upcase ]
-        .compact_blank.join("_")
+    def standard_filename_base(kind)
+      partes = [ conversation.client_name, ato_licenciamento, nome_projeto ]
+        .map { |texto| sanitize_for_filename(texto) }.compact_blank
 
-      "#{docx_numero_proposta(kind)}_#{cliente}#{"_#{escopo}" if escopo.present?}"
+      "#{docx_numero_proposta(kind)}_#{partes.join('_')}"
+    end
+
+    # Sigla mais curta que o "achado" tipo_licenca costuma trazer é geralmente já a sigla mesma
+    # (ex.: "(LP)", "LP+LI") — mas nem sempre: às vezes a IA escreve por extenso ("Licença Prévia
+    # e Licença de Instalação", achado real). Extrai as siglas que já estiverem no texto; se não
+    # achar nenhuma, tenta casar contra os nomes completos mais comuns. Junta tudo achado em TODOS
+    # os achados ativos (podem vir em registros separados, um por ato) com "+", sem repetir —
+    # mesma convenção "LP+LI" já usada de verdade pela Papyrus.
+    LICENSE_ACT_ACRONYM_PATTERN = /\b([A-Z]{2,4})\b/
+    LICENSE_ACT_NAMES = {
+      "licença prévia" => "LP", "licença de instalação" => "LI", "licença de operação" => "LO",
+      "renovação da licença de operação" => "RLO", "renovação da licença prévia" => "RLP",
+      "licença unificada" => "LU", "licença de alteração" => "LA", "licença de regularização" => "LR",
+      "autorização de supressão de vegetação" => "ASV", "autorização de manejo florestal" => "AMF",
+      "dispensa de licença ambiental" => "DLA", "autorização ambiental" => "AA"
+    }.freeze
+
+    def ato_licenciamento
+      siglas = conversation.project_findings.active.where(field: "tipo_licenca").pluck(:value)
+        .flat_map { |texto| license_acronyms_in(texto) }.uniq
+      siglas.presence&.join("+")
+    end
+
+    def license_acronyms_in(texto)
+      diretas = texto.scan(LICENSE_ACT_ACRONYM_PATTERN).flatten
+      return diretas if diretas.any?
+
+      texto_normalizado = texto.downcase
+      LICENSE_ACT_NAMES.select { |nome, _sigla| texto_normalizado.include?(nome) }.values
+    end
+
+    # "Nome do projeto" (achado `empreendimento`, ex.: "BESS São Desidério") — sem sigla pra
+    # normalizar, então quando só existe a frase técnica inteira (a descrição completa do
+    # empreendimento, comum vir só do ET) e nenhuma versão curta, omite o segmento em vez de
+    # truncar no meio de uma palavra — nome de arquivo incompleto mas limpo é melhor que completo
+    # e cortado feio; o consultor sempre pode ditar o nome exato no chat (docx_filename_override).
+    NOME_PROJETO_LIMIT = 40
+
+    def nome_projeto
+      valor = conversation.project_findings.active.where(field: "empreendimento")
+        .min_by { |finding| [ finding.value.length, ProjectFinding::SOURCE_KINDS.keys.index(finding.source_kind) || 99 ] }
+        &.value
+      valor if valor.present? && valor.length <= NOME_PROJETO_LIMIT
     end
 
     # O consultor ditou o nome; o sistema só cuida do que distingue os DOIS arquivos quando a

@@ -166,7 +166,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa. O cronograma
     # (seção 9, sempre técnica) sai igual em qualquer status — não é dado de preço.
     if @proposal.status == "draft"
-      technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
+      technical_filename = @proposal.docx_filename("tecnica")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
@@ -179,8 +179,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
           "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
     elsif @proposal.document_split == "separated"
-      technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
-      commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
+      technical_filename = @proposal.docx_filename("tecnica")
+      commercial_filename = @proposal.docx_filename("comercial")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") },
@@ -194,7 +194,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
           "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
     else
-      combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
+      combined_filename = @proposal.docx_filename("combined")
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
       failed_schedule_types = []
@@ -430,7 +430,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         ).call
         next if bytes.blank?
 
-        filename = @proposal.schedule_filename(type, municipio: args[:municipios], estado: args[:estado])
+        filename = @proposal.schedule_filename(type)
         @proposal.generated_documents.attach(
           io: StringIO.new(bytes), filename: filename, content_type: "application/xml",
           metadata: { kind: "schedule_mspdi_#{type}", version: @proposal.version, description: description }

@@ -25,20 +25,27 @@
 // fase; fase em si tem parent_id null. Datas em dias corridos (sem calendário de dias úteis),
 // mesma convenção do ScheduleTableBuilder — nenhuma conta de dia útil entra aqui.
 //
-// Duration tem que ser TimeUnit.ELAPSED_DAYS, nunca TimeUnit.DAYS (achado ao vivo, 2026-09):
-// toda tarefa nasce auto-agendada (Manual=0, é o padrão de project.addTask()/parent.addTask()) —
-// o MS Project recalcula Start+Duration pelo CALENDÁRIO da tarefa assim que abre o arquivo, e
-// TimeUnit.DAYS é dia ÚTIL (o calendário "Standard" de addDefaultBaseCalendar() é seg-sex). Com
-// Start/Finish calculados aqui em dias CORRIDOS mas Duration gravada em dias úteis, o Finish que
-// o Project mostra diverge do que foi calculado (reproduzido: 73 dias de desvio num cronograma de
-// 6 meses) — o arquivo "abre certo" e parece bom no MPXJ::Reader (que só relê os bytes, sem rodar
-// esse recálculo), mas fica torto de verdade dentro do Project. ELAPSED_DAYS ignora o calendário
-// — Start + Duration bate com o Finish em qualquer dia da semana, com ou sem recálculo.
+// TaskMode.MANUALLY_SCHEDULED em TODA tarefa (achado ao vivo, 2026-09, com o .xml real de uma
+// proposta aberto no MS Project de verdade — não só MPXJ::Reader): mesmo com Start/Finish
+// corretos e distintos por tarefa gravados no arquivo (conferido lendo o XML gerado, cada uma com
+// sua própria data), o MS Project mostrava TODAS as tarefas começando no mesmo dia — o início do
+// projeto. Causa: toda tarefa nasce AUTO_SCHEDULED (padrão de project.addTask()/parent.addTask())
+// e sem predecessora nenhuma (este cronograma não tem dependência entre atividades, só posição no
+// tempo) — o motor de CPM do Project, ao abrir/recalcular, agenda tarefa auto sem predecessora
+// como "o quanto antes" a partir do início do projeto, ignorando o <Start> literal do arquivo.
+// MANUALLY_SCHEDULED desliga esse recálculo: o Project usa exatamente o Start/Finish do arquivo,
+// sem tentar re-agendar nada — é literalmente pra isso que existe (plano já pronto, não uma
+// dependência pro Project inferir). Resolve de vez também o problema de calendário de
+// dias úteis × dias corridos que motivou o ELAPSED_DAYS de uma correção anterior: tarefa manual
+// não deriva Finish de Start+Duration, então a distinção deixou de importar pra correção — Duration
+// volta a ser TimeUnit.DAYS puro (mesmo número de dias corridos de sempre, só que sem o rótulo
+// "elapsed" que o Project mostra em português como "Xdiasd", em vez do "X dias" limpo).
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.mpxj.Duration;
 import org.mpxj.ProjectFile;
 import org.mpxj.Task;
+import org.mpxj.TaskMode;
 import org.mpxj.TimeUnit;
 import org.mpxj.mspdi.MSPDIWriter;
 
@@ -78,6 +85,7 @@ public class ScheduleToMspdi {
 
       Task task = (parent == null) ? project.addTask() : parent.addTask();
       task.setName(node.path("name").asText());
+      task.setTaskMode(TaskMode.MANUALLY_SCHEDULED);
 
       LocalDateTime start = parseDate(node.path("start_date").asText());
       boolean milestone = node.path("milestone").asBoolean(false);
@@ -87,7 +95,7 @@ public class ScheduleToMspdi {
       int durationDays = milestone ? 0 : node.path("duration_days").asInt();
       task.setStart(start);
       task.setFinish(start.plusDays(durationDays));
-      task.setDuration(Duration.getInstance(durationDays, TimeUnit.ELAPSED_DAYS));
+      task.setDuration(Duration.getInstance(durationDays, TimeUnit.DAYS));
       task.setMilestone(milestone);
 
       tasksById.put(id, task);

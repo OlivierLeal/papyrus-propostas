@@ -359,20 +359,83 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "PTC#{year}007", proposal.docx_numero_proposta("combined")
   end
 
-  test "docx_filename follows the real Papyrus naming pattern with an escopo segment (tipo de estudo + município/UF)" do
+  # Padrão pedido pelo consultor (2026-09): número / cliente / ato de licenciamento (LP, LI, RLP,
+  # LO, ASV, AMF etc.) / nome do projeto / revisão — município/UF saíram do nome de propósito.
+  # Ato e nome do projeto vêm dos achados tipo_licenca/empreendimento (ProjectFinding), já
+  # extraídos do ET/TR pra outros fins.
+  test "docx_filename follows the padrão pedido: número / cliente / ato / nome do projeto / revisão" do
     proposal = proposals(:priced_proposal)
     proposal.update!(version: 1)
+    proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "LP", source_kind: "et")
+    proposal.conversation.project_findings.create!(field: "empreendimento", value: "Parque Eólico Serra Verde", source_kind: "et")
 
-    expected = "#{proposal.docx_numero_proposta('tecnica')}_#{proposal.conversation.client_name}_RAP_Vitória da Conquista_BA_Rev.00.docx"
-    assert_equal expected, proposal.docx_filename("tecnica", municipio: "Vitória da Conquista", estado: "ba")
+    expected = "#{proposal.docx_numero_proposta('tecnica')}_#{proposal.conversation.client_name}_LP_Parque Eólico Serra Verde_Rev.00.docx"
+    assert_equal expected, proposal.docx_filename("tecnica")
   end
 
-  test "docx_filename falls back to just the tipo de estudo when município/UF aren't known yet" do
+  test "docx_filename falls back to just número/cliente when ato/nome do projeto aren't known yet" do
     proposal = proposals(:priced_proposal)
     proposal.update!(version: 1)
 
-    expected = "#{proposal.docx_numero_proposta('combined')}_#{proposal.conversation.client_name}_RAP_Rev.00.docx"
+    expected = "#{proposal.docx_numero_proposta('combined')}_#{proposal.conversation.client_name}_Rev.00.docx"
     assert_equal expected, proposal.docx_filename("combined")
+  end
+
+  test "docx_filename picks the SHORTEST active finding for nome do projeto, not the most authoritative source" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    conversation = proposal.conversation
+    # "et" vence "complementar" na ordem de autoridade (ProjectFinding::SOURCE_KINDS), mas pro
+    # nome do arquivo a versão curta é que serve — mesmo vindo de fonte "menos autoritativa".
+    conversation.project_findings.create!(field: "empreendimento", source_kind: "et",
+      value: "Sistema de armazenamento de energia em baterias (BESS) com potência de 40,32 MW individual")
+    conversation.project_findings.create!(field: "empreendimento", source_kind: "complementar", value: "BESS São Desidério")
+
+    assert_includes proposal.docx_filename("combined"), "_BESS São Desidério_Rev."
+  end
+
+  test "docx_filename omits nome do projeto instead of truncating it, when only a long finding is available" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    proposal.conversation.project_findings.create!(field: "empreendimento", source_kind: "et",
+      value: "Sistema de armazenamento de energia em baterias (BESS) com 604,8 MW de potência total")
+
+    filename = proposal.docx_filename("combined")
+
+    assert_not_includes filename, "Sistema"
+    assert_equal "#{proposal.docx_numero_proposta('combined')}_#{proposal.conversation.client_name}_Rev.00.docx", filename
+  end
+
+  # Achado ao vivo (2026-09, proposta 21/conversa 35): a IA às vezes escreve o ato por extenso
+  # ("Licença Prévia e Licença de Instalação") em vez da sigla — o nome do arquivo saía enorme e
+  # sem sentido pra convenção da Papyrus. Normaliza pro nome completo mais comum quando não há
+  # sigla nenhuma já escrita no achado.
+  test "ato_licenciamento normalizes a full license name into its acronym when no sigla is present" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    proposal.conversation.project_findings.create!(field: "tipo_licenca", source_kind: "et",
+      value: "Licença Prévia e Licença de Instalação")
+
+    assert_includes proposal.docx_filename("combined"), "_LP+LI_Rev."
+  end
+
+  test "ato_licenciamento uses the acronym already written in the achado, without normalizing" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    proposal.conversation.project_findings.create!(field: "tipo_licenca", source_kind: "et", value: "Licença Prévia (LP)")
+
+    assert_includes proposal.docx_filename("combined"), "_LP_Rev."
+  end
+
+  test "ato_licenciamento combines acronyms from more than one achado (one act per finding) with +, without repeating" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    conversation = proposal.conversation
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "et", value: "Licença Prévia (LP)")
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "tr", value: "Licença de Instalação (LI)")
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "consultor", value: "LP")
+
+    assert_includes proposal.docx_filename("combined"), "_LP+LI_Rev."
   end
 
   # O consultor dita o nome no chat quando a pasta na rede e o controle de propostas já existem
@@ -415,15 +478,15 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "PTC26002_PMM-LU_Rev.00.docx", proposal.docx_filename("combined")
   end
 
-  test "docx_filename sanitizes filesystem-unsafe characters from client name and município" do
+  test "docx_filename sanitizes filesystem-unsafe characters from client name and nome do projeto" do
     proposal = proposals(:priced_proposal)
     proposal.update!(version: 1)
     proposal.conversation.update!(client_name: "Cliente/Teste: \"Especial\"")
+    proposal.conversation.project_findings.create!(field: "empreendimento", value: "Projeto/Teste", source_kind: "et")
 
-    filename = proposal.docx_filename("combined", municipio: "Município/Teste", estado: "ba")
+    filename = proposal.docx_filename("combined")
 
     assert_includes filename, "Cliente-Teste- -Especial-"
-    assert_includes filename, "Município-Teste"
-    assert_includes filename, "_BA_"
+    assert_includes filename, "Projeto-Teste"
   end
 end

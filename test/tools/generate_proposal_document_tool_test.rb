@@ -45,10 +45,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     result = JSON.parse(tool.execute(**@args))
 
     assert result["success"]
-    assert_equal [ @proposal.docx_filename("tecnica", municipio: @args[:municipios], estado: @args[:estado]) ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("tecnica") ], result["filenames"]
     assert_equal 1, @proposal.generated_documents.count
     document = @proposal.generated_documents.first
-    assert_equal @proposal.docx_filename("tecnica", municipio: @args[:municipios], estado: @args[:estado]), document.filename.to_s
+    assert_equal @proposal.docx_filename("tecnica"), document.filename.to_s
     assert_equal "tecnica", document.blob.metadata["kind"]
 
     xml = document_xml(document)
@@ -66,7 +66,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert result["success"]
     assert_equal 2, result["version"]
-    assert_equal [ @proposal.docx_filename("combined", municipio: @args[:municipios], estado: @args[:estado]) ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("combined") ], result["filenames"]
     assert_equal 2, @proposal.generated_documents.count
   end
 
@@ -79,7 +79,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert result["success"]
     assert_equal 1, result["version"]
     assert_equal 1, @proposal.generated_documents.count
-    assert_equal @proposal.docx_filename("combined", municipio: @args[:municipios], estado: @args[:estado]), @proposal.generated_documents.first.filename.to_s
+    assert_equal @proposal.docx_filename("combined"), @proposal.generated_documents.first.filename.to_s
     assert_equal "combined", @proposal.generated_documents.first.blob.metadata["kind"]
   end
 
@@ -169,13 +169,32 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_not_includes commercial_texts, "TÉCNICA"
   end
 
-  test "the generated filename includes the escopo segment (tipo de estudo + município/UF vindos dos args da IA)" do
+  test "the generated filename includes the ato de licenciamento and o nome do projeto (achados tipo_licenca/empreendimento)" do
     @proposal.update!(document_split: "combined")
+    @proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "LP", source_kind: "et")
+    @proposal.conversation.project_findings.create!(field: "empreendimento", value: "Parque Eólico Serra Verde", source_kind: "et")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     result = JSON.parse(tool.execute(**@args))
 
-    assert_includes result["filenames"].first, "_RAP_Vitória da Conquista_BA_Rev."
+    assert_includes result["filenames"].first, "_LP_Parque Eólico Serra Verde_Rev."
+  end
+
+  test "picks the SHORTEST active finding for tipo_licenca/empreendimento, not the most authoritative source" do
+    @proposal.update!(document_split: "combined")
+    conversation = @proposal.conversation
+    # "et" vence "complementar" na ordem de autoridade (ProjectFinding::SOURCE_KINDS) — mas pro
+    # nome do arquivo, a versão curta que serve de nome de projeto tem que ganhar, mesmo vindo de
+    # uma fonte "menos autoritativa" (achado real: era assim que um empreendimento aparecia numa
+    # conversa de verdade — a versão curta só no complementar, a frase inteira no ET).
+    conversation.project_findings.create!(field: "empreendimento", source_kind: "et",
+      value: "Sistema de armazenamento de energia em baterias (BESS) com potência de 40,32 MW individual")
+    conversation.project_findings.create!(field: "empreendimento", source_kind: "complementar", value: "BESS São Desidério")
+    tool = GenerateProposalDocumentTool.new(conversation: conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_includes result["filenames"].first, "_BESS São Desidério_Rev."
   end
 
   test "the proposal number uses the right prefix per variant: PTC combined, PT/PC when separated" do
@@ -384,7 +403,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     result = JSON.parse(tool.execute(**@args))
 
-    assert_equal [ @proposal.docx_filename("combined", municipio: @args[:municipios], estado: @args[:estado]) ],
+    assert_equal [ @proposal.docx_filename("combined") ],
                  result["filenames"]
     assert_nil @proposal.reload.docx_filename_override
   end

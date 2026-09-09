@@ -164,14 +164,33 @@ Processo em duas etapas, com responsabilidades separadas (princípio mantido):
 
 O layout visual (fontes, cores, margens, logotipos, tabelas) vem pronto do modelo `.docx` da Papyrus — o código só substitui conteúdo, nunca redesenha layout. Isso garante consistência visual entre propostas independente do conteúdo gerado.
 
-**Nome do arquivo:** por padrão o sistema monta o nome no padrão real da Papyrus (número da
-proposta + cliente + escopo + `_Rev.NN`, ver `Proposal#docx_filename`). Se o consultor DITAR o nome
-no chat ("o arquivo tem que se chamar PTC26002_PMM_LU_Simões Filho_BA") — o que acontece quando a
-pasta na rede e o controle de propostas já foram criados com aquele nome (itens 1 e 2 do passo a
-passo interno) — a IA passa `nome_arquivo` para a ferramenta e o nome fica gravado em
-`proposals.docx_filename_override`, valendo também para as versões seguintes. O sistema só
-acrescenta `_Rev.NN` (se ele já não tiver escrito uma) e troca o prefixo PTC/PT/PC quando a
-proposta sai em dois arquivos. "padrão" no chat devolve a nomeação ao sistema.
+**Nome do arquivo:** por padrão o sistema monta `número / cliente / ato de licenciamento / nome do
+projeto / _Rev.NN` (`Proposal#docx_filename`/`#standard_filename_base` — padrão pedido pelo
+consultor, 2026-09; município/UF SAÍRAM do nome de propósito, não fazem mais parte do padrão).
+"Ato" (LP, LI, RLP, LO, ASV, AMF etc.) e "nome do projeto" vêm dos achados `tipo_licenca`/
+`empreendimento` já extraídos do ET/TR (`ProjectFinding`) — não são parâmetro novo, só passaram a
+alimentar o nome do arquivo também:
+- `ato_licenciamento` extrai as siglas já escritas no(s) achado(s) (`\b[A-Z]{2,4}\b`); sem
+  nenhuma sigla no texto, tenta casar contra os nomes completos mais comuns (mapa fixo em
+  `Proposal::LICENSE_ACT_NAMES` — cobre os atos mais comuns, não é exaustivo). Combina siglas de
+  TODOS os achados `tipo_licenca` ativos desta conversa (podem vir em registros separados, um ato
+  por achado) com `+`, sem repetir — mesma convenção `"LP+LI"` já usada de verdade pela Papyrus.
+  Achado ao vivo (conversa 35/proposta 21): a IA às vezes escreve o ato por extenso ("Licença
+  Prévia e Licença de Instalação") em vez da sigla — sem a normalização, o nome do arquivo saía
+  enorme.
+- `nome_projeto` pega o achado `empreendimento` mais curto entre os ativos (não o de fonte mais
+  autoritativa — `ProjectFinding::SOURCE_KINDS` decide o FATO certo, aqui o objetivo é achar o
+  texto mais limpo pra nome de arquivo; a versão curta às vezes vem de um complementar, a frase
+  técnica inteira do ET). Quando só existe a frase longa (comum, sem versão curta disponível), o
+  segmento é OMITIDO em vez de truncado no meio de uma palavra — nome incompleto mas limpo é
+  melhor que completo e cortado feio.
+- Se o consultor DITAR o nome no chat ("o arquivo tem que se chamar PTC26002_PMM_LU_Simões Filho")
+  — o que acontece quando a pasta na rede e o controle de propostas já foram criados com aquele
+  nome (itens 1 e 2 do passo a passo interno) — a IA passa `nome_arquivo` para a ferramenta e o
+  nome fica gravado em `proposals.docx_filename_override`, valendo também para as versões
+  seguintes, e nada do que foi descrito acima entra em jogo. O sistema só acrescenta `_Rev.NN`
+  (se ele já não tiver escrito uma) e troca o prefixo PTC/PT/PC quando a proposta sai em dois
+  arquivos. "padrão" no chat devolve a nomeação ao sistema.
 
 **Revisão do modelo (2026-08, a partir do PTC26002_PMM_Rev01 trazido pela Papyrus):** a seção 10
 deixou de ter o quadro de preço aberto por profissional/entregável — o valor que o cliente lê é o

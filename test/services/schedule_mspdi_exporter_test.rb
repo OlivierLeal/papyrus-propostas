@@ -42,21 +42,27 @@ class ScheduleMspdiExporterTest < ActiveSupport::TestCase
     assert_equal Date.new(2026, 10, 29), campo.finish.to_date # 3 semanas de duração
   end
 
-  # Regressão do achado ao vivo (2026-09): a Duration da tarefa tinha que ser gravada em
-  # TimeUnit.ELAPSED_DAYS (dias corridos), não TimeUnit.DAYS (dias ÚTEIS) — com DAYS, o MS
-  # Project recalcula Start+Duration pelo calendário Standard (seg-sex) assim que abre o
-  # arquivo, e o Finish sai bem depois do que foi planejado (73 dias de desvio observados num
-  # cronograma de 6 meses). MPXJ::Reader#duration devolve a duração em SEGUNDOS a partir do
-  # valor literal gravado no XML: 21 dias corridos tem que valer exatamente 21*86400s — se
-  # alguém trocar ELAPSED_DAYS de volta por DAYS, esse número cai pra ~56h (dias úteis * 8h),
-  # bem menor, e este teste pega a regressão sem precisar simular o recálculo do Project.
-  test "grava a duração em dias corridos (elapsed), não em dias úteis, pro Project não recalcular a data" do
-    items = [ item(phase: "Diagnóstico", activity: "Campo", start: 2, duration: 3) ]
+  # Regressão do achado ao vivo (2026-09, com o .xml real de uma proposta aberto no MS Project de
+  # verdade — não só MPXJ::Reader): mesmo com Start/Finish corretos e distintos por tarefa no
+  # arquivo, o Project mostrava TODAS as tarefas começando no mesmo dia. Causa: toda tarefa nasce
+  # AUTO_SCHEDULED e sem predecessora nenhuma (este cronograma não tem dependência entre
+  # atividades, só posição no tempo) — o motor de CPM do Project agenda tarefa auto sem
+  # predecessora "o quanto antes" a partir do início do projeto, ignorando o <Start> literal do
+  # arquivo. TaskMode.MANUALLY_SCHEDULED desliga esse recálculo. `task_mode` só é exposto pelo
+  # MPXJ::Reader como string — é só isso que dá pra travar aqui (o recálculo em si só um MS
+  # Project de verdade faz; não tem como reproduzir isso no teste automatizado, mesmo motivo de
+  # sempre — ver comentário do arquivo).
+  test "toda tarefa é MANUALLY_SCHEDULED, pro Project não re-agendar tudo pro início do projeto" do
+    items = [
+      item(phase: "Mobilização", activity: "Assinatura do Contrato", start: 1, duration: 1, milestone: true),
+      item(phase: "Diagnóstico", activity: "Campo", start: 2, duration: 3)
+    ]
 
-    bytes = ScheduleMspdiExporter.new(items: items, start_date: Date.new(2026, 10, 1), unit: :week, name: "Elapsed").call
-    campo = read_back(bytes).find { |t| t.name == "Campo" }
+    bytes = ScheduleMspdiExporter.new(items: items, start_date: Date.new(2026, 10, 1), unit: :week, name: "Manual").call
+    tasks = read_back(bytes)
 
-    assert_equal 21 * 86_400.0, campo.duration # 3 semanas = 21 dias corridos, em segundos
+    assert tasks.any?, "esperava tarefas no arquivo"
+    tasks.each { |task| assert_equal "MANUALLY_SCHEDULED", task.task_mode, "#{task.name} não é manually scheduled" }
   end
 
   test "uses calendar months instead of weeks when unit is :month" do
