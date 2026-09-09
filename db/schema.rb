@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_02_135137) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_09_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -176,6 +176,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_135137) do
     t.index ["origin"], name: "index_historical_proposals_on_origin"
     t.index ["role", "superseded"], name: "index_historical_proposals_on_role_and_superseded"
     t.index ["source_sha256"], name: "index_historical_proposals_on_source_sha256", unique: true
+  end
+
+  create_table "ibge_municipalities", force: :cascade do |t|
+    t.string "code_ibge", null: false
+    t.datetime "created_at", null: false
+    t.geography "geom", limit: {:srid=>4326, :type=>"multi_polygon", :geographic=>true}, null: false
+    t.string "name", null: false
+    t.string "uf", limit: 2, null: false
+    t.datetime "updated_at", null: false
+    t.index ["code_ibge"], name: "index_ibge_municipalities_on_code_ibge", unique: true
+    t.index ["geom"], name: "index_ibge_municipalities_on_geom", using: :gist
   end
 
   create_table "knowledge_notes", force: :cascade do |t|

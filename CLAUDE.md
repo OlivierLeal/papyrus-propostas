@@ -496,6 +496,42 @@ existentes continuam com a versão antiga até serem recriadas — não há como
 conversa já em andamento a não ser editando a mensagem na mão (feito manualmente na conversa 32
 pra verificação).
 
+**Terceira causa-raiz da MESMA família, agora entre DOIS PROCESSOS, não um só (2026-09, achado
+em produção: conversa 35/proposta 21 — "não saiu o cronograma").** As duas correções acima
+eliminaram toda reentrância DENTRO do mesmo processo (mesma chamada de Ruby reentrando
+`Conversation#complete`). Mas `RespondToMessageJob#perform` chama `conversation.complete` **sem
+nenhuma trava** — e `SuggestScheduleJob`, que `ensure_schedule_suggested!` enfileira de DENTRO da
+tool call de `generate_proposal_document` (ou seja, depois que RubyLLM já gravou a mensagem de
+`tool_use` dessa chamada, mas ANTES do `tool_result` dela ser gravado — isso só acontece quando a
+ferramenta TERMINA de executar), pode ser pego por outro worker do Solid Queue **nesse
+intervalo**, um processo totalmente diferente do que está rodando o turno principal. A chamada de
+dentro do job (via `ask_internally`, que já usa `with_ai_lock`) lia o histórico da conversa nesse
+estado — último bloco era um `tool_use` sem `tool_result` correspondente — e o Bedrock rejeitava:
+`messages.N: 'tool_use' ids were found without 'tool_result' blocks immediately after`. Mesmo
+sintoma de sempre (RubyLLM destruía a mensagem que estava criando, cronograma ficava com 0 itens
+pra sempre), causa nova: não é MAIS reentrância de processo, é corrida ENTRE processos pela mesma
+conversa, e nada do que já tinha sido corrigido protegia contra isso — `with_ai_lock` sempre
+serializou `ask_internally` contra `ask_internally`, nunca contra um `#complete` cru chamado de
+fora dele.
+
+**Correção**: `Conversation#complete_with_lock` (`with_ai_lock { complete }`) — `RespondToMessageJob`
+troca `conversation.complete` por isso. Como nada dentro do turno principal chama `ask_internally`
+de forma síncrona (foi exatamente essa a eliminação das duas correções anteriores), colocar o
+turno inteiro dentro do mesmo `pg_advisory_xact_lock` é seguro: não reentra a trava no mesmo
+processo (mesma sessão do Postgres, reentrante por natureza), só faz um job de OUTRO processo
+(`SuggestScheduleJob`, ou qualquer `ask_internally` futuro) esperar o commit da transação deste
+turno antes de ler o histórico — mesmo princípio de sempre (`with_ai_lock`), só que finalmente
+aplicado nos DOIS lados que escrevem na mesma conversa, não só num. `GeneralChat` não precisou do
+mesmo tratamento: nenhum job hoje chama `ask_internally` numa `GeneralChat` em paralelo com
+`RespondToGeneralChatMessageJob` (vale reavaliar se isso mudar).
+
+Testado com o mesmo método dos outros testes de `with_ai_lock`
+(`test/models/conversation_ai_lock_test.rb`, threads com conexão de banco real cada uma, não a
+transação compartilhada dos testes normais): confirmado que o teste FALHA de forma confiável (3/3
+rodadas) chamando `#complete` cru em vez de `#complete_with_lock`, e passa de forma confiável
+(3/3) com a correção — prova que o teste pega a regressão de verdade, não só documenta a
+intenção.
+
 **Exportação em MSPDI pro MS Project (2026-09):** todo cronograma presente também sai como um
 arquivo `.xml` à parte, no formato **MSPDI** (o XML de intercâmbio do MS Project — Arquivo > Abrir
 importa como projeto completo: fases, atividades, datas, marcos). **Não é o binário `.mpp` de
@@ -520,14 +556,40 @@ caminho padrão de qualquer integração séria.
   Precificação assumem essa ordem), um arquivo por tipo presente, nomeado a partir de
   `Proposal#schedule_filename` (mesma base do nome da proposta técnica + sufixo
   `_Cronograma_Servico`/`_Cronograma_Implantacao` + `.xml`). Falha do helper Java (ex.: JRE
-  ausente no servidor) não derruba a geração do `.docx` — só fica sem o arquivo extra, logado.
-  Aparece sozinho na lista de "Documentos gerados" da Tela de Precificação (`generated_documents`
-  é genérico, qualquer content-type).
+  ausente no servidor) não derruba a geração do `.docx` — só fica sem o arquivo extra, e agora
+  **avisa o consultor na própria mensagem de retorno** (`GenerateProposalDocumentTool#
+  schedule_message`, achado ao vivo: antes a falha só ia pro log do servidor, o consultor nunca
+  sabia que o `.xml` não tinha saído). Aparece sozinho na lista de "Documentos gerados" da Tela de
+  Precificação (`generated_documents` é genérico, qualquer content-type).
 - Verificado com round-trip de verdade (não só "o XML parece certo"): gera o MSPDI e relê com o
   próprio `MPXJ::Reader` da gem, conferindo hierarquia/datas/marcos batendo — mesma disciplina de
   testar via LibreOffice pro `.docx`, aqui o "abridor de referência" é a própria MPXJ.
 - **CI** (`.github/workflows/ci.yml`, jobs `test`/`system-test`) ganhou `default-jre-headless` no
   `apt-get install` — só JRE, o `.class` já vem pronto do repo.
+
+**Bug achado ao vivo, corrigido: `Duration` tinha que ser `TimeUnit.ELAPSED_DAYS`, não
+`TimeUnit.DAYS` (2026-09).** O arquivo abria certo no MPXJ (round-trip acima passava) mas as
+datas saíam TORTAS de verdade dentro do MS Project — "funciona mas é difícil de usar/confiar".
+Causa: toda tarefa nasce auto-agendada (`Manual=0`, padrão de `project.addTask()`), e o Project
+**recalcula** `Start + Duration` pelo calendário da tarefa assim que abre o arquivo — o calendário
+"Standard" que `project.addDefaultBaseCalendar()` cria é seg-sex, 8h/dia. `TimeUnit.DAYS` é dia
+**útil** nessa conta; `Start`/`Finish`, por outro lado, sempre foram calculados em dias
+**corridos** (convenção deliberada, ver acima) — as duas contas divergem sempre que a atividade
+atravessa um fim de semana, cada vez mais quanto mais fins de semana ela atravessar (medido:
+73 dias de desvio num cronograma de implantação de 6 meses). `MPXJ::Reader`, usado no teste
+automatizado, não pega isso: ele só relê os bytes já gravados, sem rodar esse recálculo de
+calendário — por isso o teste sempre passou apesar do bug. Corrigido trocando
+`TimeUnit.DAYS` por `TimeUnit.ELAPSED_DAYS` (`lib/java/ScheduleToMspdi.java`) — duração elapsed
+ignora calendário, `Start + Duration` bate com o `Finish` em qualquer dia da semana, com ou sem
+recálculo. Confirmado empiricamente (não só lido no código): a mesma entrada de 7 dias corridos
+gravava `PT56H0M0S` (56 horas ÚTEIS = 7×8h) antes da correção e passa a gravar `PT168H0M0S`
+(168 horas CORRIDAS = 7×24h) depois — `test/services/schedule_mspdi_exporter_test.rb` ganhou um
+teste que verifica `Task#duration` (segundos) exatamente por isso, porque é o jeito de pegar essa
+regressão sem precisar simular o motor de CPM do Project. Efeito colateral corrigido junto:
+marco (`milestone: true`) agora sai sempre com duração **zero** no MSPDI (convenção do MS
+Project), independente de `duration_periods` (que continua `>= 1`, é regra do Gantt do `.docx`,
+não desta exportação) — antes todo marco saía com 1 período de duração, e ficava deslocado depois
+do Project recalcular.
 
 ---
 
@@ -568,7 +630,43 @@ A Papyrus trouxe um estudo propondo uma arquitetura de "motor de composição de
 O que é valioso mas depende de pré-requisitos que ainda não existem, nesta ordem:
 
 1. ~~Motor de precificação determinístico (seção 5)~~ — **implementado**: `Proposal`/`ProjectPricing`/`ProposalProfessional`, com sugestão de equipe pela IA restrita ao menu de `study_templates` e Tela de Precificação editável.
-2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado.
+2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado — **parcial (2026-09): só a
+   camada `ibge_municipalities`**. Das 6 camadas de referência listadas na seção 3 (Mata
+   Atlântica, UCs, TIs, quilombos, bacias continuam de fora, mesmo status de antes), só município
+   foi construído:
+   - `db/migrate/..._create_ibge_municipalities.rb` + `app/models/ibge_municipality.rb` —
+     `code_ibge` (chave natural, 7 dígitos), `name`, `uf`, `geom` (`geography`, tipo
+     `multi_polygon`, SRID 4326 — mesmo tipo de `geospatial_results.geometry`, pra `ST_Intersects`
+     entre as duas colunas não precisar de cast). Índice GIST em `geom`.
+   - `script/geospatial/import_ibge_municipalities.rb` — popula a tabela a partir das APIs
+     públicas do próprio IBGE (uma por UF: malha em `/api/v3/malhas/estados/{cod}` + nomes em
+     `/api/v1/localidades/estados/{cod}/municipios`, já que a malha só traz o código `codarea`,
+     sem nome). `qualidade=minima` na malha — geometria generalizada, arquivo bem menor; não
+     precisa de precisão cartográfica fina pra "em qual município esse KMZ cai". Idempotente
+     (upsert por `code_ibge`), roda por UF pra um erro no meio não perder o que já baixou:
+     `bin/rails runner script/geospatial/import_ibge_municipalities.rb [--ufs SP,RJ,...]`.
+     **Ninguém rodou o import das 27 UFs em produção ainda** — só testado localmente com uma UF
+     pequena (SE, 75 municípios) pra validar o pipeline; falta rodar o import completo.
+   - `ProcessKmzJob#cross_reference_municipalities!` roda `IbgeMunicipality.intersecting(
+     geospatial_result.geometry)` (`ST_Intersects`, não `ST_Contains` — uma linha de transmissão
+     pode atravessar a fronteira entre dois municípios sem estar inteiramente contida em nenhum) e
+     grava em `geospatial_results.municipalities` (jsonb — coluna que já existia desde 16/07,
+     nunca escrita até agora) + um `ProjectFinding` novo (`field: "municipios"`,
+     `source_kind: "sistema"`) — **mesmo campo que `ProcessEtJob`/`ProcessTrJob` já usam** pro que
+     a IA lê do documento, o que faz o `ProjectFindings::ConflictDetector` comparar de graça o
+     que o ET/TR declara com o que a geometria do KMZ realmente mostra, sem nenhum código novo de
+     comparação. Nunca bloqueia o job (tabela vazia ou erro na query só deixa `municipalities`
+     como `[]`, igual antes).
+   - `GeospatialResult#summary_text`/`#municipalities_label` passam a incluir "· Município(s):
+     Nome/UF" quando presente — a Tela de Resultado (`conversations/show.html.erb`) não precisou
+     de nenhuma mudança própria, ela já reusa `summary_text` no card e no modal de zoom do mapa.
+   - **CI** (`.github/workflows/ci.yml`): o serviço `postgres` dos jobs `test`/`system-test`
+     trocou de `postgres` (sem PostGIS) pra `postgis/postgis:17-3.5` — sem isso a extensão
+     `postgis`/as migrations espaciais nunca eram validadas em CI. **Pendência conhecida, não
+     resolvida agora**: esse mesmo serviço também precisa da extensão `vector` (pgvector, seção
+     11.1 item 3) pro RAG, e a imagem `postgis/postgis` não traz pgvector — combinar as duas
+     extensões numa imagem de serviço do GitHub Actions exige uma imagem própria (build custom,
+     `services:` só aceita referência de imagem pronta) e ficou fora do escopo desta mudança.
 3. ~~**RAG com `pgvector`** (acervo histórico da Papyrus)~~ — **implementado** (fase 1):
    - Pipeline em `app/services/rag/` + entrypoints em `script/rag/`. O acervo é uma pasta por
      **job** (`25001_Petrobras_Cetaceos`), e dentro dela convivem papéis diferentes: a proposta

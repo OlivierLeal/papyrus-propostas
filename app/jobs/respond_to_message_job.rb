@@ -19,7 +19,10 @@ class RespondToMessageJob < ApplicationJob
     # motivo do acervo acima: ferramenta que sempre falha vira algo que a IA acha que tentou.
     conversation.with_tool(SearchLegalNormsTool.new) if Cal::Client.configured?
     conversation.with_tool(RememberForFutureProposalsTool.new(conversation: conversation))
-    conversation.complete
+    # #complete_with_lock, nunca #complete cru — serializa este turno contra qualquer
+    # #ask_internally concorrente na MESMA conversa (ex.: SuggestScheduleJob, enfileirado de
+    # dentro de uma tool call deste turno, ver Conversation#complete_with_lock).
+    conversation.complete_with_lock
 
     # Não só a última: RememberForFutureProposalsTool (e qualquer ferramenta que crie um card, ver
     # ProjectConflict) grava uma mensagem assistant PRÓPRIA para o card, separada da resposta em

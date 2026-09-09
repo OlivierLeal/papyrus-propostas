@@ -61,6 +61,27 @@ module ApplicationHelper
     FLASH_TYPES.fetch(type.to_s, FLASH_TYPES["info"])
   end
 
+  # O nome do arquivo sozinho não basta pra distinguir os documentos numa lista estreita
+  # (sidebar/card) — filename com `truncate` do Tailwind corta bem antes do que muda entre um
+  # .docx e o .xml do MS Project da MESMA versão (só o sufixo difere), e os dois às vezes saem com
+  # o mesmo badge de versão lado a lado, indistinguíveis (achado ao vivo: consultor via duas linhas
+  # "v3" idênticas na tela e não sabia qual era qual). `kind` já vem gravado no metadata do blob
+  # desde sempre — nos anexos enviados pelo consultor (`ConversationsController#attach_with_kind`,
+  # ET/TR/KMZ/complementar) e nos gerados pela IA (`GenerateProposalDocumentTool#attach!`/
+  # `#attach_schedule_mspdi_files!`) — só faltava alguém ler e mostrar. nil quando não há essa
+  # chave (não deveria acontecer pra nada que passa pelos dois caminhos acima, mas o badge
+  # simplesmente some em vez de mostrar algo errado).
+  DOCUMENT_KIND_LABELS = {
+    "et" => "ET", "tr" => "TR", "kmz" => "KMZ", "complementary" => "Complementar",
+    "tecnica" => "Técnica", "comercial" => "Comercial", "combined" => "Técnica + Comercial",
+    "schedule_mspdi_servico" => "MS Project · Serviço",
+    "schedule_mspdi_implantacao" => "MS Project · Implantação"
+  }.freeze
+
+  def document_kind_label(document)
+    DOCUMENT_KIND_LABELS[document.blob.metadata["kind"]]
+  end
+
   def render_sidebar_menu
     safe_join([
       sidebar_menu_link("Propostas", conversations_path, ICON_PROPOSTAS, active: request.path.start_with?("/conversations")),

@@ -294,6 +294,9 @@
                 <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
               </svg>
               <span class="truncate text-sm text-base-content"><%= document.filename %></span>
+              <% if (kind_label = document_kind_label(document)) %>
+                <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
+              <% end %>
             </div>
             <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
           </li>
@@ -314,7 +317,12 @@
                 <ul class="flex flex-col gap-2">
                   <% documents.each do |document| %>
                     <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
-                      <span class="truncate text-sm text-base-content"><%= document.filename %></span>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="truncate text-sm text-base-content"><%= document.filename %></span>
+                        <% if (kind_label = document_kind_label(document)) %>
+                          <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
+                        <% end %>
+                      </div>
                       <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
                     </li>
                   <% end %>

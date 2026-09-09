@@ -54,6 +54,9 @@
                   <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
                 </svg>
                 <span class="truncate text-sm text-base-content flex-1"><%= attachment.filename %></span>
+                <% if (kind_label = document_kind_label(attachment)) %>
+                  <span class="badge badge-ghost badge-xs shrink-0"><%= kind_label %></span>
+                <% end %>
                 <%= link_to rails_blob_path(attachment, disposition: "attachment"),
                       class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar" do %>
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
@@ -76,6 +79,9 @@
                     <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
                   </svg>
                   <span class="truncate text-sm text-base-content flex-1"><%= document.filename %></span>
+                  <% if (kind_label = document_kind_label(document)) %>
+                    <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
+                  <% end %>
                   <% if document.blob.metadata["version"] %>
                     <span class="badge badge-ghost badge-xs shrink-0">v<%= document.blob.metadata["version"] %></span>
                   <% end %>

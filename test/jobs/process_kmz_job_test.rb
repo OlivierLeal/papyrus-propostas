@@ -103,6 +103,35 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     assert result.area_image.attached? # croqui de linha (<polyline>), não trava a proposta
   end
 
+  test "cross-references the KMZ geometry with ibge_municipalities and records a 'municipios' finding" do
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    attach_kmz(VALID_KML)
+    municipio = create_municipio(code_ibge: "2913606", name: "Itabuna", uf: "BA", covering: [ -40.31, -14.86, -40.27, -14.82 ])
+
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
+
+    result = @conversation.reload.geospatial_result
+    assert_equal [ { "code_ibge" => "2913606", "name" => "Itabuna", "uf" => "BA" } ], result.municipalities
+
+    finding = @conversation.project_findings.find_by(field: "municipios")
+    assert finding.present?
+    assert_equal "Itabuna/BA", finding.value
+    assert_equal "sistema", finding.source_kind
+    assert_equal "fato", finding.nature
+  end
+
+  test "does not fail the job and leaves municipalities empty when nothing intersects (e.g. table not imported yet)" do
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    attach_kmz(VALID_KML)
+
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
+
+    @conversation.reload
+    assert_equal "done", @conversation.processing_step_status("kmz")
+    assert_equal [], @conversation.geospatial_result.municipalities
+    assert_nil @conversation.project_findings.find_by(field: "municipios")
+  end
+
   test "triggers GenerateSummaryJob once tr and comp_docs are already resolved" do
     @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
 
@@ -118,6 +147,15 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
         io: StringIO.new(kml_content), filename: "area.kml", content_type: "application/vnd.google-earth.kml+xml",
         metadata: { kind: "kmz" }
       )
+    end
+
+    def create_municipio(code_ibge:, name:, uf:, covering:)
+      factory = RGeo::Geographic.spherical_factory(srid: 4326)
+      lon0, lat0, lon1, lat1 = covering
+      ring = [ [ lon0, lat0 ], [ lon1, lat0 ], [ lon1, lat1 ], [ lon0, lat1 ], [ lon0, lat0 ] ]
+        .map { |lon, lat| factory.point(lon, lat) }
+      geom = factory.multi_polygon([ factory.polygon(factory.linear_ring(ring)) ])
+      IbgeMunicipality.create!(code_ibge: code_ibge, name: name, uf: uf, geom: geom)
     end
 
     # Sem isso, ProcessKmzJob chamaria a Mapbox de verdade em todo teste (MAPBOX_API_KEY já vem

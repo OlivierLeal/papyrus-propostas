@@ -30,12 +30,33 @@ class ScheduleMspdiExporterTest < ActiveSupport::TestCase
     assert_equal 2, assinatura.outline_level
     assert assinatura.milestone
     assert_equal Date.new(2026, 10, 1), assinatura.start.to_date
-    assert_equal Date.new(2026, 10, 8), assinatura.finish.to_date
+    # Marco sai com duração ZERO no MSPDI (convenção do MS Project), mesmo tendo
+    # duration_periods: 1 no ScheduleItem (regra do Gantt do .docx, não desta exportação) —
+    # sem isso, o próprio marco saía deslocado depois que o Project recalculava a tarefa.
+    assert_equal Date.new(2026, 10, 1), assinatura.finish.to_date
+    assert_equal 0.0, assinatura.duration
 
     campo = tasks.find { |t| t.name == "Campo" }
     assert_not campo.milestone
     assert_equal Date.new(2026, 10, 8), campo.start.to_date # semana 2 = start_date + 7 dias
     assert_equal Date.new(2026, 10, 29), campo.finish.to_date # 3 semanas de duração
+  end
+
+  # Regressão do achado ao vivo (2026-09): a Duration da tarefa tinha que ser gravada em
+  # TimeUnit.ELAPSED_DAYS (dias corridos), não TimeUnit.DAYS (dias ÚTEIS) — com DAYS, o MS
+  # Project recalcula Start+Duration pelo calendário Standard (seg-sex) assim que abre o
+  # arquivo, e o Finish sai bem depois do que foi planejado (73 dias de desvio observados num
+  # cronograma de 6 meses). MPXJ::Reader#duration devolve a duração em SEGUNDOS a partir do
+  # valor literal gravado no XML: 21 dias corridos tem que valer exatamente 21*86400s — se
+  # alguém trocar ELAPSED_DAYS de volta por DAYS, esse número cai pra ~56h (dias úteis * 8h),
+  # bem menor, e este teste pega a regressão sem precisar simular o recálculo do Project.
+  test "grava a duração em dias corridos (elapsed), não em dias úteis, pro Project não recalcular a data" do
+    items = [ item(phase: "Diagnóstico", activity: "Campo", start: 2, duration: 3) ]
+
+    bytes = ScheduleMspdiExporter.new(items: items, start_date: Date.new(2026, 10, 1), unit: :week, name: "Elapsed").call
+    campo = read_back(bytes).find { |t| t.name == "Campo" }
+
+    assert_equal 21 * 86_400.0, campo.duration # 3 semanas = 21 dias corridos, em segundos
   end
 
   test "uses calendar months instead of weeks when unit is :month" do

@@ -1,9 +1,10 @@
 class ProcessKmzJob < ApplicationJob
   queue_as :default
 
-  # Só geometria do próprio polígono (área/perímetro/centroide + croqui) — nenhuma camada de
-  # referência (municípios/biomas/UCs) é processada aqui, ver CLAUDE.md seção 11.1. Determinístico,
-  # sem chamada de IA.
+  # Geometria do próprio polígono (área/perímetro/centroide + croqui) + cruzamento com
+  # `ibge_municipalities` (única camada de referência construída até agora, ver CLAUDE.md
+  # seção 11.1 — as outras 5, Mata Atlântica/UCs/TIs/quilombos/bacias, continuam fora de escopo).
+  # Determinístico, sem chamada de IA.
   def perform(conversation_id)
     conversation = Conversation.find(conversation_id)
     attachment = conversation.attachment_of_kind("kmz")
@@ -18,6 +19,7 @@ class ProcessKmzJob < ApplicationJob
     )
     attach_area_image!(geospatial_result, result)
     record_findings!(conversation, attachment, result)
+    cross_reference_municipalities!(conversation, attachment, geospatial_result)
 
     conversation.mark_step!("kmz", "done")
   rescue StandardError => e
@@ -42,6 +44,32 @@ class ProcessKmzJob < ApplicationJob
           excerpt: "Medido pelo sistema a partir da geometria do KMZ (#{attachment.filename})."
         )
       end
+    end
+
+    # Cruza a geometria do KMZ com a malha de municípios do IBGE (ST_Intersects, não
+    # ST_Contains — uma linha de transmissão pode atravessar a fronteira entre dois municípios
+    # sem estar inteiramente CONTIDA em nenhum dos dois). Nunca bloqueia o job: tabela vazia
+    # (import ainda não rodou) ou erro na query só deixa `municipalities` como veio por padrão
+    # ([], ver migration) — mesma filosofia não-bloqueante do resto do pipeline geoespacial.
+    def cross_reference_municipalities!(conversation, attachment, geospatial_result)
+      municipios = IbgeMunicipality.intersecting(geospatial_result.geometry).to_a
+      return if municipios.empty?
+
+      geospatial_result.update!(
+        municipalities: municipios.map { |m| { code_ibge: m.code_ibge, name: m.name, uf: m.uf } }
+      )
+
+      # Mesmo campo "municipios" que ProcessEtJob/ProcessTrJob já usam pro que a IA lê do
+      # documento — é isso que deixa o ProjectFindings::ConflictDetector comparar de graça o que
+      # o cliente/consultor declarou com o que a geometria do KMZ realmente mostra, sem nenhum
+      # código novo de comparação.
+      conversation.project_findings.create!(
+        field: "municipios", value: municipios.map { |m| "#{m.name}/#{m.uf}" }.join(", "),
+        nature: "fato", source_kind: "sistema", source_blob: attachment.blob,
+        excerpt: "Identificado pelo sistema cruzando a geometria do KMZ com a malha municipal do IBGE."
+      )
+    rescue StandardError => e
+      Rails.logger.error("cross_reference_municipalities! falhou para conversation #{conversation.id}: #{e.class} #{e.message}")
     end
 
     # Mapa real (satélite + geometria, via Mapbox) quando disponível; croqui SVG local como

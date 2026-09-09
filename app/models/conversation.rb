@@ -420,6 +420,29 @@ class Conversation < ApplicationRecord
     end
   end
 
+  # RespondToMessageJob usa isto no lugar de #complete cru — mesmo pg_advisory_xact_lock que
+  # #ask_internally já usa por baixo (ver with_ai_lock), então os dois lados se esperam.
+  #
+  # Achado ao vivo (conversa 35/proposta 21, 2026-09): GenerateProposalDocumentTool roda DENTRO
+  # desta chamada — ela grava a mensagem de tool_use, executa a ferramenta (que enfileira
+  # SuggestScheduleJob) e só DEPOIS grava o tool_result correspondente. SuggestScheduleJob
+  # (background de propósito, ver CLAUDE.md seção 8) pode ser pego por outro worker do Solid
+  # Queue nesse intervalo — antes de #complete (chamado sem lock) ter tido a chance de gravar o
+  # tool_result. A chamada de dentro de SuggestScheduleJob (via #ask_internally, que JÁ usa
+  # with_ai_lock) lia a conversa nesse estado incompleto — último bloco de histórico era um
+  # tool_use sem tool_result — e o Bedrock rejeitava com "tool_use ids were found without
+  # tool_result blocks immediately after". RubyLLM destruía a mensagem que estava criando pra
+  # essa chamada, e o cronograma nunca era sugerido (0 itens pra sempre, igual o bug original de
+  # reentrância, mas por uma causa diferente — ali era o MESMO processo reentrando #complete; aqui
+  # são DOIS processos disputando a mesma conversa). Como nada dentro de #complete chama
+  # #ask_internally de forma síncrona (foi exatamente isso que a correção da reentrância
+  # eliminou), colocar o turno inteiro dentro do mesmo advisory lock é seguro — não reentra a
+  # trava no mesmo processo, só faz SuggestScheduleJob (sessão/processo diferente) esperar o
+  # commit da transação deste turno antes de ler o histórico.
+  def complete_with_lock(&block)
+    with_ai_lock { complete(&block) }
+  end
+
   # Usa o operador jsonb `||` do Postgres pra fazer o merge no banco (atômico),
   # em vez de merge em Ruby sobre o hash em memória — necessário porque os jobs
   # (tr/comp_docs) rodam em paralelo de verdade via Solid Queue, e um merge em

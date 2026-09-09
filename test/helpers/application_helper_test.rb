@@ -46,6 +46,29 @@ class ApplicationHelperTest < ActionView::TestCase
     assert_equal "text-warning", flash_config("warning")[:text_class]
   end
 
+  # Cobre os dois caminhos que gravam "kind" no metadata do blob: os anexos que o consultor sobe
+  # (ConversationsController#attach_with_kind — et/tr/kmz/complementary) e os que a IA gera
+  # (GenerateProposalDocumentTool#attach!/#attach_schedule_mspdi_files!).
+  test "document_kind_label maps every kind written by ConversationsController and GenerateProposalDocumentTool to a short label" do
+    proposal = proposals(:priced_proposal)
+
+    {
+      "et" => "ET", "tr" => "TR", "kmz" => "KMZ", "complementary" => "Complementar",
+      "tecnica" => "Técnica", "comercial" => "Comercial", "combined" => "Técnica + Comercial",
+      "schedule_mspdi_servico" => "MS Project · Serviço", "schedule_mspdi_implantacao" => "MS Project · Implantação"
+    }.each do |kind, label|
+      document = attach_generated_document(proposal, kind: kind)
+      assert_equal label, document_kind_label(document)
+    end
+  end
+
+  test "document_kind_label is nil for an attachment without a 'kind' in its metadata" do
+    proposal = proposals(:priced_proposal)
+    document = attach_generated_document(proposal, kind: nil)
+
+    assert_nil document_kind_label(document)
+  end
+
   test "flash_config falls back to the info config for an unknown flash type" do
     assert_equal ApplicationHelper::FLASH_TYPES["info"], flash_config("qualquer_coisa_desconhecida")
   end
@@ -93,4 +116,16 @@ class ApplicationHelperTest < ActionView::TestCase
       assert_includes render_markdown("**Tipo de licença:** LP"), "<strong>Tipo de licença:</strong>"
     end
   end
+
+  private
+    # Mesmo metadata que GenerateProposalDocumentTool#attach!/#attach_schedule_mspdi_files!
+    # gravam de verdade — kind: nil simula um attachment sem essa chave (ex.: ET/KMZ enviado pelo
+    # consultor, que não passa por essa ferramenta).
+    def attach_generated_document(proposal, kind:)
+      proposal.generated_documents.attach(
+        io: StringIO.new("conteúdo"), filename: "doc.docx", content_type: "application/octet-stream",
+        metadata: kind ? { kind: kind } : {}
+      )
+      proposal.generated_documents.last
+    end
 end

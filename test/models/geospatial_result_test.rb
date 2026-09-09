@@ -33,6 +33,33 @@ class GeospatialResultTest < ActiveSupport::TestCase
     assert_equal "Localização pontual (sem área ou extensão calculada).", result.summary_text
   end
 
+  test "summary_text appends the municipalities found by ProcessKmzJob when present" do
+    result = GeospatialResult.new(
+      conversation: conversations(:reviewing_conversation), area_ha: 100.0, perimeter_km: 5.0,
+      municipalities: [ { "code_ibge" => "2913606", "name" => "Itabuna", "uf" => "BA" } ]
+    )
+
+    assert_equal "Área: 100.0 ha · Perímetro: 5.0 km · Município(s): Itabuna/BA", result.summary_text
+  end
+
+  test "summary_text lists more than one municipality when the KMZ spans a border" do
+    result = GeospatialResult.new(
+      conversation: conversations(:reviewing_conversation), geometry_type: "line", length_km: 10.0,
+      municipalities: [
+        { "code_ibge" => "2913606", "name" => "Itabuna", "uf" => "BA" },
+        { "code_ibge" => "2916104", "name" => "Ilhéus", "uf" => "BA" }
+      ]
+    )
+
+    assert_equal "Extensão: 10.0 km · Município(s): Itabuna/BA, Ilhéus/BA", result.summary_text
+  end
+
+  test "municipalities_label is nil when no municipality was found (table not imported yet, or no match)" do
+    result = GeospatialResult.new(conversation: conversations(:reviewing_conversation))
+
+    assert_nil result.municipalities_label
+  end
+
   test "area_label matches the geometry_type so the review screen card title makes sense" do
     conversation = conversations(:reviewing_conversation)
 

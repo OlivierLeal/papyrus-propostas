@@ -172,11 +172,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
-      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
+      failed_schedule_types = []
+      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)}" }.to_json
+          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica", municipio: args[:municipios], estado: args[:estado])
       commercial_filename = @proposal.docx_filename("comercial", municipio: args[:municipios], estado: args[:estado])
@@ -187,17 +188,19 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       attach!(files[:commercial], commercial_filename, "comercial", description)
-      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
+      failed_schedule_types = []
+      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)}" }.to_json
+          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined", municipio: args[:municipios], estado: args[:estado])
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
-      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description)
+      failed_schedule_types = []
+      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -414,7 +417,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       "implantacao" => "Cronograma de Implantação do Empreendimento"
     }.freeze
 
-    def attach_schedule_mspdi_files!(schedules, args, description)
+    # `failed_types` é preenchido por efeito colateral (nunca por retorno) — o chamador já usa o
+    # retorno normal (array de filenames) pra montar `filenames:`/o texto de sucesso; um segundo
+    # retorno mudaria os 3 call sites pra desestruturar tupla à toa. Só existe pra
+    # `schedule_message` poder avisar o consultor quando algum tipo falhou (antes, a falha só ia
+    # pro log — o consultor nunca sabia que o .xml não saiu).
+    def attach_schedule_mspdi_files!(schedules, args, description, failed_types)
       schedules.filter_map do |type, payload|
         bytes = ScheduleMspdiExporter.new(
           items: payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type),
@@ -430,14 +438,20 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         filename
       rescue ScheduleMspdiExporter::JavaHelperError => e
         Rails.logger.error("attach_schedule_mspdi_files! falhou pra tipo #{type} na proposal #{@proposal.id}: #{e.message}")
+        failed_types << type
         nil
       end
     end
 
-    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued)
+    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types = [])
       parts = []
       parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}), " \
         "pronto pra abrir no MS Project (Arquivo > Abrir)." if schedule_filenames.present?
+      if failed_schedule_types.present?
+        nomes = failed_schedule_types.map { |type| SCHEDULE_NAMES.fetch(type) }.join(" e ")
+        parts << " Não consegui gerar o arquivo do #{nomes} em formato MS Project agora (o resto do " \
+          "documento saiu normal) — se persistir, avise o time de desenvolvimento."
+      end
       if defaulted_schedule_types.present?
         nomes = defaulted_schedule_types.map { |type| SCHEDULE_NAMES.fetch(type) }.join(" e ")
         data = Date.current.next_month.beginning_of_month.strftime("%d/%m/%Y")

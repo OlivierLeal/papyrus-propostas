@@ -24,6 +24,16 @@
 // Só 1 nível de hierarquia (fase -> atividade), igual ScheduleItem — parent_id aponta pro "id" da
 // fase; fase em si tem parent_id null. Datas em dias corridos (sem calendário de dias úteis),
 // mesma convenção do ScheduleTableBuilder — nenhuma conta de dia útil entra aqui.
+//
+// Duration tem que ser TimeUnit.ELAPSED_DAYS, nunca TimeUnit.DAYS (achado ao vivo, 2026-09):
+// toda tarefa nasce auto-agendada (Manual=0, é o padrão de project.addTask()/parent.addTask()) —
+// o MS Project recalcula Start+Duration pelo CALENDÁRIO da tarefa assim que abre o arquivo, e
+// TimeUnit.DAYS é dia ÚTIL (o calendário "Standard" de addDefaultBaseCalendar() é seg-sex). Com
+// Start/Finish calculados aqui em dias CORRIDOS mas Duration gravada em dias úteis, o Finish que
+// o Project mostra diverge do que foi calculado (reproduzido: 73 dias de desvio num cronograma de
+// 6 meses) — o arquivo "abre certo" e parece bom no MPXJ::Reader (que só relê os bytes, sem rodar
+// esse recálculo), mas fica torto de verdade dentro do Project. ELAPSED_DAYS ignora o calendário
+// — Start + Duration bate com o Finish em qualquer dia da semana, com ou sem recálculo.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.mpxj.Duration;
@@ -70,11 +80,15 @@ public class ScheduleToMspdi {
       task.setName(node.path("name").asText());
 
       LocalDateTime start = parseDate(node.path("start_date").asText());
-      int durationDays = node.path("duration_days").asInt();
+      boolean milestone = node.path("milestone").asBoolean(false);
+      // Marco sai sempre com duração 0 no MSPDI (convenção do MS Project) — mesmo que
+      // ScheduleItem exija duration_periods >= 1 (regra correta pro Gantt do .docx, não muda
+      // aqui: essa duração ainda é 1 período, só não é a que vai pro MS Project).
+      int durationDays = milestone ? 0 : node.path("duration_days").asInt();
       task.setStart(start);
       task.setFinish(start.plusDays(durationDays));
-      task.setDuration(Duration.getInstance(durationDays, TimeUnit.DAYS));
-      task.setMilestone(node.path("milestone").asBoolean(false));
+      task.setDuration(Duration.getInstance(durationDays, TimeUnit.ELAPSED_DAYS));
+      task.setMilestone(milestone);
 
       tasksById.put(id, task);
     }

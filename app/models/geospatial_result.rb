@@ -27,22 +27,34 @@ class GeospatialResult < ApplicationRecord
     AREA_LABELS.fetch(geometry_type, "Área do KMZ")
   end
 
+  # "Município(s): Cachoeira/BA" — cruzamento com ibge_municipalities (ProcessKmzJob, CLAUDE.md
+  # seção 11.1). nil quando a tabela ainda não foi importada ou a geometria não cai em nenhum
+  # município cadastrado — não é erro, só ausência de dado (mesmo padrão do resto do card).
+  def municipalities_label
+    return nil if municipalities.blank?
+
+    municipalities.map { |m| "#{m['name']}/#{m['uf']}" }.join(", ")
+  end
+
   # Nem todo KMZ tem polígono — linha de transmissão vira <LineString> (extensão, não área) e
   # medição eólica/ponto de amostragem vira <Point> (só localização) — ver KmzGeometryExtractor.
   def summary_text
-    case geometry_type
-    when "polygon"
-      return "Dados geoespaciais ainda não processados." if area_ha.blank?
+    base =
+      case geometry_type
+      when "polygon"
+        return "Dados geoespaciais ainda não processados." if area_ha.blank?
 
-      "Área: #{area_ha.round(2)} ha · Perímetro: #{perimeter_km.round(2)} km"
-    when "line"
-      return "Dados geoespaciais ainda não processados." if length_km.blank?
+        "Área: #{area_ha.round(2)} ha · Perímetro: #{perimeter_km.round(2)} km"
+      when "line"
+        return "Dados geoespaciais ainda não processados." if length_km.blank?
 
-      "Extensão: #{length_km.round(2)} km"
-    when "point"
-      "Localização pontual (sem área ou extensão calculada)."
-    else
-      "Dados geoespaciais ainda não processados."
-    end
+        "Extensão: #{length_km.round(2)} km"
+      when "point"
+        "Localização pontual (sem área ou extensão calculada)."
+      else
+        return "Dados geoespaciais ainda não processados."
+      end
+
+    municipalities_label.present? ? "#{base} · Município(s): #{municipalities_label}" : base
   end
 end
