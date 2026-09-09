@@ -27,6 +27,47 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Nenhuma proposta encontrada", response.body
   end
 
+  # A numeração da proposta reinicia todo ano (Proposal#docx_numero_proposta carrega o ano de 2
+  # dígitos) — pedido do consultor pra deixar isso visível na tela conforme o uso do sistema
+  # acumula mais de um ano de histórico, já que o mesmo id volta a aparecer em anos diferentes.
+  test "index groups conversations into current year, previous year, and older, in that order" do
+    atual = Conversation.create!(user: @user, client_name: "Cliente Deste Ano", status: "setup")
+    ano_passado = Conversation.create!(user: @user, client_name: "Cliente Do Ano Passado", status: "setup")
+    ano_passado.update_column(:created_at, 1.year.ago)
+    antigo = Conversation.create!(user: @user, client_name: "Cliente Bem Antigo", status: "setup")
+    antigo.update_column(:created_at, 3.years.ago)
+
+    get conversations_path
+
+    assert_response :success
+    ano_atual_label = Date.current.year.to_s
+    ano_passado_label = (Date.current.year - 1).to_s
+
+    assert_match ano_atual_label, response.body
+    assert_match ano_passado_label, response.body
+    assert_match "Anteriores", response.body
+
+    # Ordem das seções: ano atual primeiro, depois o anterior, depois "Anteriores" — e cada
+    # conversa cai na seção certa (index() da label bate antes do index() do cliente da seção
+    # seguinte, mesma técnica já usada neste arquivo pra checar ordem de versões).
+    assert_operator response.body.index(ano_atual_label), :<, response.body.index(atual.client_name)
+    assert_operator response.body.index(atual.client_name), :<, response.body.index(ano_passado_label)
+    assert_operator response.body.index(ano_passado_label), :<, response.body.index(ano_passado.client_name)
+    assert_operator response.body.index(ano_passado.client_name), :<, response.body.index("Anteriores")
+    assert_operator response.body.index("Anteriores"), :<, response.body.index(antigo.client_name)
+  end
+
+  test "index does not show a year section that has no conversations" do
+    ano_passado = Conversation.create!(user: @user, client_name: "Único Cliente do Ano Passado", status: "setup")
+    ano_passado.update_column(:created_at, 1.year.ago)
+    Conversation.where.not(id: ano_passado.id).destroy_all
+
+    get conversations_path
+
+    assert_response :success
+    assert_no_match "Anteriores", response.body
+  end
+
   test "index redirects a guest to the login screen" do
     sign_out
     get conversations_path

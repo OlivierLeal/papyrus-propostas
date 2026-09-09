@@ -32,31 +32,39 @@
       <% end %>
     </div>
   <% else %>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <% @conversations.each do |conversation| %>
-        <%= link_to conversation_path(conversation),
-              class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
-          <div class="card-body gap-3">
-            <div class="flex items-start justify-between gap-2">
-              <h3 class="font-semibold text-base-content leading-tight">
-                <%= conversation.client_name %>
-                <% if conversation.proposal.present? %>
-                  <span class="text-base-content/50 font-normal text-sm"><%= conversation.proposal.docx_numero_proposta %></span>
-                <% end %>
-              </h3>
-              <span class="badge badge-soft shrink-0 <%= conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
-                <%= conversation.status_label %>
-              </span>
-            </div>
+    <% @conversation_groups.each do |group| %>
+      <div class="flex items-center gap-3 mb-3 <%= "mt-8" unless group == @conversation_groups.first %>">
+        <h2 class="text-sm font-semibold text-base-content/60 uppercase tracking-wide"><%= group[:label] %></h2>
+        <span class="badge badge-ghost badge-sm"><%= group[:conversations].size %></span>
+        <div class="h-px bg-base-300 flex-1"></div>
+      </div>
 
-            <span class="badge badge-ghost w-fit"><%= conversation.study_type&.name || "Tipo de estudo pendente" %></span>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <% group[:conversations].each do |conversation| %>
+          <%= link_to conversation_path(conversation),
+                class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+            <div class="card-body gap-3">
+              <div class="flex items-start justify-between gap-2">
+                <h3 class="font-semibold text-base-content leading-tight">
+                  <%= conversation.client_name %>
+                  <% if conversation.proposal.present? %>
+                    <span class="text-base-content/50 font-normal text-sm"><%= conversation.proposal.docx_numero_proposta %></span>
+                  <% end %>
+                </h3>
+                <span class="badge badge-soft shrink-0 <%= conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
+                  <%= conversation.status_label %>
+                </span>
+              </div>
 
-            <div class="text-xs text-base-content/40">
-              <%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %>
+              <span class="badge badge-ghost w-fit"><%= conversation.study_type&.name || "Tipo de estudo pendente" %></span>
+
+              <div class="text-xs text-base-content/40">
+                <%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %>
+              </div>
             </div>
-          </div>
+          <% end %>
         <% end %>
-      <% end %>
-    </div>
+      </div>
+    <% end %>
   <% end %>
 </div>

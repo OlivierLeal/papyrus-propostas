@@ -4,6 +4,7 @@ class ConversationsController < ApplicationController
   def index
     @query = params[:q]
     @conversations = Conversation.search(@query)
+    @conversation_groups = group_by_year(@conversations)
   end
 
   def new
@@ -55,6 +56,22 @@ class ConversationsController < ApplicationController
   end
 
   private
+    # A numeração da proposta (Proposal#docx_numero_proposta) carrega o ano de 2 dígitos — pedido
+    # do consultor pra deixar isso visível na tela também, já que o mesmo id (ex.: "098") volta a
+    # aparecer em anos diferentes ("PTC26098" × "PTC25098" são propostas DIFERENTES) conforme o
+    # uso do sistema acumula mais de um ano de histórico. Ano corrente e o anterior ganham seção
+    # própria; o resto (mais de 1 ano) cai junto em "Anteriores" — só 3 grupos, não um por ano.
+    # `conversations` já vem ordenada created_at DESC (Conversation.search), então dentro de cada
+    # grupo a ordem se mantém sem precisar reordenar.
+    def group_by_year(conversations)
+      ano_atual = Date.current.year
+      [
+        { label: ano_atual.to_s, conversations: conversations.select { |c| c.created_at.year == ano_atual } },
+        { label: (ano_atual - 1).to_s, conversations: conversations.select { |c| c.created_at.year == ano_atual - 1 } },
+        { label: "Anteriores", conversations: conversations.select { |c| c.created_at.year < ano_atual - 1 } }
+      ].select { |grupo| grupo[:conversations].any? }
+    end
+
     # Dispara automaticamente ao criar a proposta — não existe mais uma etapa manual de
     # "confirmar antes de processar" (ver CLAUDE.md, decisão revista).
     def start_processing!
