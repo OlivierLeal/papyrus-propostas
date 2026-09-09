@@ -3,10 +3,10 @@
 # direto do banco (ProjectPricing/ProposalProfessional), nunca da IA. Ver CLAUDE.md seção 8/9.
 #
 # A proposta técnica pode ser gerada antes da precificação estar aprovada (proposal.status ==
-# "draft") — a equipe/horas sugeridas pela IA na criação da proposta já bastam pro texto técnico,
-# que não mostra valores. A comercial (ou o documento combinado) exige status "priced"/"approved"
-# (Tela de Precificação confirmada pelo consultor), porque mostra números que ainda não foram
-# revisados. Ver #execute.
+# "draft") — a equipe/horas (do template padrão ou já sugeridas pela IA) já bastam pro texto
+# técnico, que não mostra valores. A comercial (ou o documento combinado) exige status "priced"/
+# "approved" (Tela de Precificação confirmada pelo consultor), porque mostra números que ainda não
+# foram revisados. Ver #execute.
 #
 # Recebe `conversation:`, não `proposal:` — a Proposal pode nem existir ainda (o consultor nunca
 # clicou em "Avançar para Precificação"). Achado na prática: exigir isso antes de QUALQUER geração,
@@ -14,6 +14,11 @@
 # quero só a técnica"). Agora #execute cria a proposta sozinha (Conversation#ensure_proposal!) na
 # primeira vez que a ferramenta é chamada de verdade — o botão continua existindo pra quem prefere
 # ir direto pra Tela de Precificação, mas deixou de ser pré-requisito pra gerar a técnica pelo chat.
+# Chama `ensure_proposal!(ai_suggestions: false)` — NUNCA `true` daqui: essa criação acontece
+# DENTRO de uma tool call (reentraria Conversation#complete se pedisse sugestão de equipe/
+# cronograma à IA agora — ver o comentário de ensure_proposal! em conversation.rb). A equipe sai
+# do template padrão (determinístico, mesmo fallback de sempre) e o cronograma fica pro
+# #ensure_schedule_suggested! logo abaixo, que enfileira em background.
 class GenerateProposalDocumentTool < RubyLLM::Tool
   description <<~DESC
     Gera o(s) arquivo(s) .docx da proposta preenchidos, usando o texto que você escrever pra
@@ -137,7 +142,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # do cliente aparecem crus, sem sentido nenhum pra quem lê (achado ao vivo em produção).
     args = args.transform_values { |value| strip_citation_codes(value) }
 
-    @proposal = @conversation.proposal || @conversation.ensure_proposal!
+    @proposal = @conversation.proposal || @conversation.ensure_proposal!(ai_suggestions: false)
     return { error: blocked_reason }.to_json if @proposal.nil?
 
     schedule_suggestion_enqueued = ensure_schedule_suggested!

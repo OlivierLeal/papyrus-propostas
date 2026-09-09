@@ -454,18 +454,37 @@ nenhum `complete()` em andamento no meio do caminho — e testado ao vivo com o 
 verdade rodando (não só `perform_now` isolado): o job pegou a fila sozinho, a chamada ao Bedrock
 teve sucesso, os 14 itens saíram certos.
 
-**Suspeita ainda não confirmada, mesma causa-raiz:** `Conversation#ensure_proposal!` (chamado de
-dentro da MESMA tool call, na primeira geração de cada proposta) também chama
-`Proposal#build_with_ai_suggested_team!` de forma síncrona — sujeito ao mesmo problema de
-reentrância. A diferença é que equipe TEM fallback determinístico
-(`build_from_template!`, no `rescue`), então uma falha aqui não aparece como "nada acontece" — ela
-aparece como "a equipe saiu com as horas padrão do template em vez da sugestão inteligente da
-IA", silenciosa, muito mais difícil de notar do que cronograma vazio. Não corrigido nesta
-sessão — decisão consciente de não mudar um fluxo que já "funciona" (via fallback) sem
-confirmar com o consultor primeiro, já que a correção (mover `build_with_ai_suggested_team!`
-também pra um job em background) muda a experiência de quem clica "Avançar para Precificação"
-pelo chat: a Tela de Precificação abriria com equipe zerada por alguns segundos até o job
-terminar, em vez de já vir preenchida.
+**Confirmada e corrigida a mesma causa-raiz em `Conversation#ensure_proposal!` (2026-09,
+achado em produção: conversas 32/33/34 — "não saiu o .mpp no chat").** Logs reais de produção
+mostraram o quadro completo: na primeira geração de cada proposta (`ensure_proposal!` chamado de
+dentro da MESMA tool call), `build_with_ai_suggested_schedule!` reentrava e derrubava a chamada ao
+Bedrock (`tool_use ids were found without tool_result blocks`) — e o dano ficava: a mensagem
+corrompida no meio do histórico fazia o `complete()` DE FORA (o turno inteiro do
+`RespondToMessageJob`) falhar também, logo depois (`toolResult blocks... exceeds toolUse blocks`).
+O `.docx` às vezes saía (o `rescue` de `build_with_ai_suggested_schedule!`/`build_with_ai_suggested_
+team!` engolia o erro e a ferramenta terminava normal), mas a resposta da IA nunca chegava ao
+consultor — o job morria com `RespondToMessageJob failed`, e o chat mostrava só a bolha de erro
+genérica. **Equipe estava exposta ao mesmo problema**, só que mascarada pelo fallback
+determinístico (`build_from_template!`) — silenciosa, muito mais difícil de notar do que
+cronograma vazio.
+
+**Correção**: `ensure_proposal!` ganhou `ai_suggestions:` (default `true`). Quando `false` — é o
+que `GenerateProposalDocumentTool#execute` sempre passa agora
+(`ensure_proposal!(ai_suggestions: false)`) — a equipe vem direto de `build_from_template!`
+(determinístico, sem IA, MESMO resultado que já saía quando a sugestão falhava) e o cronograma
+fica de fora (cuidado pelo `ensure_schedule_suggested!` logo depois, que enfileira em background).
+Zero chamada de IA acontece dentro da tool call inteira, então zero reentrância. Quem chama pelo
+controller (`ProposalsController`, botão "Avançar para Precificação", fora de qualquer
+`complete()` em andamento) continua usando o padrão `true` — ali é seguro, e o consultor espera
+ver a equipe já sugerida pela IA ao abrir a Tela de Precificação na hora.
+
+Verificado ao vivo reproduzindo o cenário exato de produção (conversa real, sem proposta ainda,
+`RespondToMessageJob.perform_now` de verdade): a proposta nasceu, o `.docx` saiu, e — a
+diferença que importa — a resposta de sucesso da IA chegou normal no chat, sem nenhum
+`RubyLLM::BadRequestError`. Equipe conferida como vindo do template (`0h` default, não da IA);
+`SuggestScheduleJob` enfileirado e, rodado à parte, criou os itens de cronograma sem erro
+nenhum — confirma que separar as duas chamadas (equipe síncrona-porém-sem-IA, cronograma
+assíncrono) resolve os dois lados do bug de uma vez.
 
 **Efeito colateral achado ao limpar o teste ao vivo:** a checklist interna
 (`Conversation::PROPOSAL_CHECKLIST_INSTRUCTIONS`, item 12) ainda dizia "não temos suporte

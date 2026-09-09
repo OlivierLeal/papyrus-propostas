@@ -225,12 +225,18 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
   # Achado na prática: exigir clicar em "Avançar para Precificação" antes de QUALQUER geração,
   # inclusive só-técnica, não fazia sentido pro consultor ("não quero avançar pra preço ainda").
-  test "auto-creates the proposal and AI-suggested team when none exists yet, then generates the technical docx" do
+  # A criação acontece DENTRO desta tool call (que por sua vez já está dentro de um
+  # Conversation#complete em andamento, em produção) — chamar a IA de novo aqui pra sugerir
+  # equipe/cronograma reentraria complete() e quebrava a chamada de verdade pro Bedrock (achado
+  # ao vivo, conversas 32/33/34: ver Conversation#ensure_proposal!). Por isso a criação usa
+  # ensure_proposal!(ai_suggestions: false) — equipe do template padrão (determinístico), sem
+  # nenhuma chamada de IA nesta auto-criação.
+  test "auto-creates the proposal (with the default template team, no AI call) when none exists yet, then generates the technical docx" do
     conversation = conversations(:reviewing_conversation)
     assert_nil conversation.proposal
     tool = GenerateProposalDocumentTool.new(conversation: conversation)
 
-    result = stub_ai_complete('{"linhas": [], "documentos_separados": false}') { JSON.parse(tool.execute(**@args)) }
+    result = stub_ai_error { JSON.parse(tool.execute(**@args)) } # se isso chamasse a IA, este teste falharia
 
     assert result["success"], result.inspect
     conversation.reload

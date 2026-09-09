@@ -91,6 +91,15 @@ class Conversation < ApplicationRecord
     ambiental, código, receitas, tarefas genéricas ou qualquer assunto alheio a este atendimento):
     recuse em UMA frase curta, sem elaborar, redirecionando o consultor de volta para a proposta.
 
+    NUNCA responda ao consultor no formato `{"achados": [...]}` (ou qualquer JSON cru) — esse
+    formato é EXCLUSIVO de instruções internas do sistema (que pedem "Responda APENAS com um
+    JSON válido"), que você não vê rotuladas como tal no histórico, mas que aparecem mais acima
+    na conversa. Sua resposta pro consultor é SEMPRE texto corrido em português, mesmo quando ele
+    colar o texto de um ET/TR direto no chat em vez de anexar como arquivo — nesse caso, leia o
+    conteúdo colado, comente o que entendeu em prosa, e sugira reenviar como arquivo anexado se
+    fizer sentido (só o upload passa pelo processamento estruturado que gera achados rastreáveis;
+    texto colado no chat não gera nenhum achado novo por conta própria).
+
     Fatos fixos sobre os documentos desta conversa:
     - O KMZ enviado pelo consultor JÁ É a poligonal oficial da área do empreendimento (coordenadas
       reais do imóvel, não um esboço/visualização). Nunca trate isso como informação pendente nem
@@ -294,7 +303,21 @@ class Conversation < ApplicationRecord
     flag_study_type_out_of_catalog(values)
   end
 
-  def ensure_proposal!
+  # ai_suggestions: false é usado por GenerateProposalDocumentTool (chamada pelo chat) — essa
+  # ferramenta só é chamada como tool call DENTRO de Conversation#complete (RespondToMessageJob),
+  # e as duas sugestões da IA daqui (equipe, cronograma) chamam ask_internally/complete de novo
+  # — REENTRANTE, quebra a chamada de verdade pro Bedrock em produção (achado ao vivo, conversas
+  # 32/33/34: "tool_use ids were found without tool_result blocks", e o turno inteiro falhava
+  # depois, "toolResult blocks... exceeds toolUse blocks", sem o consultor ver a resposta da IA
+  # nem o arquivo gerado aparecer no chat, mesmo quando o .docx saía certo por trás). Com
+  # ai_suggestions: false, a equipe vem do fallback determinístico de sempre
+  # (`build_from_template!`, sem IA, mesmo caminho que já era usado quando a sugestão falhava) e
+  # o cronograma fica de fora — GenerateProposalDocumentTool#ensure_schedule_suggested! (chamado
+  # logo depois) enfileira a sugestão de cronograma em background sozinho. Quem chama pelo
+  # controller (`ProposalsController`, botão "Avançar para Precificação", fora de qualquer
+  # `complete()` em andamento) continua com o padrão `true` — ali é seguro, e o consultor espera
+  # ver a equipe já sugerida pela IA ao abrir a Tela de Precificação.
+  def ensure_proposal!(ai_suggestions: true)
     # Recarrega antes de checar: quem chama isso pelo chat (RespondToMessageJob) carregou este
     # Conversation no início do job, e a resposta da IA pode levar dezenas de segundos — achado
     # na prática: o consultor marcou o tipo de estudo pela tela ENQUANTO o job já estava rodando
@@ -306,8 +329,12 @@ class Conversation < ApplicationRecord
     return nil unless status == "reviewing" && study_type.present?
 
     new_proposal = create_proposal!(status: "draft")
-    new_proposal.build_with_ai_suggested_team!
-    new_proposal.build_with_ai_suggested_schedule!
+    if ai_suggestions
+      new_proposal.build_with_ai_suggested_team!
+      new_proposal.build_with_ai_suggested_schedule!
+    else
+      new_proposal.build_from_template!
+    end
     update!(status: "pricing")
     new_proposal
   end
