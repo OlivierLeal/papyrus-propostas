@@ -33,9 +33,17 @@ Rails.application.configure do
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
 
-  # Log to STDOUT with the current request id as a default log tag.
+  # Log em log/production.log, não STDOUT (2026-09) — produção é bare Ubuntu, dois serviços
+  # systemd (papyrus-propostas.service/papyrus_jobs.service) sem Docker/journald como destino
+  # natural de log; STDOUT só ia parar no journalctl, com rotação/retenção fora do controle do
+  # projeto. ActiveSupport::Logger.new(path, keep, size) já rotaciona sozinho (5 arquivos
+  # antigos, até 100MB cada) — sem isso o arquivo cresceria pra sempre num serviço que fica no ar
+  # o tempo todo. `RAILS_LOG_TO_STDOUT=true` nos dois .service não faz nada (nunca foi lido em
+  # lugar nenhum desta config) — pode ficar ou ser removido, indiferente.
   config.log_tags = [ :request_id ]
-  config.logger   = ActiveSupport::TaggedLogging.logger(STDOUT)
+  config.logger   = ActiveSupport::TaggedLogging.logger(
+    ActiveSupport::Logger.new(Rails.root.join("log", "#{Rails.env}.log"), 5, 100.megabytes)
+  )
 
   # Change to "debug" to log everything (including potentially personally-identifiable information!).
   config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
