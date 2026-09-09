@@ -41,9 +41,12 @@ Rails.application.configure do
   # o tempo todo. `RAILS_LOG_TO_STDOUT=true` nos dois .service não faz nada (nunca foi lido em
   # lugar nenhum desta config) — pode ficar ou ser removido, indiferente.
   config.log_tags = [ :request_id ]
-  config.logger   = ActiveSupport::TaggedLogging.logger(
-    ActiveSupport::Logger.new(Rails.root.join("log", "#{Rails.env}.log"), 5, 100.megabytes)
-  )
+  # TaggedLogging.logger(*args) já constrói o ActiveSupport::Logger sozinho por baixo
+  # (`new ActiveSupport::Logger.new(*args, **kwargs)`) — passar um Logger já pronto aqui (em vez
+  # dos argumentos crus) faz ele tentar abrir ESSE OBJETO como se fosse o path do arquivo
+  # (`TypeError: no implicit conversion of ActiveSupport::Logger into String`, achado ao vivo
+  # rodando `db:migrate` em produção).
+  config.logger = ActiveSupport::TaggedLogging.logger(Rails.root.join("log", "#{Rails.env}.log"), 5, 100.megabytes)
 
   # Change to "debug" to log everything (including potentially personally-identifiable information!).
   config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
