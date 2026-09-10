@@ -381,6 +381,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes texto, "corrigidos anualmente pelo IGP-M ou IPCA"
     assert_includes texto, "Lei Complementar 116/2003"
     assert_includes texto, "tributado em Lauro de Freitas"
+    assert_includes texto, "em até 30 dias após emissão da Nota Fiscal (NF)"
     assert_not_includes texto, "CONTRATADA"
   end
 

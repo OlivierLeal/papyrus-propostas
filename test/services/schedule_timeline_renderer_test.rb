@@ -60,15 +60,15 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
     assert_includes generico, 'r="5"'
   end
 
-  # Mesma conta de ScheduleMspdiExporter#item_start/#item_finish — a data mostrada no infográfico
-  # tem que bater com a data que o cronograma "de verdade" (tabela, MSPDI) usa.
-  test "date range and duration match the same elapsed-days math as ScheduleMspdiExporter" do
+  # Só a duração em dias, sem nenhuma data (pedido do consultor) — mas a conta de dias tem que
+  # continuar batendo com ScheduleMspdiExporter#item_start/#item_finish.
+  test "shows only the duration in days, no dates" do
     schedule_item = item("Campanha de campo", start_period: 2, duration_periods: 2)
 
     svg = renderer(items: [ schedule_item ], start_date: Date.new(2026, 10, 1), unit: :week).svgs.first
 
-    assert_includes svg, "08/10/2026 a 22/10/2026" # semana 2 = +7 dias; +2 semanas de duração = +14
-    assert_includes svg, "14 dias"
+    assert_includes svg, "14 dias" # 2 semanas de duração = 14 dias corridos
+    assert_no_match(%r{\d{2}/\d{2}/\d{4}}, svg, "não pode sobrar nenhuma data no infográfico")
   end
 
   # Marco (ponto no tempo) mostra "-" em vez de uma duração calculada — igual a referência

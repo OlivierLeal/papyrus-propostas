@@ -530,8 +530,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types = [])
       parts = []
-      parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}), " \
-        "pronto pra abrir no MS Project (Arquivo > Abrir)." if schedule_filenames.present?
+      if schedule_filenames.present?
+        parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}). " \
+          "Pra importar: no MS Project, Arquivo > Abrir > Procurar, troque o tipo de arquivo de " \
+          "\"Projetos\" pra \"Formato XML (*.xml)\" na caixinha embaixo do nome (senão o arquivo nem " \
+          "aparece), selecione o arquivo e escolha \"Como um novo projeto\". Clicar duas vezes no " \
+          ".xml não abre no MS Project — tem que ser por Arquivo > Abrir."
+      end
       if failed_schedule_types.present?
         nomes = failed_schedule_types.map { |type| SCHEDULE_NAMES.fetch(type) }.join(" e ")
         parts << " Não consegui gerar o arquivo do #{nomes} em formato MS Project agora (o resto do " \

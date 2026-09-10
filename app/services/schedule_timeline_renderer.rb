@@ -37,7 +37,7 @@ class ScheduleTimelineRenderer
   LABEL_LINE_HEIGHT = 20
   LABEL_MAX_LINES = 3
   DATE_LINE_HEIGHT = 16
-  DATE_BLOCK_HEIGHT = DATE_LINE_HEIGHT * 2 # intervalo de datas + duração, sempre 2 linhas
+  DATE_BLOCK_HEIGHT = DATE_LINE_HEIGHT # só a duração em dias, uma linha (sem intervalo de datas)
   ROW_BOTTOM_PADDING = 16
   MAX_CHARS_PER_LINE = 22
   LINE_OVERHANG = 26 # quanto a linha/seta passa do centro do último círculo da linha
@@ -261,12 +261,12 @@ class ScheduleTimelineRenderer
       underline_y = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) - (LABEL_LINE_HEIGHT / 2) + (UNDERLINE_BLOCK_HEIGHT / 2)
       underline = %(<line x1="#{cx - (UNDERLINE_WIDTH / 2)}" y1="#{underline_y}" x2="#{cx + (UNDERLINE_WIDTH / 2)}" y2="#{underline_y}" stroke="##{color}" stroke-width="3"/>)
 
-      date_top = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) + UNDERLINE_BLOCK_HEIGHT
-      date_xml = date_lines(item).each_with_index.map do |line, i|
-        text_tag(cx, date_top + (i * DATE_LINE_HEIGHT), line, size: 11, color: DATE_COLOR)
+      duration_top = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) + UNDERLINE_BLOCK_HEIGHT
+      duration_xml = duration_lines(item).each_with_index.map do |line, i|
+        text_tag(cx, duration_top + (i * DATE_LINE_HEIGHT), line, size: 11, color: DATE_COLOR)
       end.join
 
-      "#{title_xml}#{underline}#{date_xml}"
+      "#{title_xml}#{underline}#{duration_xml}"
     end
 
     def text_tag(x, y, text, size:, color:, weight: nil)
@@ -298,28 +298,18 @@ class ScheduleTimelineRenderer
       truncated
     end
 
-    # Marco (ponto no tempo, sem duração) mostra "-" no lugar de uma duração calculada — igual a
-    # referência trazida pelo consultor, onde as etapas pontuais não trazem número de dias
-    # nenhum. Etapa normal mostra o intervalo de datas e a duração em dias corridos.
-    def date_lines(item)
-      start_date = item_start(item)
-      return [ formatted(start_date), "-" ] if item.milestone?
+    # Só a duração em dias corridos, sem nenhuma data — pedido do consultor. Marco (ponto no
+    # tempo, sem duração) mostra "-", igual à referência, onde etapa pontual não traz número de
+    # dias nenhum. Devolve um array (o chamador desenha linha a linha) — hoje sempre 1 linha.
+    def duration_lines(item)
+      return [ "-" ] if item.milestone?
 
-      finish_date = item_finish(item)
-      duration_days = (finish_date - start_date).to_i
-
-      range = start_date == finish_date ? formatted(start_date) : "#{formatted(start_date)} a #{formatted(finish_date)}"
+      duration_days = (item_finish(item) - item_start(item)).to_i
       # String#pluralize é baseado nas regras de inflexão do INGLÊS (config.i18n.default_locale
       # sendo pt-BR não muda isso — é ActiveSupport::Inflector, não I18n) e não pluraliza "dia"
       # corretamente ("dia".pluralize(7) => "dia", errado) — regra do português é só o "s" mesmo,
       # sem tentar usar o inflector genérico pra uma palavra que ele não conhece.
-      duration = "#{duration_days} #{duration_days == 1 ? 'dia' : 'dias'}"
-
-      [ range, duration ]
-    end
-
-    def formatted(date)
-      date.strftime("%d/%m/%Y")
+      [ "#{duration_days} #{duration_days == 1 ? 'dia' : 'dias'}" ]
     end
 
     # Mesma conta de ScheduleMspdiExporter#item_start/#item_finish — duplicada de propósito

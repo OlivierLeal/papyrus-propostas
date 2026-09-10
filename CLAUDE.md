@@ -589,6 +589,22 @@ caminho padrão de qualquer integração séria.
 - **CI** (`.github/workflows/ci.yml`, jobs `test`/`system-test`) ganhou `default-jre-headless` no
   `apt-get install` — só JRE, o `.class` já vem pronto do repo.
 
+**Atrito de importação no MS Project desktop (2026-09, relato do consultor).** `.mpp` de verdade
+continua fora de alcance (a MPXJ 16.7 só tem writer de MSPDI/MPX/Planner/Primavera/SDEF — nenhum
+de `.mpp`; o binário só sai do próprio Project ou de lib paga tipo Aspose.Tasks). O que incomoda
+não é o formato e sim dois passos que o usuário não conhece: (1) clicar duas vezes no `.xml` não
+abre no MS Project (o Windows não associa `.xml` a ele — vai pro navegador); (2) em Arquivo >
+Abrir o arquivo nem aparece sem trocar o tipo de "Projetos" pra "Formato XML (*.xml)" na caixinha
+embaixo do nome. Duas frentes, sem tocar no formato:
+- `GenerateProposalDocumentTool#schedule_message` passou a dar o passo a passo exato no chat (tipo
+  de arquivo → "Como um novo projeto" → clicar duas vezes não abre).
+- `ScheduleMspdiExporter#with_import_note` injeta a mesma instrução como **comentário XML logo
+  depois da tag `<Project>`** — visível pra quem acaba abrindo o `.xml` num editor/navegador.
+  DEPOIS de `<Project>`, nunca antes: comentário antes da raiz quebra a auto-detecção de formato
+  da MPXJ ("Unsupported file type") e o que a MPXJ recusa uma versão de Project também pode
+  recusar. Teste no `schedule_mspdi_exporter_test.rb` trava que o comentário está lá E que a MPXJ
+  ainda relê o arquivo.
+
 **Bug achado ao vivo, corrigido: `Duration` tinha que ser `TimeUnit.ELAPSED_DAYS`, não
 `TimeUnit.DAYS` (2026-09).** O arquivo abria certo no MPXJ (round-trip acima passava) mas as
 datas saíam TORTAS de verdade dentro do MS Project — "funciona mas é difícil de usar/confiar".
@@ -615,8 +631,9 @@ do Project recalcular.
 
 **Infográfico de linha do tempo (2026-09):** além do `Quadro 9-1` (tabela nativa do Word,
 auditável, todas as fases/atividades), toda proposta com cronograma ganha também um resumo
-VISUAL — círculo numerado + ícone + linha conectando + título/data/duração por atividade, pedido
-pelo consultor com uma referência de uma proposta real da Papyrus. Os dois convivem no documento
+VISUAL — círculo numerado + ícone + linha conectando + título e duração em dias por atividade
+(sem data — pedido do consultor, 2026-09; marco mostra "-" no lugar da duração), pedido pelo
+consultor com uma referência de uma proposta real da Papyrus. Os dois convivem no documento
 (o infográfico entra ANTES da legenda+tabela do mesmo tipo) — o infográfico é o resumo que o
 cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
 
@@ -630,9 +647,10 @@ cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
   em vez de ensinar o filler a lidar com blip duplo de SVG nativo do Word sem necessidade.
 - **Um círculo por ATIVIDADE**, não por fase — a fase não vira círculo próprio, igual a
   referência trazida. Numeração sequencial (01, 02...) por TODO o cronograma, não reinicia por
-  linha nem por página. Datas calculadas com a MESMA conta de `ScheduleMspdiExporter#item_start`/
-  `#item_finish` (duplicada de propósito — mesmo princípio de não abstrair cedo demais, seção
-  11.1 "Decisão de design").
+  linha nem por página. Não mostra data nenhuma (só a duração em dias, `duration_lines`), mas a
+  contagem de dias vem da MESMA conta de `ScheduleMspdiExporter#item_start`/`#item_finish`
+  (duplicada de propósito — mesmo princípio de não abstrair cedo demais, seção 11.1 "Decisão de
+  design").
 - **Ícone por PALAVRA-CHAVE** no título da atividade (`ICON_KEYWORDS`, mapa fechado — mobiliza,
   campo/campanha, desloca, consolida/análise, elabora/relatório, revisão/emissão, envio,
   protocolo, reunião, aprovação) — nunca a IA decidindo; sem match nenhum, ícone genérico neutro
@@ -682,10 +700,11 @@ cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
   Distrito Federal" via `UF_NOMES`/`UF_ARTIGO`. Os placeholders `{{DESCRICAO_SERVICO}}`/
   `{{MUNICIPIOS}}`/`{{ESTADO}}` saíram do modelo (só existiam nessa linha) mas continuam sendo
   passados (inofensivo).
-- **Observações fixas no item de preços** (pedido "deixar fixo"): 4 parágrafos fixos no modelo,
+- **Observações fixas no item de preços** (pedido "deixar fixo"): 5 parágrafos fixos no modelo,
   logo depois do `Quadro 11-1` (Desembolso) e antes de "DADOS BANCÁRIOS" — correção anual
-  IGP-M/IPCA, CNAE 74.90-1-99 (com "PAPYRUS" em negrito), LC 116/2003 código 17.01, e a lista de
-  impostos aplicáveis (tributado em Lauro de Freitas). Ficam do lado comercial (depois de
+  IGP-M/IPCA, CNAE 74.90-1-99 (com "PAPYRUS" em negrito), LC 116/2003 código 17.01, a lista de
+  impostos aplicáveis (tributado em Lauro de Freitas) e a condição de pagamento ("em até 30 dias
+  após emissão da Nota Fiscal (NF)", acrescentada em 2026-09). Ficam do lado comercial (depois de
   `FIRST_COMMERCIAL_HEADING`), não saem na técnica-sozinha.
 - **Prazo padrão 12 meses pra LP/LI**: `GenerateProposalDocumentTool#prazo_execucao_value` força
   "12 (doze) meses contratuais" quando o(s) achado(s) `tipo_licenca` batem `LP_LI_FAMILY_ACTS`

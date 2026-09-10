@@ -10,6 +10,19 @@ class ScheduleMspdiExporterTest < ActiveSupport::TestCase
     assert_nil ScheduleMspdiExporter.new(items: [], start_date: Date.new(2026, 10, 1), unit: :week, name: "Vazio").call
   end
 
+  # Quem clica duas vezes no .xml não abre nada e acaba vendo o arquivo num editor/navegador — a
+  # instrução de importação vai num comentário logo depois de <Project>, onde ela é vista nesse
+  # momento sem quebrar a leitura pela MPXJ (nem, presumivelmente, pelo MS Project).
+  test "embeds a plain-language import note as an XML comment without breaking the parse" do
+    items = [ item(phase: "Mobilização", activity: "Kick-off", start: 1, duration: 1) ]
+    bytes = ScheduleMspdiExporter.new(items: items, start_date: Date.new(2026, 10, 1), unit: :week, name: "Com Nota").call
+
+    assert_includes bytes, "<!--"
+    assert_match(/Formato XML/, bytes)
+    assert_match(/Arquivo > Abrir/, bytes)
+    assert_equal 1, read_back(bytes).count { |task| task.name == "Kick-off" }, "a MPXJ ainda relê o arquivo"
+  end
+
   test "exports phases and activities with correct hierarchy, dates and milestones for weekly items" do
     items = [
       item(phase: "Mobilização", activity: "Assinatura do Contrato", start: 1, duration: 1, milestone: true),

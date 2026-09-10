@@ -38,12 +38,38 @@ class ScheduleMspdiExporter
 
       Tempfile.create([ "schedule", ".xml" ]) do |output|
         run_java!(input.path, output.path)
-        return File.binread(output.path)
+        return with_import_note(File.binread(output.path))
       end
     end
   end
 
+  # Um usuário de MS Project que clica no .xml puro não abre nada (o Windows manda pro navegador),
+  # e no Arquivo > Abrir o arquivo nem aparece sem trocar o tipo pra "Formato XML" na caixinha
+  # embaixo do nome. Quem tropeça nisso normalmente acaba abrindo o .xml num editor/navegador —
+  # então a instrução vai num comentário logo no começo do arquivo, onde ela é vista nesse
+  # momento. O MS Project ignora comentários de XML ao importar, então não afeta a abertura.
+  IMPORT_NOTE = <<~TEXT.strip.freeze
+    Este arquivo é um cronograma no formato de intercâmbio do MS Project (MSPDI).
+    Para abrir: no MS Project, Arquivo > Abrir > Procurar > na caixa de tipo de arquivo
+    (embaixo do nome), troque "Projetos" por "Formato XML (*.xml)" > selecione este arquivo
+    > no assistente de importação, escolha "Como um novo projeto" > Concluir.
+    Clicar duas vezes no arquivo NÃO abre no MS Project (o Windows não associa .xml a ele).
+  TEXT
+
   private
+    # Insere a nota como comentário LOGO DEPOIS da tag de abertura <Project ...>, não antes dela.
+    # Comentário antes da raiz quebra a auto-detecção de formato da MPXJ ("Unsupported file type")
+    # — e o que a MPXJ recusa, uma versão de MS Project também pode recusar. Depois de <Project> o
+    # sniffer já viu `<?xml...?><Project`, detecta normal, e o comentário fica visível pra quem
+    # abrir o .xml num editor/navegador (o caso de quem clica duas vezes e não abre nada).
+    def with_import_note(xml)
+      # File.binread devolve ASCII-8BIT; o MSPDI é UTF-8 por declaração e a nota tem acento.
+      xml = xml.dup.force_encoding("UTF-8")
+      comment = "\n<!--\n#{IMPORT_NOTE}\n-->"
+
+      xml.sub(/(<Project\b[^>]*>)/, "\\1#{comment}")
+    end
+
     def build_payload
       { name: @name, start_date: @start_date.iso8601, tasks: build_tasks }
     end
