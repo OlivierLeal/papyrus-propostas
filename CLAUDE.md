@@ -106,7 +106,10 @@ Relacionamentos principais: `users` 1—N `conversations`; `conversations` 1—N
 
 Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística, sobreposições geoespaciais.
 
-1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do ET, do TR (quando houver) e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). A sugestão é **sempre restrita ao "menu"** de profissionais × entregáveis já cadastrados em `study_templates` para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha sugerida que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada. Se a chamada à IA falhar ou não retornar nenhuma linha válida, o sistema cai automaticamente no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`hours_office_default`/`hours_field_default`) direto do template.
+1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do ET, do TR (quando houver) e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). Dois caminhos, conforme o tipo de estudo ter ou não `study_templates` cadastrados:
+   - **Com `study_templates` (hoje só `eia_rima`):** a sugestão é **restrita ao "menu"** de profissionais × entregáveis já cadastrados para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada e vira achado `sugestao`. Falha/nenhuma linha válida cai no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`hours_office_default`/`hours_field_default`) direto do template.
+   - **Sem `study_templates` (2026-09, pedido da Papyrus):** o "menu" passa a ser `Professional.active` inteiro (menos os `always_included`), com cargo + especialidades, e a IA escolhe QUEM entra e o QUE cada um entrega nesta proposta (`roster_suggestion_prompt`/`apply_roster_lines!`). Continua sem inventar gente (`professional_id` tem que ser de profissional real e ativo — id inválido vira achado `sugestao`), mas o `deliverable_name` é livre (não há catálogo de entregável por tipo de estudo fora do `eia_rima`). Falha/JSON inválido cai no mesmo `rescue` → `build_from_template!` (só Diretoria/Coordenação).
+   - Em ambos os casos os `always_included` (Diretoria/Coordenação) entram sozinhos via `ensure_always_included_lines!`, e o consultor ajusta tudo na Tela de Precificação.
 2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas escritório/campo, mais adição/remoção de linhas fora do menu sugerido (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
 3. **Cálculo** (`ProjectPricing#recalculate!` / `ProposalProfessional#recalculate_subtotal`):
    - `C1` = horas escritório × taxa escritório
@@ -609,6 +612,129 @@ marco (`milestone: true`) agora sai sempre com duração **zero** no MSPDI (conv
 Project), independente de `duration_periods` (que continua `>= 1`, é regra do Gantt do `.docx`,
 não desta exportação) — antes todo marco saía com 1 período de duração, e ficava deslocado depois
 do Project recalcular.
+
+**Infográfico de linha do tempo (2026-09):** além do `Quadro 9-1` (tabela nativa do Word,
+auditável, todas as fases/atividades), toda proposta com cronograma ganha também um resumo
+VISUAL — círculo numerado + ícone + linha conectando + título/data/duração por atividade, pedido
+pelo consultor com uma referência de uma proposta real da Papyrus. Os dois convivem no documento
+(o infográfico entra ANTES da legenda+tabela do mesmo tipo) — o infográfico é o resumo que o
+cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
+
+- **`app/services/schedule_timeline_renderer.rb`** — gera SVG cru (mesmo estilo de
+  `AreaSketchRenderer`: heredoc + método privado por elemento, sem gem de gráficos) e
+  **rasteriza pra PNG antes de devolver**, via `rsvg-convert` (pacote de sistema `librsvg2-bin`,
+  não é gem Ruby — mesmo padrão de "shell pra binário externo, sem bloquear o resto se faltar"
+  já usado pro helper Java do MSPDI e pro `pdftoppm`/`tesseract` do OCR do RAG). SVG nunca chega
+  no `.docx` neste projeto — o `[Content_Types].xml` do modelo só declara PNG/JPG, mesma decisão
+  já tomada pro croqui do KMZ (`GenerateProposalDocumentTool#build_images`) — e continua sendo,
+  em vez de ensinar o filler a lidar com blip duplo de SVG nativo do Word sem necessidade.
+- **Um círculo por ATIVIDADE**, não por fase — a fase não vira círculo próprio, igual a
+  referência trazida. Numeração sequencial (01, 02...) por TODO o cronograma, não reinicia por
+  linha nem por página. Datas calculadas com a MESMA conta de `ScheduleMspdiExporter#item_start`/
+  `#item_finish` (duplicada de propósito — mesmo princípio de não abstrair cedo demais, seção
+  11.1 "Decisão de design").
+- **Ícone por PALAVRA-CHAVE** no título da atividade (`ICON_KEYWORDS`, mapa fechado — mobiliza,
+  campo/campanha, desloca, consolida/análise, elabora/relatório, revisão/emissão, envio,
+  protocolo, reunião, aprovação) — nunca a IA decidindo; sem match nenhum, ícone genérico neutro
+  de reserva. Marco (`milestone: true`) usa a cor de destaque (`MILESTONE_FILL`, `C65911` — mesma
+  do `Quadro 9-1`) em vez da cor padrão do círculo (`CIRCLE_FILL`, `2E75B6` — mesma paleta da
+  tabela, consistência visual com o que já sai na mesma página em vez de inventar cor nova).
+- **Achado ao vivo, corrigido (proposta 21, 34 itens/6 linhas de círculos):** uma imagem SÓ com
+  todas as linhas ficava mais alta que uma página paisagem inteira, e o Word/LibreOffice
+  simplesmente CORTAVA as linhas de baixo — sem erro, sem aviso, as duas últimas fases do
+  cronograma real sumiam do documento por completo. Corrigido: `#call`/`#svgs` devolvem um
+  Result/SVG **por IMAGEM**, não um só — cronograma que não cabe numa imagem só
+  (`MAX_IMAGE_HEIGHT_EMU`, ~5,25pol, com folga pro cabeçalho da página) vira VÁRIAS imagens, cada
+  uma seu próprio parágrafo no `.docx` (`ProposalDocxFiller#schedule_timeline_xml`) — Word/
+  LibreOffice flui cada imagem que sozinha cabe numa página pra próxima página sozinho, sem
+  precisar de quebra de página manual nenhuma. Numeração continua contínua entre as imagens (a
+  segunda imagem começa em "19", não reinicia em "01").
+- **`ProposalDocxFiller`**: `drawing_run_xml` deixou de ter `IMAGE_WIDTH_EMU`/`IMAGE_HEIGHT_EMU`
+  fixos (proporção 4:3, só serve pro mapa) — passa a aceitar cx/cy por chamada, já que o
+  infográfico varia de altura conforme o número de linhas. `insert_schedule_tables!` ganhou o
+  parâmetro `zip` (só pra poder gravar a mídia rasterizada e registrar o relationship, reusando
+  `write_image!`/`add_image_relationship!` — extraído de `fill_images!` pra servir os dois
+  casos).
+- Verificado ao vivo (mesma metodologia de sempre: gerar proposta real via
+  `GenerateProposalDocumentTool`, converter com LibreOffice headless → PDF → captura de tela) —
+  confirmado com um cronograma pequeno (8 itens, 2 linhas) E um grande de verdade (34 itens, 6
+  linhas, proposta 21): as duas imagens saem completas, legíveis, com a numeração contínua batendo
+  (01-18 na primeira imagem, 19-34 na segunda), fluindo pra página seguinte sozinhas, e a tabela
+  `Quadro 9-1` continua saindo certa logo depois.
+- **CI** (`.github/workflows/ci.yml`, jobs `test`/`system-test`) ganhou `librsvg2-bin` no
+  `apt-get install`, ao lado do `default-jre-headless` já lá.
+
+**Rodada de revisão da Papyrus sobre a proposta QAIR (PTC26018, 2026-09) — correções pontuais:**
+- **Quadro SUMÁRIO DE REVISÕES saía cortado** pela borda direita da página: tinha `tblW`/`tblGrid`
+  de 9912 dxa num corpo de texto de 8504 dxa (margens de 1701 dxa em `w:pgMar`) e era `w:jc
+  center` + `tblLayout fixed`, então a coluna "Data" era clipada. Reescaladas as 3 colunas pra
+  1253/5450/1791 (soma 8494, igual às outras 3 tabelas do modelo) por substituição de string crua
+  no XML; removido também o `<w:ind w:left="-1094"/><w:jc w:val="right"/>` que um re-save do Word
+  tinha deixado nas linhas-molde 04–10 (era o desalinhamento visível). Teste em
+  `proposal_docx_filler_test.rb` trava que NENHUMA `<w:tbl>` do modelo passe da área útil de texto.
+- **"CONTRATADA" → "PAPYRUS" em negrito**: além da troca do texto (feita antes), os runs onde
+  "PAPYRUS" aparece agora foram divididos pra a palavra ficar em `<w:b/>` isolada (obrigação 7.1
+  sobre relatórios + os 2 usos na seção PRAZO), igual "PAPYRUS" já aparecia nas obrigações 7.2.
+- **Linha "Ref.:" concordava errado**: o modelo trazia `nos municípios de {{MUNICIPIOS}}` cravado
+  no plural (saía errado com 1 município). Virou `Ref.: {{REF_LINHA}}`, montada em
+  `GenerateProposalDocumentTool#build_ref_linha` — "no município de X" / "nos municípios de X e Y"
+  conforme a contagem, e "estado da Bahia" / "estado de São Paulo" / "estado do Pará" / "no
+  Distrito Federal" via `UF_NOMES`/`UF_ARTIGO`. Os placeholders `{{DESCRICAO_SERVICO}}`/
+  `{{MUNICIPIOS}}`/`{{ESTADO}}` saíram do modelo (só existiam nessa linha) mas continuam sendo
+  passados (inofensivo).
+- **Observações fixas no item de preços** (pedido "deixar fixo"): 4 parágrafos fixos no modelo,
+  logo depois do `Quadro 11-1` (Desembolso) e antes de "DADOS BANCÁRIOS" — correção anual
+  IGP-M/IPCA, CNAE 74.90-1-99 (com "PAPYRUS" em negrito), LC 116/2003 código 17.01, e a lista de
+  impostos aplicáveis (tributado em Lauro de Freitas). Ficam do lado comercial (depois de
+  `FIRST_COMMERCIAL_HEADING`), não saem na técnica-sozinha.
+- **Prazo padrão 12 meses pra LP/LI**: `GenerateProposalDocumentTool#prazo_execucao_value` força
+  "12 (doze) meses contratuais" quando o(s) achado(s) `tipo_licenca` batem `LP_LI_FAMILY_ACTS`
+  (LP/LI/RLP/RLI/LPI) — pedido do consultor ("sempre estabelecer… nestes casos"). Regra
+  determinística, sobrepõe o texto da IA; nos demais atos vale o que a IA escreveu.
+  `Proposal#license_act_acronyms` virou público pra isso (reusa `#license_acronyms_in`).
+- **Equipe sem `study_template`: a IA mapeia a partir do cadastro completo (2026-09, pedido da
+  Charlene — "cadastrar um template por tipo de estudo é difícil").** Antes, tipo de estudo sem
+  `study_templates` (tudo menos `eia_rima`) fazia `build_with_ai_suggested_team!` sair só com a
+  Diretoria/Coordenação. Agora, nesse caso, o "menu" da IA passa a ser `Professional.active` (menos
+  os `always_included`, que o sistema junta sozinho) com cargo + especialidades, e ela escolhe
+  QUEM entra e o QUE cada um entrega nesta proposta (`roster_suggestion_prompt`/
+  `apply_roster_lines!`). Continua restrito a `professional_id` real e ativo (a IA nunca inventa
+  gente; id inválido vira achado `sugestao`); o `deliverable_name` é livre (não há catálogo de
+  entregável fora do `eia_rima`). `eia_rima` mantém o caminho estrito de sempre (`study_templates`
+  + `apply_lines!`) — é um menu curado melhor que mapeamento livre. Falha/JSON inválido cai no
+  `rescue` → `build_from_template!` (só Diretoria/Coordenação), igual antes.
+- **Quadro EQUIPE TÉCNICA do `.docx` virou dinâmico (2026-09).** Era um esqueleto quase fixo
+  (Charlene/Ricardo/Pedro/Molina cravados no XML + 2 vagas de placeholder — `{{EQUIPE_LIDER_*}}` e
+  `{{EQUIPE_SEG_TRABALHO_*}}`, preenchidas por `Proposal#team_slot_for_docx`, que devolvia a
+  Charlene como "Líder do Projeto" numa proposta sem template). Agora a tabela (índice 2) é
+  preenchida por linha, uma por `proposal_professional`, via `Proposal#team_rows_for_docx` →
+  `[SETOR, FUNÇÃO, PROFISSIONAL, HABILITAÇÃO/REGISTRO]`. A tabela-molde do modelo foi reduzida a
+  cabeçalho + 1 linha em branco (era 7 linhas com `vMerge`), e `team_slot_for_docx`/os 4
+  placeholders `{{EQUIPE_*}}` foram removidos.
+  - **SETOR derivado** (`Proposal#docx_team_sector`, sem cadastro novo — decisão do consultor):
+    Diretoria = `always_included` com "diretor" no cargo; Gestão = os demais `always_included`
+    (Coordenação); Execução = todo o resto. Linhas ordenadas por setor e depois por nome. O texto
+    do setor **repete por linha** (sem `vMerge` — mais simples, decisão do consultor).
+  - **FUNÇÃO** = `proposal_professional.deliverable_name` (o que a pessoa entrega NESTA proposta),
+    não o cargo genérico. **HABILITAÇÃO** = `professional.specialties — professional.registration`.
+  - Verificado ao vivo (LibreOffice headless → PDF → captura): 5 membros em 3 setores saem todos,
+    agrupados, fluindo pra página seguinte quando não cabem. Efeito colateral aceito: quando uma
+    linha quebra entre páginas, a célula SETOR da continuação sai vazia (mesmo comportamento da
+    tabela antiga).
+- **Objetivo/Caracterização vazando pro escopo + parágrafos longos**: reforços só de PROMPT —
+  `param :objetivo_dos_servicos`/`:caracterizacao_do_empreendimento` agora dizem o que NÃO entra
+  em cada seção, e o `description` da ferramenta pede parágrafos de no máximo ~5 linhas.
+- **Órgão sempre genérico no TEXTO da proposta (2026-09, pedido da Charlene):** o `description` da
+  ferramenta proíbe escrever o nome/sigla de qualquer órgão (INEMA, IBAMA, FEPAM, CETESB, INEA,
+  SEMA, SPRH...) ou de sistema interno (SEI/SEIA/e-Protocolo) no corpo do documento — a IA usa
+  "o órgão ambiental", "o órgão ambiental licenciador", "o órgão interveniente". Assim o texto
+  serve pra qualquer caso. A identificação do órgão específico continua acontecendo normalmente
+  no estudo/achados/CAL (`ProcessEtJob`, mapa estado→órgão, `ProcessLegalNormsJob`) — só não vai
+  pro texto entregue ao cliente.
+- **Ainda pendente da mesma rodada:** correção de português/concordância no texto gerado (não há
+  passo de revisão gramatical hoje — só o reforço de prompt), extração do destinatário ("Prezado
+  Sr. X") a partir do e-mail do cliente anexado como complementar, e o achado "capa" / "dados
+  bancários" (o consultor pediu pra deixar de fora desta rodada).
 
 ---
 

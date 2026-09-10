@@ -328,6 +328,62 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_not @proposal.generated_documents.attached?
   end
 
+  test "a linha Ref.: concorda em número com um único município e traz o estado por extenso" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(municipios: "Morro do Chapéu", estado: "BA"))
+
+    texto = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_includes texto, "no município de Morro do Chapéu, estado da Bahia."
+    assert_not_includes texto, "nos municípios de Morro do Chapéu"
+  end
+
+  test "a linha Ref.: vai pro plural quando há mais de um município" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(municipios: "Juazeiro e Sobradinho", estado: "BA"))
+
+    texto = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_includes texto, "nos municípios de Juazeiro e Sobradinho, estado da Bahia."
+  end
+
+  test "prazo é forçado a 12 meses contratuais quando o ato de licenciamento é da família LP/LI" do
+    @proposal.update!(document_split: "combined")
+    @proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "RLP", source_kind: "et")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(prazo_de_execucao: "conforme cronograma de protocolo"))
+
+    texto = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_includes texto, "12 (doze) meses contratuais"
+    assert_not_includes texto, "conforme cronograma de protocolo"
+  end
+
+  test "prazo respeita o texto da IA quando o ato de licenciamento não é LP/LI" do
+    @proposal.update!(document_split: "combined")
+    @proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "LO", source_kind: "et")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(prazo_de_execucao: "180 dias corridos"))
+
+    assert_includes document_texts(@proposal.generated_documents.first).join(" "), "180 dias corridos"
+  end
+
+  test "as observações fixas do item de preços saem no documento e nunca aparece 'CONTRATADA'" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    texto = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_includes texto, "corrigidos anualmente pelo IGP-M ou IPCA"
+    assert_includes texto, "Lei Complementar 116/2003"
+    assert_includes texto, "tributado em Lauro de Freitas"
+    assert_not_includes texto, "CONTRATADA"
+  end
+
   private
     # PNG mínimo (1x1) válido — só precisa abrir como imagem de verdade, não importa o conteúdo.
     PNG_1X1 = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")

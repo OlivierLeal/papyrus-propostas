@@ -101,7 +101,7 @@ class ProposalDocxFiller
             table_node = doc.xpath("//w:tbl", NS)[table_index]
             fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false))
           end
-          insert_schedule_tables!(doc, schedules)
+          insert_schedule_tables!(doc, schedules, zip)
           fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
 
           # O bloco de assinatura técnico (ver TECHNICAL_SIGNATURE_*) só faz sentido separado do
@@ -193,11 +193,18 @@ class ProposalDocxFiller
 
         filename = "#{token.downcase}.png"
         rel_id = "rId_#{token}"
-        zip.get_output_stream("word/media/#{filename}") { |f| f.write(bytes) }
-        add_image_relationship!(zip, rel_id, filename)
+        write_image!(zip, rel_id, filename, bytes)
 
-        run.replace(Nokogiri::XML::DocumentFragment.parse(drawing_run_xml(rel_id, filename)))
+        run.replace(Nokogiri::XML::DocumentFragment.parse(drawing_run_xml(rel_id, filename, IMAGE_WIDTH_EMU, IMAGE_HEIGHT_EMU)))
       end
+    end
+
+    # Grava a mídia em word/media/ e registra o relationship — extraído de fill_images! pra
+    # servir também o infográfico do cronograma (insert_schedule_tables!), que não substitui
+    # token nenhum (o desenho nasce do zero, não existe {{TOKEN}} pra ele no modelo).
+    def write_image!(zip, rel_id, filename, bytes)
+      zip.get_output_stream("word/media/#{filename}") { |f| f.write(bytes) }
+      add_image_relationship!(zip, rel_id, filename)
     end
 
     def add_image_relationship!(zip, rel_id, filename)
@@ -208,10 +215,12 @@ class ProposalDocxFiller
 
     # xmlns de w/wp/r/a/pic auto-declarados aqui pra ficar autossuficiente — o fragmento é
     # parseado fora do contexto do documento principal (sem herdar as declarações da raiz
-    # <w:document>), então precisa carregar as próprias.
-    def drawing_run_xml(rel_id, filename)
+    # <w:document>), então precisa carregar as próprias. cx/cy em EMU por chamada (não fixo) —
+    # o mapa da área de estudo sempre usa a mesma proporção 4:3 (IMAGE_WIDTH_EMU/IMAGE_HEIGHT_EMU),
+    # mas o infográfico do cronograma varia de altura conforme o número de linhas de círculos.
+    def drawing_run_xml(rel_id, filename, width_emu, height_emu)
       <<~XML
-        <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="#{IMAGE_WIDTH_EMU}" cy="#{IMAGE_HEIGHT_EMU}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="9001" name="#{filename}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="#{filename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="#{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="#{IMAGE_WIDTH_EMU}" cy="#{IMAGE_HEIGHT_EMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>
+        <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="#{width_emu}" cy="#{height_emu}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="9001" name="#{filename}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="#{filename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="#{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="#{width_emu}" cy="#{height_emu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>
       XML
     end
 
@@ -245,10 +254,10 @@ class ProposalDocxFiller
     # existia, sem mudar nada nela) e um paisagem (fecha a seção 2, as tabelas) — o resto do
     # documento (VALIDADE DA PROPOSTA em diante, até o bloco de assinatura) volta pro retrato
     # sozinho, herdando do <w:sectPr> final que já existe no corpo (seção 3, implícita).
-    def insert_schedule_tables!(doc, schedules)
+    def insert_schedule_tables!(doc, schedules, zip)
       return if schedules.blank?
 
-      xml = schedule_block_xml(schedules)
+      xml = schedule_block_xml(schedules, zip)
       return if xml.blank?
 
       anchor = doc.xpath("//w:t[contains(text(), '{{PRAZO_EXECUCAO}}')]", NS).first
@@ -258,7 +267,7 @@ class ProposalDocxFiller
       paragraph.add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
     end
 
-    def schedule_block_xml(schedules)
+    def schedule_block_xml(schedules, zip)
       quadro_number = 0
       tables_xml = +""
 
@@ -267,6 +276,7 @@ class ProposalDocxFiller
         next unless payload
 
         quadro_number += 1
+        tables_xml << schedule_timeline_xml(type, payload, zip)
         tables_xml << schedule_caption_xml("Quadro #{SECAO_PRAZO_NUMERO}-#{quadro_number}: #{SCHEDULE_CAPTIONS.fetch(type)}")
         tables_xml << ScheduleTableBuilder.new(payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type)).build_xml
       end
@@ -274,6 +284,33 @@ class ProposalDocxFiller
       return "" if tables_xml.blank?
 
       "#{section_break_paragraph_xml(PORTRAIT_SECT_XML)}#{tables_xml}#{section_break_paragraph_xml(LANDSCAPE_SECT_XML)}"
+    end
+
+    # Infográfico visual (ScheduleTimelineRenderer) ANTES da legenda+tabela do mesmo tipo —
+    # resumo primeiro, detalhe auditável depois. Não bloqueia nada: sem rsvg-convert instalado,
+    # ou cronograma sem itens, o renderer devolve nil e só a tabela (de sempre) aparece — mesma
+    # filosofia não-bloqueante do mapa (Mapbox) e do MSPDI.
+    def schedule_timeline_xml(type, payload, zip)
+      results = ScheduleTimelineRenderer.new(
+        items: payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type)
+      ).call
+
+      # Um Result por IMAGEM (normalmente uma só; mais de uma quando o cronograma tem linhas
+      # demais pra caber numa página só — ver ScheduleTimelineRenderer::MAX_IMAGE_HEIGHT_EMU).
+      # Cada uma vira seu PRÓPRIO parágrafo — Word/LibreOffice flui cada imagem que sozinha cabe
+      # numa página pra próxima página sozinho, sem precisar de quebra de página manual.
+      results.each_with_index.map do |result, index|
+        filename = "cronograma_#{type}_#{index + 1}.png"
+        rel_id = "rId_CRONOGRAMA_#{type.upcase}_#{index + 1}"
+        write_image!(zip, rel_id, filename, result.png_bytes)
+
+        centered_paragraph_xml(drawing_run_xml(rel_id, filename, result.width_emu, result.height_emu))
+      end.join
+    end
+
+    def centered_paragraph_xml(run_xml)
+      "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" \
+      "<w:pPr><w:jc w:val=\"center\"/></w:pPr>#{run_xml}</w:p>"
     end
 
     def schedule_caption_xml(text)

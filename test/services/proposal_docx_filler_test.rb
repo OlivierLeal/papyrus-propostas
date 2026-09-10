@@ -17,6 +17,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     # 3 = desembolso (o quadro de preço por linha saiu do modelo na revisão de 2026-08).
     @tables = {
       1 => { rows: [ [ "EIA", "Digital (PDF)" ], [ "RIMA", "Digital (PDF)" ] ] },
+      2 => { rows: [ [ "Diretoria", "Diretora de Negócios", "Charlene Luz", "Engenheira. CREA 1." ],
+                     [ "Execução", "Geoprocessamento e Cartografia", "Rodrigo Moate", "Geógrafo. CREA 2." ] ] },
       3 => { rows: [ [ "Assinatura do contrato", "13.473,00", "25/03/2026" ] ], auto_number: true }
     }
   end
@@ -209,6 +211,36 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_equal 1, data_rows.size
     assert_equal [ "01", "Ajuste de escopo", "18/08/2026" ], cell_texts(data_rows[0])
+  end
+
+  test "preenche o quadro EQUIPE TÉCNICA (índice 2) com uma linha por membro, incluindo a coluna SETOR" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    doc = parsed_document(bytes)
+
+    equipe = doc.xpath("//w:tbl", NS)[2]
+    data_rows = equipe.xpath(".//w:tr", NS)[1..]
+
+    assert_equal 2, data_rows.size
+    assert_equal [ "Diretoria", "Diretora de Negócios", "Charlene Luz", "Engenheira. CREA 1." ], cell_texts(data_rows[0])
+    assert_equal [ "Execução", "Geoprocessamento e Cartografia", "Rodrigo Moate", "Geógrafo. CREA 2." ], cell_texts(data_rows[1])
+    refute_includes document_xml(bytes), "{{EQUIPE_LIDER_PROJETO_NOME}}"
+  end
+
+  # A tabela SUMÁRIO DE REVISÕES saía com 9912 dxa de largura num corpo de texto de 8504 dxa
+  # (margens de 1701 dxa) — a coluna "Data" era cortada pela borda da página em produção. Trava
+  # que nenhuma tabela do modelo passe da área útil de texto.
+  test "nenhuma tabela do modelo é mais larga que a área útil de texto da página" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    doc = parsed_document(bytes)
+
+    page = doc.at_xpath("//w:body/w:sectPr/w:pgSz", NS)
+    margins = doc.at_xpath("//w:body/w:sectPr/w:pgMar", NS)
+    usable = page["w:w"].to_i - margins["w:left"].to_i - margins["w:right"].to_i
+
+    doc.xpath("//w:tbl", NS).each_with_index do |tbl, index|
+      grid_width = tbl.xpath("./w:tblGrid/w:gridCol", NS).sum { |col| col["w:w"].to_i }
+      assert grid_width <= usable, "tabela #{index} tem #{grid_width} dxa de largura, área útil é #{usable} dxa"
+    end
   end
 
   test "fill removes the Papyrus logo from the header of page 1 only, keeping it from page 2 on" do
@@ -427,6 +459,49 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_not_includes commercial_xml, "Quadro 9-1: Cronograma do Serviço."
     # A técnica não fica truncada no meio do bloco novo — a validade (seção seguinte) continua lá.
     assert_includes technical_xml, "VALIDADE DA PROPOSTA"
+  end
+
+  # Infográfico visual (ScheduleTimelineRenderer) — resumo antes do detalhe: entra ANTES da
+  # legenda+tabela do mesmo tipo, nunca depois. Roda o rsvg-convert de verdade (mesma disciplina
+  # de sempre — round-trip real, não só "o XML parece certo").
+  test "fill embeds a rasterized timeline image right before its Quadro caption" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+    xml = document_xml(bytes)
+
+    assert_includes xml, 'r:embed="rId_CRONOGRAMA_SERVICO_1"'
+    assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
+    assert_includes zip_entry_content(bytes, "word/_rels/document.xml.rels"), 'Id="rId_CRONOGRAMA_SERVICO_1"'
+    assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 9-1: Cronograma do Serviço.")
+  end
+
+  test "fill numbers a separate image/relationship per schedule type present" do
+    bytes = @filler.fill(
+      placeholders: @placeholders, tables: @tables,
+      schedules: { "servico" => schedule_payload("servico"), "implantacao" => schedule_payload("implantacao") }
+    )
+
+    entries = zip_entry_names(bytes)
+    assert_includes entries, "word/media/cronograma_servico_1.png"
+    assert_includes entries, "word/media/cronograma_implantacao_1.png"
+  end
+
+  # rsvg-convert ausente (ou qualquer outra falha do renderer) não pode derrubar a tabela — mesma
+  # filosofia não-bloqueante do mapa/MSPDI. Simula o renderer sem imagem nenhuma (mesmo retorno
+  # de quando o binário não está instalado) sem precisar desinstalar nada de verdade.
+  test "a schedule the renderer can't produce an image for still leaves the table intact" do
+    original_call = ScheduleTimelineRenderer.instance_method(:call)
+    ScheduleTimelineRenderer.define_method(:call) { [] }
+
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+    xml = document_xml(bytes)
+
+    # O modelo já tem <w:drawing> de sobra (logo da capa etc.) — o que importa é que NENHUM
+    # arquivo/relationship do cronograma foi criado, não a ausência de <w:drawing> no geral.
+    assert_not_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
+    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Mobilização"
+  ensure
+    ScheduleTimelineRenderer.define_method(:call, original_call)
   end
 
   test "fill_split still produces openable docx files with a schedule table" do

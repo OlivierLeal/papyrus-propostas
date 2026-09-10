@@ -38,6 +38,22 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     informação veio, escreva por extenso dentro da própria frase (ex.: "conforme informado no
     ET", "conforme o Termo de Referência", "conforme condicionante do IPHAN") — nunca a marca
     entre colchetes.
+
+    Ao se referir à prestadora do serviço no texto das seções, escreva sempre "a Papyrus"
+    (ou "PAPYRUS") — nunca "a CONTRATADA" nem "a Contratada". O modelo já usa "PAPYRUS" nas
+    obrigações e no prazo; o texto que você escrever tem que seguir o mesmo termo.
+
+    Parágrafos curtos: no máximo ~5 linhas cada. Se um parágrafo ficar mais longo que isso,
+    quebre em dois ou mais. Vale principalmente para objetivo_dos_servicos,
+    caracterizacao_do_empreendimento e os parágrafos introdutórios do escopo.
+
+    No texto das seções, refira-se ao órgão licenciador e aos demais órgãos de forma GENÉRICA:
+    "o órgão ambiental", "o órgão ambiental licenciador", "o órgão interveniente", "os órgãos
+    intervenientes". NÃO escreva o nome nem a sigla de nenhum deles (INEMA, IBAMA, FEPAM, CETESB,
+    INEA, SEMA, SPRH, nem sistema interno tipo SEI/SEIA/e-Protocolo), mesmo que apareçam nos
+    achados ou nos documentos desta conversa. O texto da proposta tem que servir pra qualquer
+    caso — a identificação do órgão específico é usada no estudo e nos achados, não vai no corpo
+    do documento entregue ao cliente.
   DESC
 
   param :nome_cliente, desc: "Razão social do cliente/contratante"
@@ -46,8 +62,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :municipios, desc: "Município(s) do empreendimento"
   param :estado, desc: "Sigla do estado (ex.: BA)"
   param :cnpj_cliente, desc: "CNPJ do cliente, ou \"A confirmar\" se não souber"
-  param :objetivo_dos_servicos, desc: "Texto da seção 'Objetivo dos Serviços'"
-  param :caracterizacao_do_empreendimento, desc: "Texto da seção 'Caracterização do Empreendimento'"
+  param :objetivo_dos_servicos, desc: "Texto da seção 'Objetivo dos Serviços' — CURTO, no máximo 2 frases: só O QUÊ e PRA QUÊ " \
+    "(qual serviço/assessoria, para qual ato de licenciamento, do empreendimento com suas características essenciais — " \
+    "nº de aerogeradores/MW/etc. — e onde). NÃO descreva aqui o que o serviço abrange, as etapas, a metodologia ou o " \
+    "que será diagnosticado: isso é escopo_e_metodologia/topicos_escopo. Frases como \"O presente serviço abrange…\", " \
+    "\"considerando que…\" ou qualquer detalhamento de execução NÃO entram nesta seção."
+  param :caracterizacao_do_empreendimento, desc: "Texto da seção 'Caracterização do Empreendimento' — só a descrição FACTUAL do " \
+    "empreendimento: o que é, onde fica, composição (sub-parques, aerogeradores, potência), e o histórico da licença " \
+    "quando houver (processo nº, data de publicação, validade). NÃO escreva aqui o que a proposta/serviço vai fazer " \
+    "(\"a presente proposta refere-se a…\", \"com foco na atualização de…\") — isso é escopo. Quebre em 2+ parágrafos; " \
+    "nunca um único parágrafo longo."
   param :nome_documento_tr, desc: "Nome do documento de ET (Pedido Técnico do Estudo) usado como base do escopo — " \
     "o nome do parâmetro ficou de antes da separação ET/TR, mas o valor esperado é o do ET, o documento principal"
   param :escopo_e_metodologia, desc: "Parágrafo(s) INTRODUTÓRIOS da seção 'Escopo e Metodologia' — contexto geral de " \
@@ -281,9 +305,6 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     end
 
     def build_placeholders(args, images)
-      lider = @proposal.team_slot_for_docx
-      seguranca = @proposal.team_slot_for_docx(role_hint: "segurança")
-
       {
         "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("combined"),
         "REVISAO_ATUAL" => format("%02d", @proposal.version - 1),
@@ -295,21 +316,83 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "DESCRICAO_SERVICO" => args[:descricao_servico],
         "MUNICIPIOS" => args[:municipios],
         "ESTADO" => args[:estado],
+        "REF_LINHA" => build_ref_linha(args),
         "CNPJ_CLIENTE" => args[:cnpj_cliente],
         "NOME_CLIENTE_ASSINATURA" => args[:nome_cliente],
         "OBJETIVO_SERVICOS" => args[:objetivo_dos_servicos],
         "CARACTERIZACAO_EMPREENDIMENTO" => args[:caracterizacao_do_empreendimento],
         "NOME_DOCUMENTO_TR" => args[:nome_documento_tr],
         "ESCOPO_METODOLOGIA" => escopo_com_itens_nao_previstos(args),
-        "PRAZO_EXECUCAO" => args[:prazo_de_execucao],
-        "EQUIPE_LIDER_PROJETO_NOME" => lider[0],
-        "EQUIPE_LIDER_PROJETO_QUALIFICACAO" => lider[1],
-        "EQUIPE_SEG_TRABALHO_NOME" => seguranca[0],
-        "EQUIPE_SEG_TRABALHO_QUALIFICACAO" => seguranca[1],
+        "PRAZO_EXECUCAO" => prazo_execucao_value(args),
         "PRECO_TOTAL" => @proposal.docx_total_price,
         "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(args[:obrigacoes_contratante_adicionais]),
         "OBRIGACOES_PAPYRUS_ADICIONAIS" => join_lines(args[:obrigacoes_papyrus_adicionais])
       }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }
+    end
+
+    # Linha "Ref.:" montada aqui (não mais um texto fixo no modelo) só pra resolver a concordância:
+    # o modelo trazia "nos municípios de {{MUNICIPIOS}}" cravado no plural e saía errado com um
+    # município só (achado real, revisão QAIR). A preposição do estado ("da Bahia" / "de São Paulo"
+    # / "do Pará") vem de UF_ARTIGO — Distrito Federal não leva "estado".
+    UF_NOMES = {
+      "AC" => "Acre", "AL" => "Alagoas", "AP" => "Amapá", "AM" => "Amazonas", "BA" => "Bahia",
+      "CE" => "Ceará", "DF" => "Distrito Federal", "ES" => "Espírito Santo", "GO" => "Goiás",
+      "MA" => "Maranhão", "MT" => "Mato Grosso", "MS" => "Mato Grosso do Sul", "MG" => "Minas Gerais",
+      "PA" => "Pará", "PB" => "Paraíba", "PR" => "Paraná", "PE" => "Pernambuco", "PI" => "Piauí",
+      "RJ" => "Rio de Janeiro", "RN" => "Rio Grande do Norte", "RS" => "Rio Grande do Sul",
+      "RO" => "Rondônia", "RR" => "Roraima", "SC" => "Santa Catarina", "SP" => "São Paulo",
+      "SE" => "Sergipe", "TO" => "Tocantins"
+    }.freeze
+    UF_ARTIGO = {
+      "AC" => "do", "AL" => "de", "AP" => "do", "AM" => "do", "BA" => "da", "CE" => "do",
+      "ES" => "do", "GO" => "de", "MA" => "do", "MT" => "de", "MS" => "de", "MG" => "de",
+      "PA" => "do", "PB" => "da", "PR" => "do", "PE" => "de", "PI" => "do", "RJ" => "do",
+      "RN" => "do", "RS" => "do", "RO" => "de", "RR" => "de", "SC" => "de", "SP" => "de",
+      "SE" => "de", "TO" => "do"
+    }.freeze
+
+    def build_ref_linha(args)
+      descricao = args[:descricao_servico].to_s.strip
+      linha = +"Proposta de serviço para #{descricao}"
+      linha << municipio_clause(args[:municipios])
+      linha << estado_clause(args[:estado])
+      "#{linha.sub(/\.\z/, '')}."
+    end
+
+    def municipio_clause(municipios)
+      municipios = municipios.to_s.strip
+      return "" if municipios.blank?
+
+      partes = municipios.split(/\s*(?:,|;|\/|\se\s)\s*/).reject(&:blank?)
+      preposicao = partes.size <= 1 ? "no município de" : "nos municípios de"
+      ", #{preposicao} #{municipios}"
+    end
+
+    def estado_clause(estado)
+      sigla = estado.to_s.strip.upcase
+      return "" if sigla.blank?
+      return ", no Distrito Federal" if sigla == "DF"
+
+      nome = UF_NOMES[sigla]
+      return ", estado #{estado}" if nome.blank?
+
+      ", estado #{UF_ARTIGO.fetch(sigla, 'de')} #{nome}"
+    end
+
+    # Padrão da Papyrus: licenciamento da família Prévia/Instalação (LP, LI, RLP, RLI e combinações)
+    # tem SEMPRE prazo contratual de 12 meses — pedido do consultor ("sempre estabelecer prazo de
+    # doze meses contratuais nestes casos"). Regra determinística: não fica a cargo da IA. Nos
+    # demais atos vale o prazo que a IA escreveu a partir do ET/TR.
+    LP_LI_FAMILY_ACTS = %w[LP LI RLP RLI LPI].freeze
+
+    def prazo_execucao_value(args)
+      return "12 (doze) meses contratuais" if lp_li_family_licensing?
+
+      args[:prazo_de_execucao]
+    end
+
+    def lp_li_family_licensing?
+      (@proposal.license_act_acronyms & LP_LI_FAMILY_ACTS).any?
     end
 
     # Remove qualquer "[F12]" residual (recursivo — topicos_escopo/produtos/itens_nao_previstos
@@ -335,7 +418,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     end
 
     # Os índices são a POSIÇÃO da tabela no modelo, não um id: 0 = sumário de revisões,
-    # 1 = produtos, 2 = equipe técnica (preenchida por placeholder, não por linha), 3 = desembolso.
+    # 1 = produtos, 2 = equipe técnica (linhas de proposal_professionals, ver Proposal#team_rows_
+    # for_docx — virou dinâmica em 2026-09), 3 = desembolso.
     # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de existir.
     # Frase de fechamento fixa: é a proteção comercial da Papyrus e aparece em toda proposta
     # validada por eles. Não fica a cargo da IA lembrar dela.
@@ -390,6 +474,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       {
         0 => { rows: @proposal.docx_revision_rows(current_description: description) },
         1 => { rows: produtos },
+        2 => { rows: @proposal.team_rows_for_docx },
         3 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
     end

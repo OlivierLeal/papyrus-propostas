@@ -57,19 +57,33 @@ class Proposal < ApplicationRecord
   # registro profissional de alguém. "Líder do projeto" = quem tem mais horas de escritório
   # (normalmente quem coordena); "Segurança do trabalho" = quem tiver esse termo no cargo, se
   # existir alguém assim na equipe desta proposta (em branco se não houver).
-  def team_slot_for_docx(role_hint: nil)
-    lines = project_pricing&.proposal_professionals&.includes(:professional).to_a || []
-    return [ "", "" ] if lines.empty?
+  # Siglas dos atos de licenciamento (LP, LI, RLP, ASV…) dos achados `tipo_licenca` ativos desta
+  # conversa. Usado pelo gerador do .docx pra aplicar a regra de prazo de 12 meses da família
+  # Prévia/Instalação (ver GenerateProposalDocumentTool) e, internamente, por #ato_licenciamento.
+  def license_act_acronyms
+    conversation.project_findings.active.where(field: "tipo_licenca").pluck(:value)
+      .flat_map { |texto| license_acronyms_in(texto) }.uniq
+  end
 
-    line = if role_hint
-      lines.find { |l| l.professional.role.to_s.downcase.include?(role_hint.downcase) }
-    else
-      lines.max_by(&:hours_office)
-    end
-    return [ "", "" ] unless line
+  # Linhas do Quadro "Membros da equipe" (seção EQUIPE TÉCNICA) do .docx: uma por
+  # proposal_professional, no formato [SETOR, FUNÇÃO, PROFISSIONAL, HABILITAÇÃO/REGISTRO].
+  # A tabela do modelo virou dinâmica (2026-09) — antes era um esqueleto quase fixo com só 2
+  # vagas de placeholder (líder + segurança do trabalho). O SETOR é derivado: Diretoria =
+  # always_included com "diretor" no cargo; Gestão = os demais always_included (Coordenação);
+  # Execução = todo o resto. Ordena por setor e depois por nome. FUNÇÃO é o entregável dele
+  # NESTA proposta (deliverable_name), não o cargo genérico.
+  DOCX_TEAM_SECTORS = { diretoria: 0, gestao: 1, execucao: 2 }.freeze
 
-    professional = line.professional
-    [ professional.name, [ professional.role, professional.registration ].compact_blank.join(" — ") ]
+  def team_rows_for_docx
+    lines = project_pricing&.proposal_professionals&.includes(:professional)&.to_a || []
+
+    lines
+      .sort_by { |line| [ DOCX_TEAM_SECTORS.fetch(docx_team_sector(line.professional)), line.professional.name.to_s ] }
+      .map do |line|
+        professional = line.professional
+        habilitacao = [ professional.specialties.presence, professional.registration.presence ].compact.join(" — ")
+        [ docx_team_sector_label(professional), line.deliverable_name.to_s, professional.name.to_s, habilitacao ]
+      end
   end
 
   # Preço total por extenso na frase de abertura da seção 10 — o modelo da Papyrus (revisão de
@@ -119,7 +133,17 @@ class Proposal < ApplicationRecord
     pricing = create_project_pricing!
 
     if templates.empty?
+      # Sem menu de horas cadastrado pro tipo de estudo (só eia_rima tem hoje), a IA mapeia o
+      # time a partir do CADASTRO COMPLETO de profissionais (cargo + especialidades) contra o
+      # escopo desta conversa — pedido da Papyrus, "cadastrar um template por tipo de estudo é
+      # difícil". Continua restrito a professional_id real e ativo (a IA nunca inventa gente);
+      # como não há menu de entregável aqui, é a IA quem nomeia o entregável de cada linha.
+      # Falha/resposta vazia cai no rescue -> build_from_template! (só Diretoria/Coordenação),
+      # exatamente o que já saía antes desta mudança.
+      suggestion = fetch_ai_roster_suggestion
+      apply_roster_lines!(pricing, Array(suggestion["linhas"]))
       ensure_always_included_lines!(pricing, templates)
+      update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
       return finalize!(pricing)
     end
 
@@ -193,9 +217,7 @@ class Proposal < ApplicationRecord
     }.freeze
 
     def ato_licenciamento
-      siglas = conversation.project_findings.active.where(field: "tipo_licenca").pluck(:value)
-        .flat_map { |texto| license_acronyms_in(texto) }.uniq
-      siglas.presence&.join("+")
+      license_act_acronyms.presence&.join("+")
     end
 
     def license_acronyms_in(texto)
@@ -251,6 +273,19 @@ class Proposal < ApplicationRecord
       pricing
     end
 
+    # SETOR derivado (sem cadastro novo): Diretoria = always_included com "diretor" no cargo;
+    # Gestão = os demais always_included (Coordenação/Gestão da Papyrus); Execução = o resto.
+    def docx_team_sector(professional)
+      return :execucao unless professional.always_included
+      return :diretoria if professional.role.to_s.downcase.include?("diretor")
+
+      :gestao
+    end
+
+    def docx_team_sector_label(professional)
+      { diretoria: "Diretoria", gestao: "Gestão", execucao: "Execução" }.fetch(docx_team_sector(professional))
+    end
+
     def fetch_ai_suggestion(templates)
       conversation.ask_internally(suggestion_prompt(templates), hide_response: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
@@ -287,6 +322,64 @@ class Proposal < ApplicationRecord
         {
           "linhas": [
             { "professional_id": 12, "deliverable_name": "Coordenação geral", "hours_office": 30, "hours_field": 0 }
+          ],
+          "documentos_separados": false,
+          "justificativa_documentos_separados": "..."
+        }
+      TEXT
+    end
+
+    def fetch_ai_roster_suggestion
+      conversation.ask_internally(roster_suggestion_prompt, hide_response: true)
+      response = conversation.messages.where(role: "assistant").order(:created_at).last
+      AiJsonResponse.parse(response.content) || {}
+    end
+
+    # Usado quando o tipo de estudo NÃO tem study_templates: o "menu" passa a ser o cadastro
+    # inteiro de profissionais (menos os always_included, que o sistema junta sozinho depois).
+    # A IA escolhe QUEM e o QUE cada um faz nesta proposta a partir do cargo/especialidades;
+    # o nome do entregável é livre (não há catálogo de entregável por tipo de estudo).
+    def roster_suggestion_prompt
+      menu = Professional.active.where(always_included: false).order(:name).map do |professional|
+        "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
+        "especialidades: #{professional.specialties.presence || '—'}"
+      end.join("\n")
+
+      <<~TEXT
+        Você é um assistente que monta a composição de equipe para uma proposta de consultoria
+        ambiental, com base em tudo que já foi analisado nesta conversa (ET, TR quando houver,
+        documentos complementares e propostas anteriores semelhantes, se houver).
+
+        Este tipo de estudo ("#{conversation.study_type.name}") não tem um modelo de equipe
+        pré-cadastrado, então o menu abaixo é o QUADRO COMPLETO de profissionais da Papyrus. Para
+        cada necessidade real deste projeto (diagnósticos exigidos, geoprocessamento/cartografia,
+        estudos temáticos, análise jurídica, arqueologia, etc.), escolha o profissional cujo
+        cargo/especialidades melhor atendem e diga o que ele entrega nesta proposta.
+
+        Profissionais disponíveis (não invente professional_id — use só os desta lista; a
+        Diretoria e a Coordenação são adicionadas automaticamente pelo sistema, não precisa
+        incluí-las):
+        #{menu}
+
+        Regras:
+        - Só inclua um profissional se o escopo desta proposta realmente exigir a atuação dele.
+        - "deliverable_name" é o entregável/frente de trabalho dele NESTA proposta (ex.:
+          "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Análise Jurídica").
+        - Sugira as horas de escritório e de campo necessárias para este projeto. Se não tiver
+          base para estimar, use 0 nos dois campos (o consultor ajusta na Tela de Precificação),
+          mas ainda assim inclua a linha.
+        - Um mesmo profissional pode ter mais de uma linha se entregar frentes distintas.
+
+        Diga também se o ET ou o TR exige que a proposta técnica e a comercial sejam apresentadas
+        como documentos/envelopes SEPARADOS (comum em licitação) — se nenhum falar nada, considere
+        que NÃO (documento único).
+
+        Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
+        neste formato:
+
+        {
+          "linhas": [
+            { "professional_id": 12, "deliverable_name": "Geoprocessamento e Cartografia", "hours_office": 40, "hours_field": 0 }
           ],
           "documentos_separados": false,
           "justificativa_documentos_separados": "..."
@@ -364,6 +457,26 @@ class Proposal < ApplicationRecord
       end
     end
 
+    # Versão sem catálogo de entregável (tipo de estudo sem study_templates): valida só que o
+    # professional_id é de um profissional ativo e real; o deliverable_name é o que a IA nomeou.
+    def apply_roster_lines!(pricing, lines)
+      valid = Professional.active.where(always_included: false).index_by(&:id)
+
+      lines.each do |line|
+        professional = valid[line["professional_id"].to_i]
+        deliverable = line["deliverable_name"].to_s.strip
+        next flag_out_of_catalog(line, reason: :roster) if professional.nil? || deliverable.blank?
+
+        hours_office = line["hours_office"].to_f
+        hours_field = line["hours_field"].to_f
+
+        pricing.proposal_professionals.create!(
+          professional: professional, deliverable_name: deliverable,
+          hours_office: hours_office, hours_field: hours_field
+        )
+      end
+    end
+
     def apply_lines!(pricing, lines, templates)
       valid_templates = templates.index_by { |t| [ t.professional_id, t.deliverable_name.to_s.strip.downcase ] }
 
@@ -430,16 +543,18 @@ class Proposal < ApplicationRecord
       end
     end
 
-    def flag_out_of_catalog(line)
+    def flag_out_of_catalog(line, reason: :template)
       professional = Professional.find_by(id: line["professional_id"])
       descricao = [ professional&.name || "profissional ##{line['professional_id']}",
                     line["deliverable_name"].presence ].compact_blank.join(" — ")
+      motivo = reason == :roster ?
+        "A IA sugeriu este profissional para a equipe, mas o professional_id não existe ou está inativo no cadastro. Não entrou na precificação." :
+        "A IA sugeriu esta linha para a equipe, mas ela não existe nos modelos de horas cadastrados para o tipo de estudo. Não entrou na precificação."
 
       conversation.project_findings.create!(
         field: "outro", nature: "sugestao", source_kind: "sistema",
         value: "sugestão de equipe fora do cadastro: #{descricao}",
-        excerpt: "A IA sugeriu esta linha para a equipe, mas ela não existe nos modelos de horas " \
-                 "cadastrados para o tipo de estudo. Não entrou na precificação."
+        excerpt: motivo
       )
     rescue ActiveRecord::RecordInvalid => e
       Rails.logger.warn("[Proposal] não consegui registrar sugestão fora do cadastro: #{e.message}")

@@ -123,9 +123,35 @@ class ProposalTest < ActiveSupport::TestCase
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
     proposal = conversation.create_proposal!(status: "draft")
 
-    pricing = proposal.build_with_ai_suggested_team!
+    pricing = stub_ai_complete({ linhas: [], documentos_separados: false }.to_json) { proposal.build_with_ai_suggested_team! }
 
     assert pricing.proposal_professionals.exists?(professional: professionals(:diretora))
+  end
+
+  # Tipo de estudo SEM study_templates: a IA passa a mapear o time a partir do cadastro completo
+  # de profissionais (cargo/especialidades) em vez de a proposta sair só com a Diretoria — pedido
+  # da Papyrus ("cadastrar um template por tipo de estudo é difícil").
+  test "build_with_ai_suggested_team! sem study_templates mapeia a equipe a partir do cadastro completo" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
+    proposal = conversation.create_proposal!(status: "draft")
+
+    ai_response = {
+      linhas: [
+        { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", hours_office: 40, hours_field: 24 },
+        { professional_id: professionals(:inativo).id, deliverable_name: "Meio Físico", hours_office: 10, hours_field: 0 }
+      ],
+      documentos_separados: true
+    }.to_json
+
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    linha = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
+    assert_equal "Diagnóstico de Fauna e Flora", linha.deliverable_name
+    assert_equal 40, linha.hours_office
+    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora)), "a Diretoria continua entrando sozinha"
+    assert_not pricing.proposal_professionals.exists?(professional: professionals(:inativo)), "profissional inativo não entra"
+    assert_equal "separated", proposal.reload.document_split
+    assert_includes conversation.project_findings.where(nature: "sugestao").last.value, "fora do cadastro"
   end
 
   test "build_from_template! includes always_included professionals even when the study_type has no study_templates at all" do
@@ -262,30 +288,22 @@ class ProposalTest < ActiveSupport::TestCase
     assert_nil proposal.project_pricing.schedule_empreendimento_start_date
   end
 
-  test "team_slot_for_docx returns the professional with the most office hours by default" do
+  test "team_rows_for_docx: uma linha por profissional, [SETOR, FUNÇÃO, PROFISSIONAL, HABILITAÇÃO], agrupada por setor" do
     proposal = proposals(:priced_proposal)
+    proposal.project_pricing.proposal_professionals.create!(
+      professional: professionals(:diretora), deliverable_name: "Direção de Negócios",
+      hours_office: 0, hours_field: 0, subtotal: 0
+    )
 
-    name, qualification = proposal.team_slot_for_docx
+    rows = proposal.team_rows_for_docx
 
-    assert_equal "Pedro Almeida", name
-    assert_includes qualification, "Coordenador Técnico"
-  end
-
-  test "team_slot_for_docx matches a role hint case-insensitively" do
-    proposal = proposals(:priced_proposal)
-
-    name, = proposal.team_slot_for_docx(role_hint: "bióloga")
-
-    assert_equal "Beth Ferreira", name
-  end
-
-  test "team_slot_for_docx returns blanks when there is no matching professional" do
-    proposal = proposals(:priced_proposal)
-
-    name, qualification = proposal.team_slot_for_docx(role_hint: "segurança do trabalho")
-
-    assert_equal "", name
-    assert_equal "", qualification
+    # Diretora (always_included, cargo "Diretora de Negócios") vem primeiro, no setor Diretoria;
+    # coordenador e bióloga (execução) depois.
+    assert_equal [ "Diretoria", "Direção de Negócios", "Diretora Fixa", "Direção — CREA 00000" ], rows.first
+    coordenador_row = rows.find { |r| r[2] == "Pedro Almeida" }
+    assert_equal "Execução", coordenador_row[0]
+    assert_equal "Coordenação geral", coordenador_row[1] # FUNÇÃO é o entregável desta proposta, não o cargo
+    assert_includes coordenador_row[3], "CREA 12345"
   end
 
   # O modelo da Papyrus (revisão de 2026-08) deixou de trazer o quadro de preço aberto por linha:

@@ -100,8 +100,9 @@ jobs:
       - name: Install packages
         # default-jre-headless: só pra rodar o helper Java do cronograma em MSPDI (ScheduleMspdiExporter,
         # CLAUDE.md seção 8) — o .class já vem compilado no repo (lib/java/build/), então JRE basta,
-        # não precisa de JDK/javac aqui.
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips default-jre-headless
+        # não precisa de JDK/javac aqui. librsvg2-bin: rsvg-convert, pra rasterizar o infográfico do
+        # cronograma (ScheduleTimelineRenderer) de SVG pra PNG antes de entrar no .docx.
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips default-jre-headless librsvg2-bin
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -142,8 +143,9 @@ jobs:
       - name: Install packages
         # default-jre-headless: só pra rodar o helper Java do cronograma em MSPDI (ScheduleMspdiExporter,
         # CLAUDE.md seção 8) — o .class já vem compilado no repo (lib/java/build/), então JRE basta,
-        # não precisa de JDK/javac aqui.
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips default-jre-headless
+        # não precisa de JDK/javac aqui. librsvg2-bin: rsvg-convert, pra rasterizar o infográfico do
+        # cronograma (ScheduleTimelineRenderer) de SVG pra PNG antes de entrar no .docx.
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips default-jre-headless librsvg2-bin
 
       - name: Checkout code
         uses: actions/checkout@v6
