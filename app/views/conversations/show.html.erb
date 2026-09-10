@@ -145,8 +145,14 @@
         <% end %>
       </div>
 
-      <div class="lg:col-span-3 bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh] lg:h-full lg:min-h-0"
-           data-controller="chat-scroll">
+      <div class="relative lg:col-span-3 bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh] lg:h-full lg:min-h-0"
+           data-controller="chat-scroll file-drop"
+           data-action="dragover->file-drop#over dragleave->file-drop#leave drop->file-drop#drop">
+        <div data-file-drop-target="overlay" hidden
+             class="absolute inset-2 z-20 rounded-box border-2 border-dashed border-primary bg-base-100/90 flex items-center justify-center pointer-events-none">
+          <span class="text-primary font-semibold">Solte o arquivo aqui para anexar</span>
+        </div>
+
         <h2 class="font-semibold text-base-content p-6 pb-4 shrink-0 border-b border-base-300">Conversa</h2>
 
         <% visible_messages = @conversation.messages.where(internal: false).order(:created_at) %>
