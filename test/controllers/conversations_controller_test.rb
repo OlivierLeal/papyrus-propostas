@@ -240,6 +240,22 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "show renders a document attached to a message as a chip inside the bubble, not just in the sidebar" do
+    conversation = conversations(:reviewing_conversation)
+    message = conversation.messages.create!(role: "user", content: "essa é a versão final revisada", internal: false)
+    message.attachments.attach(
+      io: StringIO.new("conteúdo"), filename: "proposta_revisada.docx",
+      content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      metadata: { kind: "complementary" }
+    )
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_match "essa é a versão final revisada", response.body
+    assert_match "proposta_revisada.docx", response.body
+  end
+
   test "show renders a message asking for a TR when the study type is not identified yet" do
     conversation = conversations(:reviewing_conversation)
     conversation.update_column(:study_type_id, nil)

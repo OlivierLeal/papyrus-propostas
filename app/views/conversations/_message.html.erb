@@ -75,12 +75,32 @@
             </div>
           <% end %>
         </dl>
-      <% elsif message.content.present? %>
-        <% cited = message.cited_findings %>
-        <%= tag.div render_markdown(message.content, findings: cited), class: "markdown-content", data: (animate ? { controller: "typewriter" } : {}) %>
-        <%# Fora do elemento animado de propósito: o typewriter revela nó de texto por nó de texto
-            e engoliria o conteúdo do popover junto. %>
-        <%= render_citation_popovers(cited) %>
+      <% elsif message.attachments.attached? || message.content.present? %>
+        <%# Anexos (ET/TR/KMZ/complementar) junto do texto digitado — sem isso a mensagem só
+            mostrava o texto, e um documento enviado junto ficava invisível aqui (só aparecia na
+            sidebar "Documentos", sem nenhum vínculo visual com a mensagem que o mandou). %>
+        <% if message.attachments.attached? %>
+          <ul class="flex flex-col gap-1.5 <%= "mb-2" if message.content.present? %>">
+            <% message.attachments.each do |attachment| %>
+              <li>
+                <%= link_to rails_blob_path(attachment, disposition: "attachment"),
+                      class: "flex items-center gap-1.5 px-2 py-1 rounded-field bg-base-100/20 hover:bg-base-100/40 min-w-0" do %>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5 shrink-0">
+                    <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+                  </svg>
+                  <span class="truncate"><%= attachment.filename %></span>
+                <% end %>
+              </li>
+            <% end %>
+          </ul>
+        <% end %>
+        <% if message.content.present? %>
+          <% cited = message.cited_findings %>
+          <%= tag.div render_markdown(message.content, findings: cited), class: "markdown-content", data: (animate ? { controller: "typewriter" } : {}) %>
+          <%# Fora do elemento animado de propósito: o typewriter revela nó de texto por nó de
+              texto e engoliria o conteúdo do popover junto. %>
+          <%= render_citation_popovers(cited) %>
+        <% end %>
       <% else %>
         <span class="italic opacity-60">(sem conteúdo)</span>
       <% end %>
