@@ -11,6 +11,9 @@ class RespondToMessageJob < ApplicationJob
     # proposal!), então não depende mais do consultor clicar em "Avançar para Precificação" antes.
     conversation.with_tool(GenerateProposalDocumentTool.new(conversation: conversation))
     conversation.with_tool(AddExternalCostTool.new(proposal: conversation.proposal)) if conversation.proposal
+    # Inserir só a seção de cronograma num .docx finalizado que o consultor anexou (proposta
+    # gerada pelo sistema e revisada por fora — ver CLAUDE.md seção 8).
+    conversation.with_tool(InsertScheduleSectionTool.new(proposal: conversation.proposal)) if conversation.proposal
     # Consulta ao acervo histórico (CLAUDE.md seção 11.1). Só é registrada quando há acervo
     # indexado — sem isso a IA "descobre" uma ferramenta que sempre volta vazia e passa a
     # mencionar buscas que não trouxeram nada.

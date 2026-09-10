@@ -605,6 +605,37 @@ embaixo do nome. Duas frentes, sem tocar no formato:
   recusar. Teste no `schedule_mspdi_exporter_test.rb` trava que o comentário está lá E que a MPXJ
   ainda relê o arquivo.
 
+**Inserir só o cronograma num `.docx` finalizado por fora (2026-09, pedido do consultor).** Caso
+real: a proposta foi gerada pelo sistema, revisada no Word por fora, e o consultor quer só a
+seção de cronograma (tabela `Quadro 9-N` + infográfico, página paisagem) de volta nesse `.docx`,
+sem refazer o documento inteiro. `GenerateProposalDocumentTool` só monta o `.docx` do zero a
+partir do modelo — não servia.
+- **`ProposalDocxFiller#insert_schedule_section(docx_bytes, schedules:)`** — abre o `.docx` do
+  consultor (não o modelo), roda só `schedule_block_xml` (o mesmo que `#insert_schedule_tables!`
+  usa — infográfico + legenda + tabela, entre duas quebras de seção retrato/paisagem) e devolve
+  os bytes. `schedules` no mesmo formato de `#fill`. Ancora pelo TÍTULO "PRAZO DE EXECUÇÃO"
+  (`SCHEDULE_ANCHOR_HEADING`, o token `{{PRAZO_EXECUCAO}}` não existe num `.docx` finalizado) —
+  insere logo antes do próximo Título 1. Sem essa seção → `SectionAnchorError` (a ferramenta
+  traduz numa mensagem de chat). **Se o `.docx` já tem um bloco de cronograma** (legenda "Quadro
+  9-N"), REMOVE o bloco paisagem antigo — dos dois parágrafos com `<w:sectPr>` que o cercam — e
+  põe o novo no lugar, pra não sair cronograma duplicado (o `.docx` gerado pelo sistema quase
+  sempre já tem um). As props de seção (cabeçalho/rodapé) vêm do `<w:sectPr>` final do PRÓPRIO
+  `.docx` enviado (`sect_props_from_xml`, string, não Nokogiri) — um "Salvar como" no Word pode
+  ter renumerado os `r:id` do `rId15`/`rId16` do modelo.
+- **`InsertScheduleSectionTool`** — registrada em `RespondToMessageJob` só quando
+  `conversation.proposal` existe. Acha o `.docx` mais recente anexado na conversa (padrão de
+  `LearnFromRevisedProposalTool#latest_attachment`, só `.docx`), pega o cronograma direto do
+  `project_pricing` (gêmeo de `GenerateProposalDocumentTool#build_schedules`/`#schedule_payload`),
+  presume início do mês que vem pra data ausente (mesma regra determinística), chama
+  `insert_schedule_section` e anexa o resultado em `generated_documents`
+  (`kind: "revised_with_schedule"`). Sem `schedule_items` nenhum → enfileira `SuggestScheduleJob`
+  e pede pra tentar de novo (nunca chama IA síncrono, mesmo motivo de sempre). Devolve o formato
+  `{ success:, version:, filenames:, message: }` que o card de download do chat já entende.
+- Verificado ao vivo (gerar `.docx` sem cronograma pelo modelo → `insert_schedule_section` →
+  LibreOffice → PDF → captura): bloco paisagem com infográfico + `Quadro 9-1` + tabela entra
+  logo depois de "PRAZO DE EXECUÇÃO", cabeçalho/rodapé preservados, resto do documento intacto;
+  rodar 2× não duplica.
+
 **Bug achado ao vivo, corrigido: `Duration` tinha que ser `TimeUnit.ELAPSED_DAYS`, não
 `TimeUnit.DAYS` (2026-09).** O arquivo abria certo no MPXJ (round-trip acima passava) mas as
 datas saíam TORTAS de verdade dentro do MS Project — "funciona mas é difícil de usar/confiar".

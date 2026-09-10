@@ -15,6 +15,10 @@
 class ProposalDocxFiller
   NS = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }.freeze
 
+  # Levantado por #insert_schedule_section quando o .docx enviado não tem onde ancorar o
+  # cronograma (nenhuma seção "PRAZO DE EXECUÇÃO"). A ferramenta traduz isso numa mensagem de chat.
+  class SectionAnchorError < StandardError; end
+
   # Tamanho de exibição fixo pro mapa da área de estudo (6 x 4,5 pol, proporção 4:3 — mesma
   # proporção pedida à Mapbox Static Images API, ver MapboxStaticMap::WIDTH/HEIGHT). EMU
   # (914400 = 1 polegada) não depende da dimensão real do arquivo de imagem: o Word escala
@@ -73,6 +77,31 @@ class ProposalDocxFiller
       technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :technical) },
       commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :commercial) }
     }
+  end
+
+  # Insere (ou substitui) SÓ a seção paisagem de cronograma — tabela Quadro 9-N + infográfico —
+  # num .docx JÁ FINALIZADO que veio de fora: o consultor gerou a proposta pelo sistema, revisou
+  # no Word por fora, e quer só o cronograma de volta. Diferente de #fill/#fill_split, que montam
+  # o documento inteiro a partir do modelo — aqui o documento do consultor É a base e a única
+  # mudança é o bloco de cronograma, ancorado pelo título "PRAZO DE EXECUÇÃO" (o token
+  # {{PRAZO_EXECUCAO}} não existe mais num .docx finalizado). `schedules` no mesmo formato de #fill.
+  # `template_path` não é usado neste caminho — pode instanciar com nil.
+  def insert_schedule_section(docx_bytes, schedules:)
+    return docx_bytes if schedules.blank?
+
+    Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
+      File.binwrite(tmp.path, docx_bytes)
+
+      Zip::File.open(tmp.path) do |zip|
+        document_xml = zip.read("word/document.xml")
+        doc = Nokogiri::XML(document_xml)
+        ensure_png_content_type!(zip)
+        insert_or_replace_schedule_block!(doc, schedules, zip, sect_props_from_xml(document_xml))
+        zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
+      end
+
+      File.binread(tmp.path)
+    end
   end
 
   private
@@ -267,7 +296,11 @@ class ProposalDocxFiller
       paragraph.add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
     end
 
-    def schedule_block_xml(schedules, zip)
+    # portrait_sect/landscape_sect: propriedades de seção pra abrir/fechar o bloco paisagem. No
+    # caminho do modelo (#build → #insert_schedule_tables!) são as constantes de sempre; em
+    # #insert_schedule_section vêm do próprio .docx do consultor (que pode ter cabeçalho/rodapé
+    # com r:id diferente se passou por "Salvar como" no Word).
+    def schedule_block_xml(schedules, zip, portrait_sect: PORTRAIT_SECT_XML, landscape_sect: LANDSCAPE_SECT_XML)
       quadro_number = 0
       tables_xml = +""
 
@@ -283,7 +316,97 @@ class ProposalDocxFiller
 
       return "" if tables_xml.blank?
 
-      "#{section_break_paragraph_xml(PORTRAIT_SECT_XML)}#{tables_xml}#{section_break_paragraph_xml(LANDSCAPE_SECT_XML)}"
+      "#{section_break_paragraph_xml(portrait_sect)}#{tables_xml}#{section_break_paragraph_xml(landscape_sect)}"
+    end
+
+    SCHEDULE_ANCHOR_HEADING = "PRAZO DE EXECU" # começo do título da seção 9, sem depender do acento/final
+
+    # Margens do bloco paisagem (mesmas do LANDSCAPE_SECT_XML) — separadas pra reusar quando as
+    # props de seção vêm do .docx do consultor em #insert_schedule_section.
+    LANDSCAPE_PGMAR_XML = '<w:pgMar w:top="1701" w:right="1418" w:bottom="1701" w:left="1418" w:header="708" w:footer="708" w:gutter="0"/>'
+
+    # Insere o bloco de cronograma no .docx do consultor (não no modelo). Se já houver um bloco
+    # (o .docx gerado pelo sistema quase sempre tem — legenda "Quadro 9-N"), remove o antigo e põe
+    # o novo no lugar, pra não sair cronograma duplicado num documento que vai pro cliente.
+    def insert_or_replace_schedule_block!(doc, schedules, zip, sect_props)
+      portrait_sect, landscape_sect = sect_props
+      xml = schedule_block_xml(schedules, zip, portrait_sect: portrait_sect, landscape_sect: landscape_sect)
+      raise SectionAnchorError, "Não consegui montar o bloco de cronograma." if xml.blank?
+
+      children = doc.at_xpath("//w:body", NS).children.to_a
+      fragment = Nokogiri::XML::DocumentFragment.parse(xml)
+
+      if (range = existing_schedule_block_range(children))
+        children[range.begin].add_previous_sibling(fragment)
+        range.each { |i| children[i].remove }
+      else
+        schedule_anchor_node(children).add_previous_sibling(fragment)
+      end
+    end
+
+    # Bloco de cronograma já presente: legenda "Quadro 9-N: …" cercada por dois parágrafos com
+    # <w:sectPr> (retrato antes, paisagem depois — ver schedule_block_xml). Num .docx gerado pelo
+    # sistema esses são os ÚNICOS <w:sectPr> em nível de parágrafo (a capa usa titlePg, não seção
+    # própria), então varrer irmãos pra trás/frente a partir da legenda acha os limites do bloco.
+    def existing_schedule_block_range(children)
+      caption = children.index do |node|
+        node.name == "p" && node.xpath(".//w:t", NS).map(&:text).join.strip.start_with?("Quadro #{SECAO_PRAZO_NUMERO}-")
+      end
+      return nil unless caption
+
+      start_i = caption.downto(0).find { |i| section_break_paragraph?(children[i]) }
+      end_i = (caption...children.size).find { |i| section_break_paragraph?(children[i]) }
+      return nil unless start_i && end_i && start_i < end_i
+
+      start_i..end_i
+    end
+
+    def section_break_paragraph?(node)
+      node.name == "p" && !node.at_xpath("./w:pPr/w:sectPr", NS).nil?
+    end
+
+    # Onde inserir quando ainda não há bloco: logo ANTES do próximo Título 1 depois de "PRAZO DE
+    # EXECUÇÃO" (fim da seção 9). Sem essa seção no documento não dá pra ancorar nada.
+    def schedule_anchor_node(children)
+      heading = children.index do |node|
+        node.name == "p" && node.xpath(".//w:t", NS).map(&:text).join.strip.upcase.start_with?(SCHEDULE_ANCHOR_HEADING)
+      end
+      raise SectionAnchorError, "Não encontrei a seção \"PRAZO DE EXECUÇÃO\" no documento — sem ela não sei onde encaixar o cronograma." unless heading
+
+      next_heading = ((heading + 1)...children.size).find { |i| heading_style?(children[i]) }
+      children[next_heading || (children.size - 1)]
+    end
+
+    # Props de seção (cabeçalho/rodapé/tamanho de página) a partir do <w:sectPr> final do corpo do
+    # .docx enviado — string, não Nokogiri, pra a saída ser previsível e não arrastar declaração de
+    # namespace redundante. Fallback pras constantes do modelo se não achar.
+    def sect_props_from_xml(document_xml)
+      final = document_xml[%r{<w:sectPr\b[^>]*>.*?</w:sectPr>(?=\s*</w:body>)}m]
+      return [ PORTRAIT_SECT_XML, LANDSCAPE_SECT_XML ] unless final
+
+      inner = final.sub(%r{\A<w:sectPr\b[^>]*>}, "").sub(%r{</w:sectPr>\z}, "")
+      refs = inner.scan(%r{<w:(?:header|footer)Reference\b[^>]*/>}).join
+      refs = SECT_HEADER_FOOTER_XML if refs.empty?
+
+      pgsz = inner[%r{<w:pgSz\b[^>]*/>}] || '<w:pgSz w:w="11906" w:h="16838"/>'
+      width = pgsz[/w:w="(\d+)"/, 1] || "11906"
+      height = pgsz[/w:h="(\d+)"/, 1] || "16838"
+      pgmar = inner[%r{<w:pgMar\b[^>]*/>}] ||
+        '<w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/>'
+
+      portrait = "#{refs}#{pgsz}#{pgmar}"
+      landscape = %(#{refs}<w:pgSz w:orient="landscape" w:w="#{height}" w:h="#{width}"/>#{LANDSCAPE_PGMAR_XML})
+      [ portrait, landscape ]
+    end
+
+    # word/media/*.png já é declarado pelo [Content_Types].xml de todo .docx gerado pelo sistema
+    # (herda do modelo). Rede de segurança caso um "Salvar como" tenha mexido nisso.
+    def ensure_png_content_type!(zip)
+      types = zip.read("[Content_Types].xml")
+      return if types.include?('Extension="png"')
+
+      patched = types.sub(%r{(<Types\b[^>]*>)}, %(\\1<Default Extension="png" ContentType="image/png"/>))
+      zip.get_output_stream("[Content_Types].xml") { |f| f.write(patched) }
     end
 
     # Infográfico visual (ScheduleTimelineRenderer) ANTES da legenda+tabela do mesmo tipo —

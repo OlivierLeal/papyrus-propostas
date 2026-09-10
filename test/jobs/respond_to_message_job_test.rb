@@ -46,6 +46,14 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
 
     assert_includes with_tool_calls, GenerateProposalDocumentTool
     assert_includes with_tool_calls, AddExternalCostTool
+    # Só com proposta: inserir o cronograma num .docx finalizado depende da precificação existir.
+    assert_includes with_tool_calls, InsertScheduleSectionTool
+  end
+
+  test "does not register the schedule-insertion tool when there is no proposal yet" do
+    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+
+    assert_not_includes with_tool_calls, InsertScheduleSectionTool
   end
 
   test "registers the CAL legal norms tool only when CAL_EMAIL/CAL_PASSWORD are configured" do

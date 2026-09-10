@@ -520,6 +520,45 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     end
   end
 
+  # insert_schedule_section: pega um .docx JÁ FINALIZADO (gerado antes, sem cronograma) e encaixa
+  # só a seção paisagem de cronograma logo depois de "PRAZO DE EXECUÇÃO", sem tocar em mais nada.
+  test "insert_schedule_section adds the landscape schedule block to a finished docx, leaving the rest intact" do
+    finished = @filler.fill(placeholders: @placeholders, tables: @tables) # sem schedules — "revisado por fora"
+    assert_not_includes document_xml(finished), "Quadro 9-1: Cronograma do Serviço."
+
+    result = ProposalDocxFiller.new(nil).insert_schedule_section(finished, schedules: { "servico" => schedule_payload("servico") })
+    xml = document_xml(result)
+
+    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Mobilização"
+    assert_includes xml, 'w:orient="landscape"', "o bloco de cronograma tem que abrir numa seção paisagem"
+    assert_includes zip_entry_names(result), "word/media/cronograma_servico_1.png"
+    assert_includes zip_entry_content(result, "word/_rels/document.xml.rels"), "media/cronograma_servico_1.png"
+    assert_includes xml, "PRAZO DE EXECU", "a seção âncora continua no documento"
+    assert_includes xml, @placeholders["OBJETIVO_SERVICOS"] || "", "o resto do texto do documento fica intacto" if @placeholders["OBJETIVO_SERVICOS"].present?
+  end
+
+  test "insert_schedule_section replaces an existing schedule block instead of duplicating it" do
+    with_block = ProposalDocxFiller.new(nil).insert_schedule_section(
+      @filler.fill(placeholders: @placeholders, tables: @tables), schedules: { "servico" => schedule_payload("servico") }
+    )
+    twice = ProposalDocxFiller.new(nil).insert_schedule_section(with_block, schedules: { "servico" => schedule_payload("servico") })
+
+    assert_equal 1, document_xml(twice).scan("Quadro 9-1: Cronograma do Serviço.").size
+  end
+
+  test "insert_schedule_section raises SectionAnchorError when the doc has no PRAZO DE EXECUÇÃO section" do
+    no_anchor = zip_with_document_xml(
+      "<w:document xmlns:w=\"#{NS['w']}\"><w:body>" \
+      "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>OUTRA SEÇÃO</w:t></w:r></w:p>" \
+      "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr></w:body></w:document>"
+    )
+
+    assert_raises(ProposalDocxFiller::SectionAnchorError) do
+      ProposalDocxFiller.new(nil).insert_schedule_section(no_anchor, schedules: { "servico" => schedule_payload("servico") })
+    end
+  end
+
   private
     def document_xml(bytes)
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
@@ -551,6 +590,22 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
         tmp.flush
         Zip::File.open(tmp.path) { |zip| return zip.read(entry_name).force_encoding("UTF-8") }
       end
+    end
+
+    # .docx mínimo (só o que insert_schedule_section lê): Content_Types, rels e o document.xml dado.
+    def zip_with_document_xml(document_xml)
+      buffer = Zip::OutputStream.write_buffer do |zip|
+        zip.put_next_entry("[Content_Types].xml")
+        zip.write('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' \
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' \
+          '<Default Extension="png" ContentType="image/png"/>' \
+          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+        zip.put_next_entry("word/_rels/document.xml.rels")
+        zip.write('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>')
+        zip.put_next_entry("word/document.xml")
+        zip.write(document_xml)
+      end
+      buffer.string
     end
 
     def schedule_payload(schedule_type)
