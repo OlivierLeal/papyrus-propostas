@@ -33,9 +33,10 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
 
     # reviewing_conversation não tem proposal ainda, por isso a de custo externo fica de fora.
-    # A de memória (RememberForFutureProposalsTool) vale em qualquer conversa: o consultor pode
-    # corrigir a IA sobre algo reaproveitável a qualquer momento.
-    assert_equal [ GenerateProposalDocumentTool, RememberForFutureProposalsTool ], with_tool_calls
+    # A de memória (RememberForFutureProposalsTool) e a de aprender com versão revisada
+    # (LearnFromRevisedProposalTool) valem em qualquer conversa: o consultor pode corrigir a IA
+    # ou anexar uma versão final revisada a qualquer momento.
+    assert_equal [ GenerateProposalDocumentTool, RememberForFutureProposalsTool, LearnFromRevisedProposalTool ], with_tool_calls
   end
 
   test "registers both the document-generation and external-cost tools when there is a proposal" do

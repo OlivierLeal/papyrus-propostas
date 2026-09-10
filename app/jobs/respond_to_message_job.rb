@@ -19,6 +19,10 @@ class RespondToMessageJob < ApplicationJob
     # motivo do acervo acima: ferramenta que sempre falha vira algo que a IA acha que tentou.
     conversation.with_tool(SearchLegalNormsTool.new) if Cal::Client.configured?
     conversation.with_tool(RememberForFutureProposalsTool.new(conversation: conversation))
+    # Aprender com a versão final revisada manualmente pela Papyrus, quando anexada no chat (ver
+    # CLAUDE.md seção 11.1) — mesma disciplina de curadoria da ferramenta acima, card pendente até
+    # o consultor aprovar.
+    conversation.with_tool(LearnFromRevisedProposalTool.new(conversation: conversation))
     # #complete_with_lock, nunca #complete cru — serializa este turno contra qualquer
     # #ask_internally concorrente na MESMA conversa (ex.: SuggestScheduleJob, enfileirado de
     # dentro de uma tool call deste turno, ver Conversation#complete_with_lock).

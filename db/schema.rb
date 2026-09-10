@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_09_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_012450) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -158,8 +158,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_130000) do
     t.string "job_number"
     t.string "origin", default: "acervo", null: false
     t.integer "page_count", default: 0, null: false
+    t.text "pending_text"
     t.jsonb "pricing_data"
     t.string "relative_path", null: false
+    t.string "review_status", default: "approved", null: false
     t.integer "revision"
     t.string "role", null: false
     t.string "role_source", null: false
@@ -168,6 +170,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_130000) do
     t.string "spreadsheet_path"
     t.string "status", null: false
     t.string "subject"
+    t.bigint "submitted_by_id"
     t.boolean "superseded", default: false, null: false
     t.datetime "updated_at", null: false
     t.integer "year"
@@ -176,6 +179,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_130000) do
     t.index ["origin"], name: "index_historical_proposals_on_origin"
     t.index ["role", "superseded"], name: "index_historical_proposals_on_role_and_superseded"
     t.index ["source_sha256"], name: "index_historical_proposals_on_source_sha256", unique: true
+    t.index ["submitted_by_id"], name: "index_historical_proposals_on_submitted_by_id"
   end
 
   create_table "ibge_municipalities", force: :cascade do |t|
@@ -582,6 +586,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_130000) do
   add_foreign_key "geospatial_results", "conversations"
   add_foreign_key "historical_proposal_chunks", "historical_proposals"
   add_foreign_key "historical_proposals", "conversations"
+  add_foreign_key "historical_proposals", "users", column: "submitted_by_id"
   add_foreign_key "knowledge_notes", "conversations"
   add_foreign_key "knowledge_notes", "general_chats"
   add_foreign_key "knowledge_notes", "users", column: "approved_by_id"

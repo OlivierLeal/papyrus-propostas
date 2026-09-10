@@ -2,6 +2,11 @@ class Conversation < ApplicationRecord
   acts_as_chat
 
   has_many :knowledge_notes, dependent: :destroy
+  # Versões finais revisadas manualmente que o consultor mandou aprender pro acervo RAG (ver
+  # LearnFromRevisedProposalTool/HistoricalProposal#approve!) — sem dependent: propositalmente,
+  # mesma FK sem ON DELETE já existente antes desta associação existir (nenhuma mudança de
+  # comportamento na exclusão de uma conversation).
+  has_many :historical_proposals
   # O entendimento estruturado do projeto (o que foi lido, onde, e com que grau de certeza) e as
   # divergências entre documentos — ver ProjectFinding e ProjectConflict.
   has_many :project_findings, dependent: :destroy

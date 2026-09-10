@@ -44,6 +44,11 @@
         <% if note %>
           <%= render "knowledge_notes/note", note: note %>
         <% end %>
+      <% elsif parsed_content.is_a?(Hash) && parsed_content["historical_proposal_id"].present? %>
+        <% historical_proposal = HistoricalProposal.find_by(id: parsed_content["historical_proposal_id"]) %>
+        <% if historical_proposal %>
+          <%= render "historical_proposal_reviews/card", historical_proposal: historical_proposal %>
+        <% end %>
       <% elsif parsed_content.is_a?(Hash) && parsed_content["success"] && parsed_content["total_atualizado"].present? %>
         <div class="flex items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-success shrink-0">

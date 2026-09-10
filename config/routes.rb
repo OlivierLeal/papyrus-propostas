@@ -13,6 +13,17 @@ Rails.application.routes.draw do
       end
     end
 
+    # Aprovação da versão final revisada que o consultor mandou aprender pro acervo (ver
+    # LearnFromRevisedProposalTool/HistoricalProposal#approve!). Controller próprio (não
+    # "historical_proposals") porque o recurso de domínio é HistoricalProposal, mas a ação aqui é
+    # só de revisão/aprovação — mesma separação já usada em knowledge_notes.
+    resources :historical_proposals, controller: "historical_proposal_reviews", only: [] do
+      member do
+        post :approve
+        post :reject
+      end
+    end
+
     resources :project_conflicts, only: [] do
       member do
         post :resolve

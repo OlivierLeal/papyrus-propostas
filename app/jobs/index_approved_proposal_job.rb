@@ -76,44 +76,8 @@ class IndexApprovedProposalJob < ApplicationJob
       superseded: false
     )
 
-    HistoricalProposal.transaction do
-      record.save!
-      record.chunks.delete_all
-      insert_chunks(record, text)
-    end
-
-    embed!(record)
-  end
-
-  def insert_chunks(record, text)
-    now = Time.current
-    rows = Rag::SectionChunker.new(text).call.map do |chunk|
-      tags = Rag::SensitivityTagger.new(chunk.content).call
-
-      {
-        historical_proposal_id: record.id, position: chunk.position,
-        section_number: chunk.section_number, section_title: chunk.section_title,
-        content: chunk.content, token_count: chunk.estimated_tokens,
-        sensitive: tags.sensitive, contains_pricing: tags.contains_pricing,
-        sensitivity_reasons: tags.reasons, created_at: now, updated_at: now
-      }
-    end
-
-    HistoricalProposalChunk.insert_all!(rows) if rows.any?
-  end
-
-  def embed!(record)
-    chunks = record.chunks.pending_embedding.to_a
-    return if chunks.empty?
-
-    embedder = Rag::Embedder.new
-    chunks.each_slice(Rag::Embedder::MAX_TEXTS_PER_CALL) do |batch|
-      vectors = embedder.embed_documents(batch.map(&:content))
-      now = Time.current
-
-      batch.each_with_index do |chunk, index|
-        chunk.update_columns(embedding: vectors[index], embedding_model: Rag::Embedder::MODEL_ID, embedded_at: now)
-      end
-    end
+    # Salvar+chunkar+embedar é compartilhado com HistoricalProposal#approve! (ver Rag::
+    # ProposalIndexer) — os dois caminhos convergem aqui, só o gatilho e os atributos acima mudam.
+    Rag::ProposalIndexer.new(record, text).call!
   end
 end

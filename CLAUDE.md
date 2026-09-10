@@ -922,6 +922,39 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
    - **Propostas aprovadas dentro do sistema** — continua adiado: só entrega valor depois que
      existir volume real de propostas aprovadas *pelo próprio sistema* pra indexar; hoje é
      zero. Quando chegar a hora, reaproveita a mesma infraestrutura.
+   - **Aprender com a versão final revisada manualmente (2026-09).** `IndexApprovedProposalJob`
+     só indexa o que passou por `proposals#approve` NESTE sistema — mas às vezes alguém da
+     Papyrus (ex.: Charlene) pega o rascunho que a IA gerou, reescreve/ajusta e produz a versão
+     que realmente vai pro cliente, sem que isso passe pela aprovação daqui (pode nunca ser
+     re-subida como "documento gerado"). Sem um caminho pra essa versão, a IA nunca aprendia com
+     o texto que a Papyrus de fato validou como pronto pra enviar.
+     - `LearnFromRevisedProposalTool` — o consultor anexa o `.docx` final no chat da própria
+       proposta (mesmo mecanismo de documento complementar já existente, sem UI nova) e diz que
+       aquela é a versão final; a ferramenta acha o anexo mais recente da conversa (mesmo
+       princípio de "só o mais recente conta" de `Message#stale_for_llm?`), extrai o texto
+       (`Rag::TextExtractor`) e cria um `HistoricalProposal` com `origin: "revisao_manual"`,
+       `role_source: "consultor"`. Idempotente pelo mesmo checksum de sempre
+       (`source_sha256: "blob:..."`) — reenviar o mesmo arquivo não duplica o card.
+     - **Curadoria não é opcional aqui também** (mesmo princípio do item 4 abaixo,
+       `KnowledgeNote`): a ferramenta não indexa na hora — cria o registro com
+       `review_status: "pending"` e o texto extraído em `pending_text`, e posta um card no chat
+       (mesmo mecanismo de mensagem assistant própria + broadcast já usado pelo card de
+       `KnowledgeNote`). Só quando o consultor aprova (`HistoricalProposal#approve!`,
+       `HistoricalProposalReviewsController`) o texto é chunkado e embedado de verdade.
+     - **Atomicidade por construção, sem filtro em nenhuma busca**: `review_status` default
+       `"approved"` pra todo registro já existente (acervo em disco, `IndexApprovedProposalJob`)
+       — nada muda pra eles. Só o caminho novo nasce `"pending"`, e um registro pendente
+       simplesmente não tem `HistoricalProposalChunk` nenhum ainda — `SimilarJobFinder`/
+       `Retriever`/`SearchHistoricalArchiveTool` só enxergam chunks, então um documento pendente
+       já é inencontrável por construção, sem precisar ensinar nenhuma dessas três consultas a
+       filtrar "pendente". `#approve!` roda tudo (mudar status + chunkar + embedar) numa
+       transação só, mesmo padrão de `KnowledgeNote#approve!`: se embedar falhar (chamada
+       externa), o registro volta exatamente como estava, pending_text incluso, pra tentar de
+       novo — nunca fica "aprovado" sem vetor nenhum.
+     - `Rag::ProposalIndexer` — o passo salvar+chunkar+tagear sensibilidade+embedar que antes
+       vivia dentro de `IndexApprovedProposalJob` foi extraído pra cá, reaproveitado pelos dois
+       chamadores (aprovação de proposta E aprovação deste card) — só o gatilho e os atributos
+       de origem mudam entre os dois.
 
 4. ~~**Memória por cliente**~~ — **implementado** (`KnowledgeNote`), com a curadoria como
    parte do desenho, não como refinamento futuro:
