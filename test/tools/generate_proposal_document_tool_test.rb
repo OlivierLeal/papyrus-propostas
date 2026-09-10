@@ -292,7 +292,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_nil conversation.reload.proposal
   end
 
-  test "broadcasts a refresh after successfully attaching a generated document, so the sidebar updates without F5" do
+  # A tool call roda DENTRO da transação do with_ai_lock (Conversation#complete_with_lock) — um
+  # broadcast daqui chega no navegador antes do commit e ele re-renderiza sem o arquivo novo
+  # ("às vezes tenho que dar F5"). Quem dispara o refresh é RespondToMessageJob, depois do commit.
+  test "does not broadcast from inside the tool call (would race the with_ai_lock commit)" do
     @proposal.update!(document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
@@ -306,7 +309,8 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       Conversation.define_method(:broadcast_refresh, original)
     end
 
-    assert broadcasted
+    assert_not broadcasted
+    assert @proposal.reload.generated_documents.any?, "o documento continua sendo anexado normalmente"
   end
 
   test "returns a friendly error and attaches nothing when the filler raises" do

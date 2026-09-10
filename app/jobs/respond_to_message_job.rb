@@ -5,6 +5,7 @@ class RespondToMessageJob < ApplicationJob
     conversation = Conversation.find(conversation_id)
     conversation.refresh_proposal_state_snapshot!
     before_message_ids = conversation.messages.ids
+    docs_before = generated_docs_count(conversation)
 
     # Sempre registrada, mesmo sem proposal ainda — ela cria a proposta sozinha na primeira vez
     # que é chamada de verdade (ver GenerateProposalDocumentTool#execute/Conversation#ensure_
@@ -31,6 +32,20 @@ class RespondToMessageJob < ApplicationJob
     # dentro de uma tool call deste turno, ver Conversation#complete_with_lock).
     conversation.complete_with_lock
 
+    conversation.broadcast_remove_to conversation, target: "typing_indicator"
+
+    # Se alguma tool call gerou/anexou documento (GenerateProposalDocumentTool,
+    # InsertScheduleSectionTool), a barra lateral "Documentos" e o histórico só apareciam com F5:
+    # o broadcast_refresh saía de DENTRO da tool call, ou seja, DENTRO da transação do
+    # `with_ai_lock` (complete_with_lock) — o navegador re-buscava a página antes do commit e via
+    # o estado velho, sem o arquivo novo (achado ao vivo: "às vezes tenho que dar F5"). Aqui já
+    # está commitado. Um refresh (morph) já traz as mensagens novas + os documentos + a sidebar,
+    # então dispensa o append por mensagem.
+    if generated_docs_count(conversation.reload) != docs_before
+      conversation.broadcast_refresh
+      return
+    end
+
     # Não só a última: RememberForFutureProposalsTool (e qualquer ferramenta que crie um card, ver
     # ProjectConflict) grava uma mensagem assistant PRÓPRIA para o card, separada da resposta em
     # texto — sem broadcast dela aqui, o card só aparecia depois de um F5 na página. animate só na
@@ -40,7 +55,6 @@ class RespondToMessageJob < ApplicationJob
       .where.not(id: before_message_ids).order(:created_at)
     return if new_messages.none?
 
-    conversation.broadcast_remove_to conversation, target: "typing_indicator"
     new_messages.each do |message|
       conversation.broadcast_append_to conversation, target: "messages", partial: "conversations/message",
         locals: { message: message, animate: message == new_messages.last }
@@ -55,6 +69,10 @@ class RespondToMessageJob < ApplicationJob
   end
 
   private
+    def generated_docs_count(conversation)
+      conversation.proposal&.generated_documents&.count || 0
+    end
+
     # Não persiste como Message — isso entraria no histórico enviado de volta pra IA em toda
     # chamada futura (ver Conversation#to_llm). É só um aviso visual, some se a página recarregar.
     def error_text_for(error)

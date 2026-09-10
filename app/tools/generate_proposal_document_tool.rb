@@ -480,9 +480,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       }
     end
 
-    # broadcast_refresh na mão: anexar um blob em generated_documents não passa pelos callbacks de
-    # Conversation (broadcasts_refreshes só reage a create/update/destroy da própria Conversation),
-    # então sem isso o card "Documentos" da barra lateral só atualizava com F5 — achado na prática.
+    # Não faz broadcast aqui: esta tool call roda DENTRO da transação do with_ai_lock
+    # (Conversation#complete_with_lock), então um broadcast daqui chega no navegador ANTES do
+    # commit e ele re-renderiza sem o arquivo novo ("às vezes tenho que dar F5"). Quem dispara o
+    # refresh é RespondToMessageJob, depois do commit, ao notar que generated_documents cresceu.
     def attach!(bytes, filename, kind, description)
       @proposal.generated_documents.attach(
         io: StringIO.new(bytes),
@@ -490,7 +491,6 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         metadata: { kind: kind, version: @proposal.version, description: description }
       )
-      @conversation.broadcast_refresh
     end
 
     # MSPDI (XML do MS Project) por tipo de cronograma presente — ver ScheduleMspdiExporter/

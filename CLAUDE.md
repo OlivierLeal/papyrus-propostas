@@ -655,6 +655,19 @@ partir do modelo — não servia.
   logo depois de "PRAZO DE EXECUÇÃO", cabeçalho/rodapé preservados, resto do documento intacto;
   rodar 2× não duplica.
 
+**"Documento gerado só aparece depois de F5, às vezes" (2026-09, relato do consultor).** Toda tool
+call roda DENTRO da transação do `with_ai_lock` (`Conversation#complete_with_lock`, ver acima). O
+`GenerateProposalDocumentTool#attach!` disparava `@conversation.broadcast_refresh` de lá de dentro
+— o navegador recebia o refresh e re-buscava a página ANTES do commit da transação, via o estado
+velho (sem o arquivo novo), e nada re-broadcastava depois do commit. Intermitente: às vezes a
+re-busca ganhava a corrida do commit, às vezes não. `InsertScheduleSectionTool` nem broadcastava.
+**Correção**: o `broadcast_refresh` saiu das tool calls; `RespondToMessageJob` guarda a contagem
+de `proposal.generated_documents` ANTES do turno e, DEPOIS de `complete_with_lock` retornar (já
+commitado), dispara UM `broadcast_refresh` (morph — já traz mensagens novas + a sidebar
+"Documentos") se a contagem cresceu, em vez do append por mensagem. Teste no
+`respond_to_message_job_test.rb` (stub de `#complete` que anexa um doc → espera `action: "refresh"`
+e nenhum `append`) e no `generate_proposal_document_tool_test.rb` (a tool NÃO broadcasta sozinha).
+
 **Bug achado ao vivo, corrigido: `Duration` tinha que ser `TimeUnit.ELAPSED_DAYS`, não
 `TimeUnit.DAYS` (2026-09).** O arquivo abria certo no MPXJ (round-trip acima passava) mas as
 datas saíam TORTAS de verdade dentro do MS Project — "funciona mas é difícil de usar/confiar".

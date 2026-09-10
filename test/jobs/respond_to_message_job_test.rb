@@ -87,6 +87,30 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     Conversation.define_method(:complete, original_method)
   end
 
+  # "não ta carregando os documentos gerados automaticamente, às vezes tenho que dar F5": a tool
+  # call que anexa um generated_document roda DENTRO da transação do with_ai_lock, então um
+  # broadcast de dentro dela corria com o commit. Agora o job nota que generated_documents cresceu
+  # e dispara UM refresh depois do commit (que já traz mensagens + sidebar), sem o append.
+  test "broadcasts a refresh (not per-message appends) when the turn produced a new generated document" do
+    conversation = conversations(:priced_conversation)
+    proposal = proposals(:priced_proposal)
+
+    original = Conversation.instance_method(:complete)
+    Conversation.define_method(:complete) do
+      proposal.generated_documents.attach(io: StringIO.new("docx"), filename: "proposta.docx",
+        content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        metadata: { version: 1 })
+      messages.create!(role: "assistant", content: "Gerei o documento.")
+    end
+
+    turbo_streams = capture_turbo_stream_broadcasts(conversation) { RespondToMessageJob.perform_now(conversation.id) }
+
+    assert_includes turbo_streams.map { |s| s["action"] }, "refresh"
+    assert_not_includes turbo_streams.map { |s| s["action"] }, "append"
+  ensure
+    Conversation.define_method(:complete, original)
+  end
+
   test "broadcasts a friendly error bubble and does not raise when the AI call errors out" do
     turbo_streams = capture_turbo_stream_broadcasts @conversation do
       stub_ai_error { RespondToMessageJob.perform_now(@conversation.id) }
