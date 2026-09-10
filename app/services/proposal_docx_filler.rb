@@ -253,10 +253,11 @@ class ProposalDocxFiller
       XML
     end
 
-    # "PRAZO DE EXECUÇÃO" é sempre a 9ª seção de nível 1 do modelo (estrutura fixa — mesmo
+    # "PRAZO DE EXECUÇÃO" é sempre a 10ª seção de nível 1 do modelo (estrutura fixa — mesmo
     # princípio de GenerateProposalDocumentTool::SECAO_ESCOPO_NUMERO), por isso dá pra numerar o
-    # quadro aqui, sem a IA saber a posição real do documento renderizado.
-    SECAO_PRAZO_NUMERO = 9
+    # quadro aqui, sem a IA saber a posição real do documento renderizado. Era a 9ª até 2026-09,
+    # quando "ITENS NÃO PREVISTOS" virou capítulo independente (seção 7) e empurrou tudo depois.
+    SECAO_PRAZO_NUMERO = 10
 
     SCHEDULE_TYPES_IN_ORDER = %w[servico implantacao].freeze
     SCHEDULE_CAPTIONS = {
@@ -344,13 +345,21 @@ class ProposalDocxFiller
       end
     end
 
-    # Bloco de cronograma já presente: legenda "Quadro 9-N: …" cercada por dois parágrafos com
+    # Bloco de cronograma já presente: legenda "Quadro 10-N: …" cercada por dois parágrafos com
     # <w:sectPr> (retrato antes, paisagem depois — ver schedule_block_xml). Num .docx gerado pelo
     # sistema esses são os ÚNICOS <w:sectPr> em nível de parágrafo (a capa usa titlePg, não seção
     # própria), então varrer irmãos pra trás/frente a partir da legenda acha os limites do bloco.
+    # Aceita "Quadro 9-" também: docs gerados antes de 2026-09 (quando PRAZO era a 9ª seção) ainda
+    # circulam, e reinserir cronograma neles não pode duplicar o bloco. O "· Cronograma" é o que
+    # distingue essa legenda da do EQUIPE (também "Quadro 9-1" desde 2026-09).
+    SCHEDULE_CAPTION_PREFIXES = [ "Quadro #{SECAO_PRAZO_NUMERO}-", "Quadro 9-" ].uniq.freeze
+
     def existing_schedule_block_range(children)
       caption = children.index do |node|
-        node.name == "p" && node.xpath(".//w:t", NS).map(&:text).join.strip.start_with?("Quadro #{SECAO_PRAZO_NUMERO}-")
+        next false unless node.name == "p"
+
+        text = node.xpath(".//w:t", NS).map(&:text).join.strip
+        text.include?("Cronograma") && SCHEDULE_CAPTION_PREFIXES.any? { |prefix| text.start_with?(prefix) }
       end
       return nil unless caption
 

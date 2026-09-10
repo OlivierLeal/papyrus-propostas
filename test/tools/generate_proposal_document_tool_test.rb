@@ -509,29 +509,35 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_not_includes xml, "5.1"
   end
 
-  # ITENS NÃO PREVISTOS. Toda proposta validada pela Papyrus fecha o escopo com o que ela NÃO
-  # cobre; nas geradas pelo sistema essa lista simplesmente não existia.
-  test "o escopo termina com os itens não previstos e a ressalva de proposta complementar" do
+  # ITENS NÃO PREVISTOS é um CAPÍTULO independente do documento (2026-09), não mais um bloco no
+  # fim do escopo. Toda proposta validada pela Papyrus fecha o escopo com o que ela NÃO cobre.
+  test "os itens não previstos saem no capítulo próprio (não no escopo) com a ressalva fixa" do
     @proposal.update!(status: "priced", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args.merge(itens_nao_previstos: [ "Execução dos planos e programas ambientais", "Regularização fundiária" ]))
 
+    texts = document_texts(@proposal.generated_documents.first)
+    assert_includes texts, "ITENS NÃO PREVISTOS" # título do capítulo
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Itens não previstos"
     assert_includes xml, "Execução dos planos e programas ambientais"
     assert_includes xml, "Regularização fundiária"
     assert_includes xml, "serão objeto de proposta complementar"
+    # não vazou pro texto do escopo (que só tem a metodologia da IA)
+    assert_not_includes xml, "{{ITENS_NAO_PREVISTOS}}"
   end
 
-  # A ressalva é proteção comercial: não pode depender de a IA lembrar de mandá-la.
+  # A ressalva é proteção comercial: agora é texto FIXO do modelo no capítulo, não depende de a
+  # IA (nem do backend) lembrar de mandá-la. Sem nenhum item, o capítulo fica só com ela.
   test "a ressalva de proposta complementar sai mesmo quando a IA não lista nenhum item" do
     @proposal.update!(status: "priced", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     tool.execute(**@args)
 
-    assert_includes document_xml(@proposal.generated_documents.first), "serão objeto de proposta complementar"
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "serão objeto de proposta complementar"
+    assert_not_includes xml, "{{ITENS_NAO_PREVISTOS}}" # placeholder do parágrafo vazio some
   end
 
   # OBRIGAÇÕES ADICIONAIS. Quando o ET/TR pede algo específico de uma das partes além do que já é
@@ -635,7 +641,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
   end
 
@@ -672,8 +678,8 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 9-1: Cronograma do Serviço."
-    assert_includes xml, "Quadro 9-2: Cronograma de Implantação do Empreendimento."
+    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 10-2: Cronograma de Implantação do Empreendimento."
   end
 
   test "also attaches an MSPDI (.xml) file per schedule type present, alongside the docx" do

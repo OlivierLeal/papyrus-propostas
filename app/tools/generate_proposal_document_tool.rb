@@ -113,10 +113,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
   param :itens_nao_previstos, type: "array", required: false,
     desc: "O que esta proposta NÃO cobre, um item por linha (ex.: \"Execução dos planos e programas ambientais\", " \
-          "\"Regularização fundiária\", \"Tratativas junto a INCRA ou FUNAI\"). Toda proposta da Papyrus fecha o " \
-          "escopo com essa lista — é o que impede o cliente de cobrar depois um serviço que não foi orçado. " \
-          "Liste o que for específico deste projeto; a frase padrão sobre proposta complementar o sistema " \
-          "acrescenta sozinho."
+          "\"Regularização fundiária\", \"Tratativas junto a INCRA ou FUNAI\"). Vira o capítulo \"ITENS NÃO " \
+          "PREVISTOS\" (seção própria do documento) — é o que impede o cliente de cobrar depois um serviço que " \
+          "não foi orçado. Liste só o que for específico deste projeto; a frase padrão sobre proposta " \
+          "complementar o modelo já traz fixa nesse capítulo. Sem nada específico, pode deixar de fora."
   param :nome_arquivo,
     desc: "SÓ quando o consultor disser como o arquivo deve se chamar (ex.: \"o arquivo tem que se chamar " \
           "PTC26002_PMM_LU_Simões Filho_BA\"). Copie o nome exatamente como ele escreveu, sem inventar, sem " \
@@ -182,7 +182,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     schedules = build_schedules
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
-    remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS
+    remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS]
 
     # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
     # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
@@ -322,7 +322,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "OBJETIVO_SERVICOS" => args[:objetivo_dos_servicos],
         "CARACTERIZACAO_EMPREENDIMENTO" => args[:caracterizacao_do_empreendimento],
         "NOME_DOCUMENTO_TR" => args[:nome_documento_tr],
-        "ESCOPO_METODOLOGIA" => escopo_com_itens_nao_previstos(args),
+        "ESCOPO_METODOLOGIA" => escopo_e_topicos(args),
+        "ITENS_NAO_PREVISTOS" => build_itens_nao_previstos(args),
         "PRAZO_EXECUCAO" => prazo_execucao_value(args),
         "PRECO_TOTAL" => @proposal.docx_total_price,
         "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(args[:obrigacoes_contratante_adicionais]),
@@ -421,34 +422,34 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # 1 = produtos, 2 = equipe técnica (linhas de proposal_professionals, ver Proposal#team_rows_
     # for_docx — virou dinâmica em 2026-09), 3 = desembolso.
     # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de existir.
-    # Frase de fechamento fixa: é a proteção comercial da Papyrus e aparece em toda proposta
-    # validada por eles. Não fica a cargo da IA lembrar dela.
-    RESSALVA_PROPOSTA_COMPLEMENTAR =
-      "Caso sejam solicitados serviços e estudos não contemplados nesta proposta, estes serão objeto de " \
-      "proposta complementar.".freeze
 
-    # O escopo escrito pela IA sempre termina com o que a proposta NÃO cobre. Vem como parâmetro
-    # próprio (e não embutido na prosa) porque era justamente o que sumia: nas propostas geradas
-    # até aqui essa lista simplesmente não existia, enquanto as escritas por gente sempre a têm.
     # A seção "ESCOPO E METODOLOGIA DE EXECUÇÃO DO SERVIÇO" é sempre a 5ª de nível 1 no modelo —
     # a estrutura de seções é fixa, só o conteúdo varia por proposta — por isso o número dos
     # subtópicos pode ser calculado aqui: a IA não tem como saber a posição real da seção no
     # documento renderizado, só o sistema sabe.
     SECAO_ESCOPO_NUMERO = 5
 
-    def escopo_com_itens_nao_previstos(args)
-      itens = Array(args[:itens_nao_previstos]).map { |item| item.to_s.strip }.compact_blank
-      bloco = [ "**Itens não previstos**" ]
-      bloco.concat(itens.map { |item| "- #{item}" })
-      bloco << RESSALVA_PROPOSTA_COMPLEMENTAR
+    # Só a metodologia da IA — os "itens não previstos" saíram daqui (2026-09): viraram capítulo
+    # independente ("ITENS NÃO PREVISTOS", 7ª seção do modelo), preenchido por
+    # #build_itens_nao_previstos no placeholder {{ITENS_NAO_PREVISTOS}}. A frase fixa sobre
+    # proposta complementar agora é texto FIXO do modelo, logo abaixo do placeholder.
+    def escopo_e_topicos(args)
+      [ args[:escopo_e_metodologia], topicos_do_escopo(args) ].compact_blank.join("\n\n")
+    end
 
-      [ args[:escopo_e_metodologia], topicos_do_escopo(args), bloco.join("\n\n") ].compact_blank.join("\n\n")
+    # Lista do capítulo "ITENS NÃO PREVISTOS" — um "- item" por linha, com uma frase introdutória
+    # só quando há algum item. Vazio devolve "" e o parágrafo do placeholder some
+    # (remove_paragraph_if_blank), sobrando no capítulo só a frase fixa do modelo.
+    def build_itens_nao_previstos(args)
+      itens = Array(args[:itens_nao_previstos]).map { |item| item.to_s.strip }.compact_blank
+      return "" if itens.empty?
+
+      ([ "Não estão contemplados nesta proposta os seguintes itens:" ] + itens.map { |item| "- #{item}" }).join("\n")
     end
 
     # "Título | texto" vira "**5.N TÍTULO**" (negrito — ver ProposalDocxFiller#apply_line!)
     # seguido do texto normal do tópico. Devolve "" quando a IA não usar topicos_escopo (escopo
-    # sem divisão temática), então não sobra nada em branco entre a introdução e os itens não
-    # previstos.
+    # sem divisão temática), então não sobra nada em branco depois da introdução.
     def topicos_do_escopo(args)
       topicos = Array(args[:topicos_escopo]).filter_map do |item|
         titulo, texto = item.to_s.split("|", 2).map(&:strip)

@@ -323,6 +323,24 @@ precisar de um placeholder por tópico, já que a quantidade varia por proposta.
 temática (estudo simples) pode deixar `topicos_escopo` de fora e escrever tudo em
 `escopo_e_metodologia`, como antes.
 
+**"ITENS NÃO PREVISTOS" virou capítulo independente (2026-09, pedido da Charlene).** Até então era
+um bloco no fim do texto do escopo (`**Itens não previstos**` em negrito + lista + a frase fixa de
+proposta complementar, tudo dentro de `{{ESCOPO_METODOLOGIA}}`). Agora é a **7ª seção de nível 1**
+do modelo (auto-numerada, `numId=1`, logo depois de PRODUTOS), o que empurrou RESPONSABILIDADES
+7→8 (e "7.1/7.2" viraram "8.1/8.2", texto literal), EQUIPE 8→9 (`Quadro 8-1`→`9-1`, literal),
+PRAZO 9→10 (`SECAO_PRAZO_NUMERO`), VALIDADE 10→11, PREÇO 11→12 (`Quadro 11-1`→`12-1`, literal),
+DADOS BANCÁRIOS 12→13. PRODUTOS continua 6 (`Quadro 6-1` intacto), ESCOPO continua 5
+(`SECAO_ESCOPO_NUMERO`). O capítulo tem: `{{ITENS_NAO_PREVISTOS}}` (a lista, `- item` por linha,
+com a frase introdutória "Não estão contemplados nesta proposta os seguintes itens:" só quando há
+item — `GenerateProposalDocumentTool#build_itens_nao_previstos`; vazio → o parágrafo some via
+`remove_paragraph_if_blank`) + a frase fixa de proposta complementar, que agora é **texto FIXO do
+modelo** (não mais anexada pelo backend — o constante `RESSALVA_PROPOSTA_COMPLEMENTAR` saiu).
+
+**Texto padrão abaixo do Quadro 6-1 (produtos) — atualizado (2026-09):** o parágrafo fixo sobre
+formatos de arquivo ganhou "PDF" e `"shapefile" ou "kml"` na lista, e um segundo parágrafo fixo:
+"Quando necessário o uso de alguma plataforma para compartilhamento de documentos, será priorizado
+a utilização de SharePoint ou OneDrive da Contratante."
+
 **Cronograma (Gantt) em página paisagem, 2 tipos (2026-09):** toda proposta pode ter um
 cronograma visual no `.docx`, baseado num exemplo real da Papyrus (`Quadro 9-1`, tabela nativa do
 Word com colunas de período agrupadas e barras coloridas por atividade). Dois tipos, sempre
@@ -399,9 +417,10 @@ independentes:
   que já existia sem mudar nada nela; um paisagem, fecha a seção das tabelas) pra abrir e fechar o
   bloco paisagem; o resto do documento (VALIDADE DA PROPOSTA em diante, até o bloco de assinatura)
   volta pro retrato sozinho, herdando do `<w:sectPr>` final que já existe no corpo. "PRAZO DE
-  EXECUÇÃO" é sempre a 9ª seção de nível 1 do modelo (estrutura fixa, mesmo princípio de
-  `SECAO_ESCOPO_NUMERO`), por isso o número do quadro (`Quadro 9-1`/`Quadro 9-2`) é calculado no
-  backend, nunca pela IA.
+  EXECUÇÃO" é sempre a **10ª** seção de nível 1 do modelo (era a 9ª até 2026-09 — "ITENS NÃO
+  PREVISTOS" virou capítulo, ver abaixo; estrutura fixa, mesmo princípio de `SECAO_ESCOPO_NUMERO`),
+  por isso o número do quadro (`Quadro 10-1`/`Quadro 10-2`, `ProposalDocxFiller::SECAO_PRAZO_NUMERO`)
+  é calculado no backend, nunca pela IA.
   **Achado ao vivo, corrigido**: a tabela nova nasce ENTRE a de equipe (índice posicional 2) e a
   de desembolso (índice 3) — inseri-la ANTES do `tables.each` de `build` deslocava `//w:tbl[3]`
   pra apontar pra ela em vez do Desembolso, e `fill_table!` reescrevia o cronograma por cima com
