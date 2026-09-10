@@ -32,17 +32,23 @@ class ScheduleTimelineRenderer
   COLUMN_WIDTH = 220
   ROW_TOP_PADDING = 24
   LABEL_START_GAP = 22
+  UNDERLINE_BLOCK_HEIGHT = 14
+  UNDERLINE_WIDTH = 28
   LABEL_LINE_HEIGHT = 20
   LABEL_MAX_LINES = 3
+  DATE_LINE_HEIGHT = 16
+  DATE_BLOCK_HEIGHT = DATE_LINE_HEIGHT * 2 # intervalo de datas + duração, sempre 2 linhas
   ROW_BOTTOM_PADDING = 16
   MAX_CHARS_PER_LINE = 22
+  LINE_OVERHANG = 26 # quanto a linha/seta passa do centro do último círculo da linha
 
-  # Mesma paleta do Quadro 9-1 (ScheduleTableBuilder) — consistência visual com o que já sai na
-  # mesma página, em vez de inventar cor nova.
-  CIRCLE_FILL = "2E75B6"
-  MILESTONE_FILL = "C65911"
-  BADGE_FILL = "1F4E79"
-  LINE_COLOR = "2E75B6"
+  # Degradê quente→frio (âmbar → verde-oliva → verde → verde-azulado → azul-petróleo → azul →
+  # azul-escuro), pedido pelo consultor pra bater com uma referência real da Papyrus — cada etapa
+  # pega uma cor ao longo desse degradê conforme sua posição no cronograma INTEIRO (não por
+  # linha/imagem, pra ficar contínuo mesmo quando o cronograma quebra em várias imagens). Termina
+  # no mesmo azul-escuro do Quadro 9-1 (ScheduleTableBuilder::HEADER_GROUP_FILL) — só essa ponta
+  # mantém a paleta já usada na tabela, o resto é a variação pedida.
+  GRADIENT_STOPS = %w[F2A93B 9BB93C 4FAE64 2FA98C 1F9AA0 1F7FB0 1F63A8 1F4E79].freeze
   TEXT_COLOR = "333333"
   DATE_COLOR = "666666"
 
@@ -145,7 +151,8 @@ class ScheduleTimelineRenderer
     end
 
     def row_height
-      ROW_TOP_PADDING + (CIRCLE_R * 2) + LABEL_START_GAP + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) + ROW_BOTTOM_PADDING
+      ROW_TOP_PADDING + (CIRCLE_R * 2) + LABEL_START_GAP + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) +
+        UNDERLINE_BLOCK_HEIGHT + DATE_BLOCK_HEIGHT + ROW_BOTTOM_PADDING
     end
 
     def row_count_for(chunk_items)
@@ -168,51 +175,98 @@ class ScheduleTimelineRenderer
       row_top = row_index * row_height
       cy = row_top + ROW_TOP_PADDING + CIRCLE_R
       centers = row_items.each_index.map { |i| column_center_x(i) }
+      global_index = ->(i) { number_offset + (row_index * ITEMS_PER_ROW) + i }
+      colors = row_items.each_index.map { |i| color_for(global_index.call(i)) }
 
-      line = row_items.size > 1 ? %(<line x1="#{centers.first}" y1="#{cy}" x2="#{centers.last}" y2="#{cy}" stroke="##{LINE_COLOR}" stroke-width="4"/>) : ""
+      line = row_items.size > 1 ? connector_xml(row_index, centers, cy, colors) : ""
       circles = row_items.each_with_index.map do |item, i|
-        number = number_offset + (row_index * ITEMS_PER_ROW) + i + 1
-        step_xml(item, number, centers[i], cy, row_top)
+        step_xml(item, global_index.call(i) + 1, centers[i], cy, row_top, colors[i])
       end.join
 
       "#{line}#{circles}"
+    end
+
+    # Linha em degradê (um <linearGradient> com um stop na cor de CADA círculo, não só início/fim
+    # — o degradê muda suave mesmo com vários tons diferentes numa linha só) + seta no final,
+    # igual a referência trazida pelo consultor (a linha "continua" além do último círculo).
+    def connector_xml(row_index, centers, cy, colors)
+      x1 = centers.first
+      x2 = centers.last + LINE_OVERHANG
+      gradient_id = "linha-#{row_index}"
+      stops = centers.each_with_index.map do |x, i|
+        offset = (x - x1).to_f / (x2 - x1)
+        %(<stop offset="#{offset.round(4)}" stop-color="##{colors[i]}"/>)
+      end.join
+
+      <<~SVG
+        <defs><linearGradient id="#{gradient_id}" gradientUnits="userSpaceOnUse" x1="#{x1}" y1="#{cy}" x2="#{x2}" y2="#{cy}">#{stops}</linearGradient></defs>
+        <line x1="#{x1}" y1="#{cy}" x2="#{x2 - 10}" y2="#{cy}" stroke="url(##{gradient_id})" stroke-width="4"/>
+        <polygon points="#{x2 - 12},#{cy - 7} #{x2},#{cy} #{x2 - 12},#{cy + 7}" fill="##{colors.last}"/>
+      SVG
+    end
+
+    # Posição (0-based) no cronograma INTEIRO, não na linha/imagem — o degradê fica contínuo
+    # mesmo quando o cronograma quebra em várias imagens (a 2ª imagem continua de onde a 1ª
+    # parou, nunca reinicia a cor do zero).
+    def color_for(global_index)
+      total = @items.size
+      return GRADIENT_STOPS.first if total <= 1
+
+      position = (global_index.to_f / (total - 1)) * (GRADIENT_STOPS.size - 1)
+      lower = position.floor.clamp(0, GRADIENT_STOPS.size - 2)
+      blend_hex(GRADIENT_STOPS[lower], GRADIENT_STOPS[lower + 1], position - lower)
+    end
+
+    def blend_hex(hex_a, hex_b, t)
+      rgb_a = hex_a.scan(/../).map { |part| part.to_i(16) }
+      rgb_b = hex_b.scan(/../).map { |part| part.to_i(16) }
+      rgb_a.zip(rgb_b).map { |a, b| format("%02X", (a + ((b - a) * t)).round.clamp(0, 255)) }.join
     end
 
     def column_center_x(index_in_row)
       (index_in_row * COLUMN_WIDTH) + (COLUMN_WIDTH / 2)
     end
 
-    def step_xml(item, number, cx, cy, row_top)
-      fill = item.milestone? ? MILESTONE_FILL : CIRCLE_FILL
-
+    # Círculo em ANEL (contorno colorido, miolo branco) com o ícone na MESMA cor do anel — não
+    # preenchido sólido com ícone branco (versão anterior) — pra bater com a referência trazida
+    # pelo consultor.
+    def step_xml(item, number, cx, cy, row_top, color)
       <<~SVG
-        <circle cx="#{cx}" cy="#{cy}" r="#{CIRCLE_R}" fill="##{fill}"/>
-        #{icon_xml(icon_for(item), cx, cy)}
-        #{badge_xml(number, cx - (CIRCLE_R * 0.7), cy - (CIRCLE_R * 0.7))}
-        #{labels_xml(item, cx, row_top, cy)}
+        <circle cx="#{cx}" cy="#{cy}" r="#{CIRCLE_R}" fill="#ffffff" stroke="##{color}" stroke-width="4"/>
+        #{icon_xml(icon_for(item), cx, cy, color)}
+        #{badge_xml(number, cx - (CIRCLE_R * 0.7), cy - (CIRCLE_R * 0.7), color)}
+        #{labels_xml(item, cx, row_top, cy, color)}
       SVG
     end
 
-    def badge_xml(number, cx, cy)
+    def badge_xml(number, cx, cy, color)
       <<~SVG
-        <circle cx="#{cx}" cy="#{cy}" r="#{BADGE_R}" fill="##{BADGE_FILL}" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="#{cx}" cy="#{cy}" r="#{BADGE_R}" fill="##{color}" stroke="#ffffff" stroke-width="2"/>
         #{text_tag(cx, cy + 5, format("%02d", number), size: 14, color: "ffffff", weight: "bold")}
       SVG
     end
 
-    def labels_xml(item, cx, row_top, cy)
+    # Sublinhado e data sempre na MESMA posição vertical dentro da linha — reserva o espaço de
+    # LABEL_MAX_LINES sempre, não só o que o título de fato ocupa, pra títulos de tamanhos
+    # diferentes não desalinharem o resto da etiqueta entre um círculo e outro da mesma linha
+    # (mesmo orçamento vertical que row_height já reserva por linha).
+    def labels_xml(item, cx, row_top, cy, color)
       top = cy + CIRCLE_R + LABEL_START_GAP
+
       title_lines = wrap_text(item.activity_name, MAX_CHARS_PER_LINE)
       title_xml = title_lines.each_with_index.map do |line, i|
         text_tag(cx, top + (i * LABEL_LINE_HEIGHT), line, size: 13, color: TEXT_COLOR, weight: "bold")
       end.join
 
-      date_top = top + (title_lines.size * LABEL_LINE_HEIGHT)
+      underline_y = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) - (LABEL_LINE_HEIGHT / 2) + (UNDERLINE_BLOCK_HEIGHT / 2)
+      underline = %(<line x1="#{cx - (UNDERLINE_WIDTH / 2)}" y1="#{underline_y}" x2="#{cx + (UNDERLINE_WIDTH / 2)}" y2="#{underline_y}" stroke="##{color}" stroke-width="3"/>)
+
+      date_top = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) + UNDERLINE_BLOCK_HEIGHT
       date_xml = date_lines(item).each_with_index.map do |line, i|
-        text_tag(cx, date_top + (i * (LABEL_LINE_HEIGHT - 4)), line, size: 11, color: DATE_COLOR)
+        text_tag(cx, date_top + (i * DATE_LINE_HEIGHT), line, size: 11, color: DATE_COLOR)
       end.join
 
-      "#{title_xml}#{date_xml}"
+      "#{title_xml}#{underline}#{date_xml}"
     end
 
     def text_tag(x, y, text, size:, color:, weight: nil)
@@ -244,8 +298,13 @@ class ScheduleTimelineRenderer
       truncated
     end
 
+    # Marco (ponto no tempo, sem duração) mostra "-" no lugar de uma duração calculada — igual a
+    # referência trazida pelo consultor, onde as etapas pontuais não trazem número de dias
+    # nenhum. Etapa normal mostra o intervalo de datas e a duração em dias corridos.
     def date_lines(item)
       start_date = item_start(item)
+      return [ formatted(start_date), "-" ] if item.milestone?
+
       finish_date = item_finish(item)
       duration_days = (finish_date - start_date).to_i
 
@@ -254,7 +313,7 @@ class ScheduleTimelineRenderer
       # sendo pt-BR não muda isso — é ActiveSupport::Inflector, não I18n) e não pluraliza "dia"
       # corretamente ("dia".pluralize(7) => "dia", errado) — regra do português é só o "s" mesmo,
       # sem tentar usar o inflector genérico pra uma palavra que ele não conhece.
-      duration = duration_days.zero? ? "Marco" : "#{duration_days} #{duration_days == 1 ? 'dia' : 'dias'}"
+      duration = "#{duration_days} #{duration_days == 1 ? 'dia' : 'dias'}"
 
       [ range, duration ]
     end
@@ -305,8 +364,10 @@ class ScheduleTimelineRenderer
     FOLDER_PATHS = '<path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 9h-15a4.483 4.483 0 0 0-3 1.146Z"/>'.freeze
     GENERIC_PATHS = '<circle cx="12" cy="12" r="5"/>'.freeze
 
-    def icon_xml(symbol, cx, cy)
-      %(<g transform="translate(#{cx},#{cy}) scale(#{ICON_SCALE}) translate(-#{ICON_VIEWBOX_CENTER},-#{ICON_VIEWBOX_CENTER})" fill="#ffffff">#{icon_paths(symbol)}</g>)
+    # Ícone na MESMA cor do anel do círculo (miolo branco, anel + ícone coloridos) — não branco
+    # fixo, pra bater com a referência trazida pelo consultor.
+    def icon_xml(symbol, cx, cy, color)
+      %(<g transform="translate(#{cx},#{cy}) scale(#{ICON_SCALE}) translate(-#{ICON_VIEWBOX_CENTER},-#{ICON_VIEWBOX_CENTER})" fill="##{color}">#{icon_paths(symbol)}</g>)
     end
 
     def icon_paths(symbol)

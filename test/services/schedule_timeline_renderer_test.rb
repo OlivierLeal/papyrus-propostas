@@ -18,9 +18,11 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
 
     svg = renderer(items: items).svgs.first
 
-    # 8 itens = 2 linhas (ITEMS_PER_ROW = 6): 6 na primeira, 2 na segunda — 2 linhas conectoras
+    # 8 itens = 2 linhas (ITEMS_PER_ROW = 6): 6 na primeira, 2 na segunda — 2 linhas CONECTORAS
     # (a segunda linha, de 2 itens, também tem 1 <line> — só uma linha com 1 item só não teria).
-    assert_equal 2, svg.scan("<line ").size
+    # Cada item também desenha um <line> de sublinhado sob o título — por isso a busca é só pela
+    # linha conectora em degradê (stroke="url(#...)"), não por "<line " genérico.
+    assert_equal 2, svg.scan('stroke="url(#').size
     # círculo principal (r=40) + badge (r=15) por item = 16, mais o que cada ícone desenha por
     # dentro (varia por ícone) — aqui todos batem "aprova"/genérico, então só os círculos fixos.
     assert_equal 8, svg.scan('r="40"').size
@@ -35,16 +37,14 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
     (1..8).each { |n| assert_includes svg, format(">%02d<", n) }
   end
 
-  test "milestone item uses MILESTONE_FILL, regular item uses CIRCLE_FILL" do
-    items = [
-      item("Marco de aprovação", start_period: 1, milestone: true),
-      item("Atividade normal", start_period: 2, milestone: false)
-    ]
+  # A cor do anel/ícone/selo segue o degradê contínuo pela posição no cronograma (ver
+  # GRADIENT_STOPS) — marco não muda mais a cor do círculo, só o texto da duração (abaixo).
+  test "ring color follows the gradient by position, not a fixed color per item" do
+    items = (1..3).map { |n| item("Atividade #{n}", start_period: n) }
 
     svg = renderer(items: items).svgs.first
 
-    assert_includes svg, %(fill="##{ScheduleTimelineRenderer::MILESTONE_FILL}")
-    assert_includes svg, %(fill="##{ScheduleTimelineRenderer::CIRCLE_FILL}")
+    assert_equal 3, svg.scan(/stroke="#[0-9A-F]{6}" stroke-width="4"/).size
   end
 
   test "picks the icon by keyword in the activity name, and the generic icon when nothing matches" do
@@ -71,15 +71,18 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
     assert_includes svg, "14 dias"
   end
 
-  test "a duration of zero periods reads as 'Marco' instead of '0 dias'" do
-    svg = renderer(items: [ item("Assinatura", start_period: 1, duration_periods: 1, milestone: true) ],
-      start_date: Date.new(2026, 10, 1), unit: :week).svgs.first
+  # Marco (ponto no tempo) mostra "-" em vez de uma duração calculada — igual a referência
+  # trazida pelo consultor, onde etapas pontuais não trazem número de dias nenhum.
+  test "milestone item shows '-' instead of a computed duration, regular item shows days" do
+    items = [
+      item("Assinatura", start_period: 1, duration_periods: 1, milestone: true),
+      item("Atividade normal", start_period: 2, duration_periods: 2, milestone: false)
+    ]
 
-    # Marco real do sistema tem duration_periods >= 1 (regra do ScheduleItem, é do Gantt do
-    # .docx) — aqui simulado como "termina no mesmo dia que começa" não é o caso comum, mas o
-    # rótulo "Marco" (em vez de "0 dias") existe pra qualquer item de duração zero, se algum dia
-    # aparecer um assim.
-    assert_includes svg, "dia" # sanity: pelo menos alguma duração aparece pro item normal
+    svg = renderer(items: items, start_date: Date.new(2026, 10, 1), unit: :week).svgs.first
+
+    assert_includes svg, ">-<"
+    assert_includes svg, "dias"
   end
 
   test "long activity names wrap into multiple lines instead of overflowing the column" do
