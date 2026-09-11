@@ -224,6 +224,32 @@ class Proposal < ApplicationRecord
     finalize!(pricing)
   end
 
+  # SuggestScheduleJob/ElectScheduleKeyPointsJob rodam FORA da conversa que pediu a geração (ver
+  # comentário nos dois), então mais de um pode ser enfileirado pra a MESMA proposta antes que o
+  # primeiro termine — achado ao vivo (chat 32, 2026-09, "saiu muita coisa repetida no
+  # cronograma"): duas chamadas de "gerar cronograma" a ~40s de distância passaram as duas pela
+  # checagem "já existe item?" (feita ANTES da chamada à IA, que sozinha leva dezenas de segundos)
+  # enquanto nenhuma tinha inserido nada ainda, e as duas rodaram build_with_ai_suggested_schedule!
+  # em paralelo — cada uma criando o cronograma inteiro do zero (position reiniciando em 0), a
+  # tabela final saiu com cada atividade duplicada numa paráfrase diferente (duas chamadas de IA
+  # distintas, não a mesma inserida 2x). `with_schedule_lock` serializa os dois jobs pela MESMA
+  # proposta com pg_advisory_xact_lock — quem chega depois espera o commit de quem já está
+  # rodando e então repete a própria checagem "já existe?", agora vendo o resultado da primeira
+  # chamada e desistindo. Namespace próprio (classid fixo, forma de 2 argumentos) pra não colidir
+  # com o pg_advisory_xact_lock(conversation.id) de Conversation#with_ai_lock — id de proposta e
+  # id de conversa são sequências independentes que podem coincidir numericamente (a proposta 18
+  # desta mesma conversa 32 é um exemplo real). Libera sozinho no commit/rollback, mesmo mecanismo
+  # de sempre.
+  SCHEDULE_LOCK_NAMESPACE = 982451
+  private_constant :SCHEDULE_LOCK_NAMESPACE
+
+  def with_schedule_lock(&block)
+    self.class.transaction do
+      self.class.connection.execute("SELECT pg_advisory_xact_lock(#{SCHEDULE_LOCK_NAMESPACE}, #{id.to_i})")
+      block.call
+    end
+  end
+
   # Sugere fases/atividades do cronograma a partir do que já foi extraído do ET/TR nesta
   # conversa (CLAUDE.md seção 8). Diferente da equipe técnica, não existe "menu" de fases por
   # tipo de estudo — é conteúdo livre, então não passa por catálogo/apply_lines!, só parse +

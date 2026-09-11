@@ -728,6 +728,61 @@ rodadas) chamando `#complete` cru em vez de `#complete_with_lock`, e passa de fo
 (3/3) com a correção — prova que o teste pega a regressão de verdade, não só documenta a
 intenção.
 
+**Quarta causa-raiz da MESMA família: dois jobs concorrentes pra MESMA proposta, não mais um
+processo disputando com outro (2026-09, relato do consultor: "pedi no chat 32 pra fazer o
+cronograma e saiu muita coisa repetida").** As três correções acima eliminaram toda reentrância
+(mesmo processo) e toda corrida entre um `#complete` cru e um `ask_internally` concorrente
+(processos diferentes, mesma conversa). Mas nada até aqui impedia DOIS `SuggestScheduleJob`
+enfileirados pra MESMA proposta de rodarem ao mesmo tempo — `GenerateProposalDocumentTool#
+ensure_schedule_background_work!` enfileira um sempre que `pricing.schedule_items.exists?` é
+`false` NA HORA da checagem, e essa checagem roda de novo a CADA geração pedida no chat. Dados
+reais da proposta 18 (conversation 32): duas chamadas de "gerar documento" a **~40 segundos** de
+distância (`22:40:21`/`22:41:01`) — tempo mais que suficiente pra uma chamada de IA ainda não ter
+terminado — enfileiraram dois `SuggestScheduleJob`, os dois viram `schedule_items.exists? ==
+false` (nenhum tinha inserido nada ainda) e **os dois rodaram
+`build_with_ai_suggested_schedule!` em paralelo**, cada um com sua própria chamada de IA. O
+resultado não foi a mesma lista inserida duas vezes — foram **duas sugestões de cronograma
+inteiras, com paráfrases diferentes pra cada atividade**, intercaladas na tabela porque
+`apply_schedule_lines!` sempre grava `position` a partir de 0 (índice do array daquela chamada),
+nunca olhando quantos itens já existem: `schedule_items` da proposta 18 tinha 34 linhas, sendo
+posição 0 a 17 cada uma duplicada (uma vez às `22:41:17`, outra às `22:41:27` — os dois jobs
+rodaram 10s um do outro, os dois terminando a própria chamada de IA antes de qualquer verificação
+acontecer de novo). Mesma família de bug (checagem "já existe?" feita ANTES de uma chamada de IA
+que demora dezenas de segundos, sem nada travando o intervalo entre checar e escrever), quarta
+causa diferente: agora é concorrência entre jobs de BACKGROUND pra mesma proposta, não mais
+conversa/processo.
+
+**Correção**: `Proposal#with_schedule_lock` — mesmo mecanismo de sempre
+(`pg_advisory_xact_lock`, libera sozinho no commit/rollback), mas com **namespace próprio** (a
+forma de 2 argumentos, `pg_advisory_xact_lock(classid, objid)`, com um `classid` fixo só pra isso)
+em vez de reusar a chave de `Conversation#with_ai_lock` — id de proposta e id de conversa são
+sequências independentes que podem coincidir numericamente (a proposta 18 já é filha da
+conversa 32; um dia poderiam ser o mesmo número em lados diferentes de propósitos diferentes, e aí
+a trava erraria de travar coisa demais). `SuggestScheduleJob` e `ElectScheduleKeyPointsJob` agora
+envolvem a checagem "já existe?"/"já elegeu?" **e** a chamada de IA dentro do mesmo
+`with_schedule_lock`: quem chega primeiro trava a proposta inteira até terminar (checagem +
+IA + escrita, tudo dentro da mesma transação); quem chega depois espera o commit e só então repete
+a própria checagem — agora vendo o resultado de verdade, e desiste.
+
+**Pegadinha achada escrevendo o teste, corrigida**: `ElectScheduleKeyPointsJob` guardava
+`pricing = proposal.project_pricing` (association `has_one`, memoiza o registro em Ruby) **antes**
+de entrar na trava — a segunda chamada, ao acordar depois do commit da primeira, ainda enxergava
+`schedule_key_points` como estava ANTES de qualquer uma rodar (o objeto em memória nunca foi
+reconsultado), e chamava a IA de novo à toa. Corrigido com `proposal.project_pricing.reload`
+**depois** de adquirir a trava. `SuggestScheduleJob` não tem o mesmo problema: a checagem ali é
+`schedule_items.exists?` numa association `has_many`, que sempre bate no banco (nunca usa o cache
+de Ruby de uma leitura anterior), então funciona certo mesmo com `project_pricing` carregado antes
+da trava — os dois casos ficaram documentados um do lado do outro nos jobs pra não alguém
+"simplificar" um copiando o padrão errado do outro.
+
+Testado com o mesmo método das corridas anteriores
+(`test/jobs/schedule_lock_test.rb`, threads com conexão de banco real cada uma, não a transação
+compartilhada dos testes normais, `Conversation#complete` redefinido com um `sleep` proposital pra
+abrir a janela da corrida): duas chamadas concorrentes de `SuggestScheduleJob` pra mesma proposta
+produzem **1** cronograma, não 2; duas chamadas concorrentes de `ElectScheduleKeyPointsJob`
+resultam em **1** chamada de IA, não 2 — os dois testes falhavam de forma confiável sem
+`with_schedule_lock`/`.reload` e passam com a correção.
+
 **Exportação em MSPDI pro MS Project (2026-09):** todo cronograma presente também sai como um
 arquivo `.xml` à parte, no formato **MSPDI** (o XML de intercâmbio do MS Project — Arquivo > Abrir
 importa como projeto completo: fases, atividades, datas, marcos). **Não é o binário `.mpp` de
