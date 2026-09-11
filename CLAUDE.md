@@ -42,6 +42,26 @@ A IA nunca faz conta de dinheiro. Ela só identifica escopo; quem precifica é o
 
 Documentos complementares podem ser enviados a qualquer momento da conversa, não só no início.
 
+**Escolher arquivos em mais de uma rodada no mesmo campo (2026-09, achado ao vivo, relato do
+consultor).** Todo campo `<input type="file" multiple>` do sistema (ET/TR/KMZ/complementares na
+Tela de Setup, e o clipe dos dois composers de chat) usa o mesmo
+`app/javascript/controllers/file_list_controller.js` pra mostrar a seleção como chips removíveis.
+Reabrir "Escolher arquivos" pra pegar MAIS arquivos de OUTRA pasta troca `input.files` pela
+seleção nova sozinho — comportamento nativo do navegador, não um bug do Rails — e sem compensar
+isso no JS, a segunda rodada de escolha apagava a primeira (só sobravam os arquivos da pasta mais
+recente). Corrigido: o controller passou a manter `this.files` como estado de verdade que
+sobrevive entre trocas de seleção (inicializado em `connect()`, começa vazio) — a cada "change"
+do input, faz a UNIÃO de `this.files` com o que está em `input.files` naquele momento (dedup por
+nome+tamanho+data de modificação, já que `File` não tem identidade estável entre seleções — re-
+escolher o mesmo arquivo funde em vez de duplicar) e reconstrói `input.files` a partir da união
+(`DataTransfer`, único jeito de "editar" a seleção de um `<input type="file">` — mesmo truque que
+`#remove` já usava, e que `file_drop_controller.js`, seção de arrastar-e-soltar do composer, já
+usava pra mesclar o solto). Como o `file_drop_controller` já entrega `input.files` pré-mesclado
+antes de disparar "change", a união funciona igual nos dois casos, sem duplicar.
+Verificado com teste de sistema de verdade (`test/system/file_list_accumulation_test.rb`,
+Selenium/Chrome headless): escolher um arquivo, depois escolher outro no mesmo campo, os dois
+chips aparecem juntos; remover um mantém o outro.
+
 ---
 
 ## 3. Arquitetura técnica
@@ -195,6 +215,23 @@ alimentar o nome do arquivo também:
   (se ele já não tiver escrito uma) e troca o prefixo PTC/PT/PC quando a proposta sai em dois
   arquivos. "padrão" no chat devolve a nomeação ao sistema.
 
+**Capa sem o prefixo PT/PTC/PC (2026-09, pedido do consultor).** A capa do `.docx` (texto
+`{{NUMERO_PROPOSTA}}/20` + "26" + " - Rev. {{REVISAO_ATUAL}}`", fixo no modelo) mostrava o número
+completo com prefixo — "PTC26018/2026 - Rev. 00". Passou a mostrar só os dígitos — "26018/2026 -
+Rev. 00" — sem letra nenhuma. `Proposal#docx_numero_capa(kind)` reusa `#docx_numero_proposta`
+(que continua com o prefixo, sem NENHUMA mudança) e só tira as letras do começo
+(`.sub(/\A[A-Z]+/, "")`); `GenerateProposalDocumentTool` passou a mandar `docx_numero_capa` no
+lugar de `docx_numero_proposta` só pro placeholder `NUMERO_PROPOSTA` (o único uso dele no
+modelo — confirmado que `{{NUMERO_PROPOSTA}}` só aparece na capa, nada mais depende disso).
+`docx_numero_proposta` (com prefixo) continua sendo a fonte de verdade em todo resto do sistema
+— nome de arquivo (`standard_filename_base`), busca de conversa por número
+(`Conversation#matches_search?`) e indexação no RAG (`LearnFromRevisedProposalTool`/
+`IndexApprovedProposalJob`) — nada disso mudou, é só a capa que parou de mostrar a letra.
+Efeito colateral aceito: como técnica/comercial/combinado têm a MESMA sequência de dígitos (só o
+prefixo mudava entre eles), a capa por si só não distingue mais qual variante é — quem faz isso
+agora é só o título (`TITULO_LINHA2`/`TITULO_LINHA3`, "TÉCNICA"/"COMERCIAL"/"TÉCNICA E COMERCIAL"),
+que já existia do lado da capa pra isso.
+
 **Revisão do modelo (2026-08, a partir do PTC26002_PMM_Rev01 trazido pela Papyrus):** a seção 10
 deixou de ter o quadro de preço aberto por profissional/entregável — o valor que o cliente lê é o
 total, escrito na frase de abertura (`{{PRECO_TOTAL}}`), e o único quadro é o de desembolso, agora
@@ -238,9 +275,37 @@ continua existindo e editável na Tela de Precificação, só não vai mais impr
   `% DO ITEM`/`PREÇO R$`, redistribuindo a largura total da tabela em vez de encolher), cortada
   pra 1 linha de dado só (a de Desembolso manteve as 9). Verificado ao vivo (LibreOffice headless
   → PDF → captura): os dois quadros saem exatamente como a referência trazida pelo consultor,
-  numerados "12-1"/"12-2" (a numeração real desta seção no modelo, calculada automaticamente —
-  não é fixa "11-1"/"11-2" como na referência, que veio de uma proposta sem o capítulo "ITENS NÃO
-  PREVISTOS" que empurra a numeração em 1 nesta versão do modelo).
+  numerados "12-1"/"12-2" nesta rodada (a numeração real desta seção no modelo, calculada
+  automaticamente — não é fixa "11-1"/"11-2" como na referência, que veio de uma proposta sem o
+  capítulo "ITENS NÃO PREVISTOS" que empurra a numeração em 1 nesta versão do modelo; virou
+  "13-1"/"13-2" pouco depois, com o capítulo fixo "EXIGÊNCIAS SMS" logo abaixo).
+
+**"EXIGÊNCIAS SMS" virou capítulo fixo, logo depois de EQUIPE TÉCNICA (2026-09, pedido do
+consultor a partir de um texto pronto da Papyrus).** Texto INTEIRO fixo do modelo — nada vem da
+IA nem de `ProjectFinding` nenhum, mesmo princípio das "Observações fixas no item de preços"
+(seção 8, mais abaixo) e da frase de proposta complementar de "ITENS NÃO PREVISTOS": um parágrafo
+introdutório mais dois grupos com rótulo em negrito ("Documentos da Empresa:"/"Documentação dos
+Colaboradores:") e listas reais com marcador "●" (`w:numPr`, `numId=2` — reaproveita a MESMA
+definição de lista das OBRIGAÇÕES DA PAPYRUS; bullet não tem contador pra "colidir" entre listas
+diferentes, então reusar o numId é seguro e não precisou mexer em `word/numbering.xml`). Vira a
+**10ª seção de nível 1** do modelo (entre EQUIPE TÉCNICA, que continua 9ª, e PRAZO DE EXECUÇÃO,
+que passa de 10ª pra 11ª — e por isso PRAZO/VALIDADE/PREÇO/DADOS BANCÁRIOS sobem 1 cada, mesmo
+efeito dominó de sempre ao inserir capítulo novo, ver "ITENS NÃO PREVISTOS" acima).
+- `ProposalDocxFiller::SECAO_PRAZO_NUMERO` foi de 10 pra 11 — é ele quem numera os Quadros do
+  cronograma (`Quadro 11-1`/`Quadro 11-2`, dinâmicos, gerados na hora — não são texto fixo do
+  modelo, então não precisam de edição de XML nenhuma pra renumerar, só o constante Ruby).
+  `SCHEDULE_CAPTION_PREFIXES` ganhou `"Quadro 10-"` na lista de prefixos históricos (ao lado do
+  já existente `"Quadro 9-"`) — pra `insert_schedule_section` continuar reconhecendo e
+  substituindo (sem duplicar) o bloco de cronograma de um `.docx` que foi gerado ANTES desta
+  mudança, quando PRAZO ainda era a 10ª seção.
+- Os literais `Quadro 12-1`/`Quadro 12-2` (Preço/Desembolso, ver acima — só existiam desde a
+  rodada anterior desta mesma sessão) viraram `Quadro 13-1`/`Quadro 13-2` — string crua no
+  `word/document.xml`, igual sempre, nunca `Nokogiri#to_xml`.
+- Verificado ao vivo (LibreOffice headless → PDF → captura, proposta real): "9. EQUIPE TÉCNICA" →
+  "10. EXIGÊNCIAS SMS" (texto + as duas listas com bullet) → "11. PRAZO DE EXECUÇÃO" → "12.
+  VALIDADE" → "13. PREÇO E CONDIÇÕES DE PAGAMENTO" (com `Quadro 13-1`/`13-2` certos) → "14. DADOS
+  BANCÁRIOS" — a cadeia inteira renumerada sozinha, exceto os 3 literais que precisaram de edição
+  manual (2 captions + a chamada `SECAO_PRAZO_NUMERO`).
 
 **Validade da proposta sempre 90 dias, inclusive na técnica-sozinha (2026-08):** a seção
 "VALIDADE DA PROPOSTA" (texto fixo "Esta proposta tem validade de 90 dias.", sem placeholder —

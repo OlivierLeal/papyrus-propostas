@@ -193,7 +193,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       technical_filename = @proposal.docx_filename("tecnica")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
-        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") }
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") }
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       failed_schedule_types = []
@@ -207,8 +207,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       commercial_filename = @proposal.docx_filename("comercial")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
-        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("tecnica") },
-        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("comercial") }
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") },
+        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("comercial") }
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       attach!(files[:commercial], commercial_filename, "comercial", description)
@@ -313,7 +313,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     def build_placeholders(args, images)
       {
-        "NUMERO_PROPOSTA" => @proposal.docx_numero_proposta("combined"),
+        "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("combined"),
         "REVISAO_ATUAL" => format("%02d", @proposal.version - 1),
         "TITULO_LINHA2" => "TÉCNICA E",
         "TITULO_LINHA3" => "COMERCIAL",

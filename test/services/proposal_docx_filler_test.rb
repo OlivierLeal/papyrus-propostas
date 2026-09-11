@@ -143,7 +143,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
   end
 
   test "fill_table shrinks the table when there are fewer rows than the template molde" do
-    # Quadro 12-2 (Desembolso) tem 9 linhas moldadas; passamos só 1.
+    # Quadro 13-2 (Desembolso) tem 9 linhas moldadas; passamos só 1.
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
 
@@ -458,7 +458,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert zip_entry_names(bytes).include?("word/footer2.xml"), "o modelo tem que trazer o footer2.xml"
 
     xml = document_xml(bytes)
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
     # O resto do documento continua intacto depois da tabela.
     assert_includes xml, "VALIDADE DA PROPOSTA"
@@ -488,19 +488,19 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     )
     xml = document_xml(bytes)
 
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
-    assert_includes xml, "Quadro 10-2: Cronograma de Implantação do Empreendimento."
-    assert_operator xml.index("Quadro 10-1"), :<, xml.index("Quadro 10-2")
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-2: Cronograma de Implantação do Empreendimento."
+    assert_operator xml.index("Quadro 11-1"), :<, xml.index("Quadro 11-2")
   end
 
-  test "fill_split only keeps the schedule table in the technical variant (PRAZO DE EXECUÇÃO is section 9)" do
+  test "fill_split only keeps the schedule table in the technical variant (PRAZO DE EXECUÇÃO is section 11)" do
     result = @filler.fill_split(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
 
     technical_xml = document_xml(result[:technical])
     commercial_xml = document_xml(result[:commercial])
 
-    assert_includes technical_xml, "Quadro 10-1: Cronograma do Serviço."
-    assert_not_includes commercial_xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes technical_xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_not_includes commercial_xml, "Quadro 11-1: Cronograma do Serviço."
     # A técnica não fica truncada no meio do bloco novo — a validade (seção seguinte) continua lá.
     assert_includes technical_xml, "VALIDADE DA PROPOSTA"
   end
@@ -515,7 +515,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes xml, 'r:embed="rId_CRONOGRAMA_SERVICO_1"'
     assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
     assert_includes zip_entry_content(bytes, "word/_rels/document.xml.rels"), 'Id="rId_CRONOGRAMA_SERVICO_1"'
-    assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 10-1: Cronograma do Serviço.")
+    assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 11-1: Cronograma do Serviço.")
   end
 
   # Quando o payload traz os ≤6 marcos que a IA elegeu (project_pricing.schedule_key_points), o
@@ -531,7 +531,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_includes xml, 'r:embed="rId_CRONOGRAMA_SERVICO_1"'
     assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
   end
 
   test "fill numbers a separate image/relationship per schedule type present" do
@@ -558,7 +558,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     # O modelo já tem <w:drawing> de sobra (logo da capa etc.) — o que importa é que NENHUM
     # arquivo/relationship do cronograma foi criado, não a ausência de <w:drawing> no geral.
     assert_not_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
   ensure
     ScheduleTimelineRenderer.define_method(:call, original_call)
@@ -584,12 +584,12 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
   # só a seção paisagem de cronograma logo depois de "PRAZO DE EXECUÇÃO", sem tocar em mais nada.
   test "insert_schedule_section adds the landscape schedule block to a finished docx, leaving the rest intact" do
     finished = @filler.fill(placeholders: @placeholders, tables: @tables) # sem schedules — "revisado por fora"
-    assert_not_includes document_xml(finished), "Quadro 10-1: Cronograma do Serviço."
+    assert_not_includes document_xml(finished), "Quadro 11-1: Cronograma do Serviço."
 
     result = ProposalDocxFiller.new(nil).insert_schedule_section(finished, schedules: { "servico" => schedule_payload("servico") })
     xml = document_xml(result)
 
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
     assert_includes xml, 'w:orient="landscape"', "o bloco de cronograma tem que abrir numa seção paisagem"
     assert_includes zip_entry_names(result), "word/media/cronograma_servico_1.png"
@@ -604,7 +604,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     )
     twice = ProposalDocxFiller.new(nil).insert_schedule_section(with_block, schedules: { "servico" => schedule_payload("servico") })
 
-    assert_equal 1, document_xml(twice).scan("Quadro 10-1: Cronograma do Serviço.").size
+    assert_equal 1, document_xml(twice).scan("Quadro 11-1: Cronograma do Serviço.").size
   end
 
   test "insert_schedule_section raises SectionAnchorError when the doc has no PRAZO DE EXECUÇÃO section" do

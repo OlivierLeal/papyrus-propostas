@@ -22,6 +22,16 @@ class Proposal < ApplicationRecord
     "#{DOCX_NUMERO_PREFIXES.fetch(kind, "PTC")}#{created_at.strftime("%y")}#{id.to_s.rjust(3, "0")}"
   end
 
+  # Igual a #docx_numero_proposta, mas sem o prefixo de letras (PT/PTC/PC) — só pra capa do
+  # `.docx` (2026-09, pedido do consultor: "ao invés de PT/PTC, só o número"). O modelo já
+  # concatena "/20" + "26" + " - Rev. {{REVISAO_ATUAL}}" depois do placeholder na própria capa
+  # (string fixa do modelo, não campo calculado), então só o prefixo de letras precisa sair
+  # daqui — em qualquer outro lugar (nome de arquivo, busca de conversa, indexação no RAG)
+  # continua sendo #docx_numero_proposta, com prefixo, sem mudança nenhuma.
+  def docx_numero_capa(kind = "combined")
+    docx_numero_proposta(kind).sub(/\A[A-Z]+/, "")
+  end
+
   # Nome de arquivo no padrão pedido pelo consultor (2026-09): número / cliente / ato de
   # licenciamento (LP, LI, RLP, LO, ASV, AMF etc.) / nome do projeto / revisão. Município/UF
   # SAÍRAM do nome de propósito — não fazem parte deste padrão. "Ato" e "nome do projeto" vêm dos

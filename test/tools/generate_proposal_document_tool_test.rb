@@ -104,7 +104,11 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     xml = document_xml(@proposal.generated_documents.first)
 
-    assert_includes xml, @proposal.docx_numero_proposta
+    # A capa mostra só o número, sem o prefixo PT/PTC/PC (2026-09, pedido do consultor) — o
+    # prefixo continua existindo em #docx_numero_proposta pra nome de arquivo/busca/indexação,
+    # só não aparece mais impresso.
+    assert_includes xml, @proposal.docx_numero_capa
+    assert_not_includes xml, @proposal.docx_numero_proposta
     assert_includes xml, "Pedro Almeida" # team_slot_for_docx, não veio dos args
   end
 
@@ -197,13 +201,19 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes result["filenames"].first, "_BESS São Desidério_Rev."
   end
 
-  test "the proposal number uses the right prefix per variant: PTC combined, PT/PC when separated" do
+  # A capa (Proposal#docx_numero_capa) mostra só os dígitos, sem prefixo — não distingue mais
+  # técnica/comercial/combinado por texto (quem faz isso na capa é TITULO_LINHA2/LINHA3, ver
+  # #build_placeholders). O prefixo PTC/PT/PC continua existindo e diferindo por variante em
+  # #docx_numero_proposta, só que agora só é usado pro NOME DO ARQUIVO (ver o teste
+  # "the dictated name distinguishes técnica from comercial..."), nunca impresso no documento.
+  test "the cover shows only the number, without the PTC/PT/PC prefix, regardless of variant" do
     @proposal.update!(document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
     tool.execute(**@args)
 
     combined_xml = document_xml(@proposal.generated_documents.first)
-    assert_includes combined_xml, @proposal.docx_numero_proposta("combined")
+    assert_includes combined_xml, @proposal.docx_numero_capa("combined")
+    assert_not_includes combined_xml, @proposal.docx_numero_proposta("combined")
 
     @proposal.update!(document_split: "separated")
     tool.execute(**@args)
@@ -212,9 +222,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     technical_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "tecnica" && d.blob.metadata["version"] == @proposal.version })
     commercial_xml = document_xml(@proposal.generated_documents.find { |d| d.blob.metadata["kind"] == "comercial" && d.blob.metadata["version"] == @proposal.version })
 
-    assert_includes technical_xml, @proposal.docx_numero_proposta("tecnica")
-    assert_not_includes technical_xml, @proposal.docx_numero_proposta("combined")
-    assert_includes commercial_xml, @proposal.docx_numero_proposta("comercial")
+    assert_includes technical_xml, @proposal.docx_numero_capa("tecnica")
+    assert_not_includes technical_xml, @proposal.docx_numero_proposta("tecnica")
+    assert_includes commercial_xml, @proposal.docx_numero_capa("comercial")
+    assert_not_includes commercial_xml, @proposal.docx_numero_proposta("comercial")
   end
 
   test "embeds the real Mapbox map in the docx when the geospatial result has a PNG area_image" do
@@ -645,7 +656,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
   end
 
@@ -690,7 +701,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
     assert_includes zip_entry_names(@proposal.generated_documents.first), "word/media/cronograma_servico_1.png"
   end
 
@@ -727,8 +738,8 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
-    assert_includes xml, "Quadro 10-2: Cronograma de Implantação do Empreendimento."
+    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes xml, "Quadro 11-2: Cronograma de Implantação do Empreendimento."
   end
 
   test "also attaches an MSPDI (.xml) file per schedule type present, alongside the docx" do

@@ -532,6 +532,19 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "PTC#{year}007", proposal.docx_numero_proposta("combined")
   end
 
+  # A capa do .docx mostra só o número, sem PT/PTC/PC (2026-09, pedido do consultor) — o prefixo
+  # continua existindo em #docx_numero_proposta (nome de arquivo, busca, indexação no RAG), só
+  # não aparece mais impresso na capa.
+  test "docx_numero_capa strips the letter prefix, keeping the rest of docx_numero_proposta intact" do
+    proposal = proposals(:priced_proposal)
+    year = proposal.created_at.strftime("%y")
+
+    assert_equal "#{year}#{proposal.id}", proposal.docx_numero_capa
+    assert_equal "#{year}#{proposal.id}", proposal.docx_numero_capa("combined")
+    assert_equal "#{year}#{proposal.id}", proposal.docx_numero_capa("tecnica")
+    assert_equal "#{year}#{proposal.id}", proposal.docx_numero_capa("comercial")
+  end
+
   # Padrão pedido pelo consultor (2026-09): número / cliente / ato de licenciamento (LP, LI, RLP,
   # LO, ASV, AMF etc.) / nome do projeto / revisão — município/UF saíram do nome de propósito.
   # Ato e nome do projeto vêm dos achados tipo_licenca/empreendimento (ProjectFinding), já

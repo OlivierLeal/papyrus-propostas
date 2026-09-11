@@ -61,7 +61,8 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
   end
 
   # A data de cada parcela é decisão comercial do consultor, digitada na mesma tela do resto —
-  # de lá ela vai direto para o Quadro 10-1 do documento.
+  # de lá ela vai direto para a Tela de Precificação (não mais pro Desembolso do .docx, que desde
+  # 2026-09 mostra só % DO ITEM — ver Proposal#docx_payment_schedule_rows).
   test "update stores the instalment dates typed on the pricing screen" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "1.20", tax_multiplier: "1.25", distance_km: "0", logistics_days: "0",

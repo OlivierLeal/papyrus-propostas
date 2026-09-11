@@ -24,7 +24,7 @@ class InsertScheduleSectionToolTest < ActiveSupport::TestCase
     assert_equal "proposta_revisada_com_Cronograma.docx", doc.filename.to_s
     assert_equal "revised_with_schedule", doc.blob.metadata["kind"]
     xml = read_document_xml(doc)
-    assert_includes xml, "Quadro 10-1: Cronograma do"
+    assert_includes xml, "Quadro 11-1: Cronograma do"
     assert_includes xml, 'w:orient="landscape"'
   end
 
