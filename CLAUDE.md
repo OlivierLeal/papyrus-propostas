@@ -783,12 +783,26 @@ produzem **1** cronograma, não 2; duas chamadas concorrentes de `ElectScheduleK
 resultam em **1** chamada de IA, não 2 — os dois testes falhavam de forma confiável sem
 `with_schedule_lock`/`.reload` e passam com a correção.
 
-**Exportação em MSPDI pro MS Project (2026-09):** todo cronograma presente também sai como um
+**Exportação em MSPDI pro MS Project (2026-09):** um cronograma presente PODE sair também como um
 arquivo `.xml` à parte, no formato **MSPDI** (o XML de intercâmbio do MS Project — Arquivo > Abrir
 importa como projeto completo: fases, atividades, datas, marcos). **Não é o binário `.mpp` de
 verdade** — gravar esse formato não é viável em nenhuma linguagem fora de produtos pagos .NET/Java
 (a Microsoft nunca documentou escrita, só engenharia reversa parcial pra leitura); MSPDI é o
 caminho padrão de qualquer integração séria.
+
+**Sob demanda, não em toda geração (2026-09, pedido do consultor).** Nasceu saindo sempre que
+havia cronograma; a maioria das propostas nunca chega a ser importada em nenhum MS Project, então
+o arquivo saía à toa quase sempre. `GenerateProposalDocumentTool` ganhou o parâmetro
+`exportar_cronograma_ms_project` (boolean, `required: false`) — a IA só marca `true` quando o
+consultor pede explicitamente no chat ("manda também em .xml"), ou quando o ET/TR exige entrega
+nesse formato; sem isso, `#export_ms_project?` (`ActiveModel::Type::Boolean`, ausência/`nil` conta
+como `false`) mantém `attach_schedule_mspdi_files!` fora de jogo e `schedule_filenames` fica `[]`
+— nada de MSPDI, nada de menção a "MS Project" na mensagem de retorno (`schedule_message` só fala
+nisso quando `schedule_filenames.present?`). A tabela do cronograma dentro do próprio `.docx`
+(`Quadro N-1`, ver acima) **nunca** depende disto — sai sempre, com ou sem o `.xml`. Decisão por
+geração, não fica "lembrada": cada chamada da ferramenta decide de novo a partir do que está
+acontecendo NAQUELA conversa, então pedir uma vez não faz o `.xml` sair de novo sozinho nas
+próximas gerações — o consultor pede de novo se quiser outra versão dele.
 - **`app/services/schedule_mspdi_exporter.rb`** monta o payload (fase = tarefa-resumo, atividades
   = tarefas-filhas, 1 nível só, mesmo agrupamento por `phase_name` consecutivo do
   `ScheduleTableBuilder`) e delega a montagem do `org.mpxj.ProjectFile`/gravação pra um helper Java

@@ -742,7 +742,11 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "Quadro 11-2: Cronograma de Implantação do Empreendimento."
   end
 
-  test "also attaches an MSPDI (.xml) file per schedule type present, alongside the docx" do
+  # 2026-09, pedido do consultor: o .xml de MS Project passou a ser SOB DEMANDA — a IA só marca
+  # exportar_cronograma_ms_project quando o consultor pediu no chat, ou o ET/TR exige esse
+  # formato (ver descrição do parâmetro). Sem o parâmetro, o cronograma sai só na tabela do
+  # próprio .docx, mesmo com schedule_items presentes.
+  test "also attaches an MSPDI (.xml) file per schedule type present, when exportar_cronograma_ms_project is true" do
     pricing = @proposal.project_pricing
     pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1), schedule_empreendimento_start_date: Date.new(2026, 9, 1))
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
@@ -751,7 +755,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       start_period: 1, duration_periods: 6, position: 0)
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    result = JSON.parse(tool.execute(**@args))
+    result = JSON.parse(tool.execute(**@args.merge(exportar_cronograma_ms_project: true)))
 
     assert result["success"]
     assert_equal 3, @proposal.generated_documents.count # docx + 2 cronogramas
@@ -762,10 +766,36 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_match(/formato MS Project/, result["message"])
   end
 
-  test "does not attach any MSPDI file, or mention MS Project, when there is no schedule at all" do
+  test "does not attach any MSPDI file, or mention MS Project, when there is a schedule but exportar_cronograma_ms_project was not requested" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1))
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     result = JSON.parse(tool.execute(**@args))
+
+    assert_equal 1, @proposal.generated_documents.count
+    refute_match(/MS Project/, result["message"])
+  end
+
+  test "does not attach any MSPDI file when exportar_cronograma_ms_project is explicitly false" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1))
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args.merge(exportar_cronograma_ms_project: false)))
+
+    assert_equal 1, @proposal.generated_documents.count
+    refute_match(/MS Project/, result["message"])
+  end
+
+  test "does not attach any MSPDI file, or mention MS Project, when there is no schedule at all" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args.merge(exportar_cronograma_ms_project: true)))
 
     assert_equal 1, @proposal.generated_documents.count
     refute_match(/MS Project/, result["message"])
@@ -800,7 +830,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       start_period: 1, duration_periods: 1, position: 0)
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    result = JSON.parse(tool.execute(**@args))
+    result = JSON.parse(tool.execute(**@args.merge(exportar_cronograma_ms_project: true)))
 
     expected = Date.current.next_month.beginning_of_month
     assert_equal expected, pricing.reload.schedule_papyrus_start_date

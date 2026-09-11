@@ -137,6 +137,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "especificamente. Formato AAAA-MM-DD.",
     required: false
 
+  param :exportar_cronograma_ms_project, type: "boolean", required: false,
+    desc: "true SOMENTE em dois casos: (1) o consultor pediu explicitamente no chat o cronograma em formato " \
+          "MS Project (ex.: \"manda também em .xml\", \"preciso importar no MS Project\"), ou (2) o ET ou o TR " \
+          "exige a entrega do cronograma nesse formato. Fora desses dois casos, NÃO envie este parâmetro (ou " \
+          "envie false) — a maioria das propostas não precisa do arquivo extra, e a tabela do cronograma dentro " \
+          "do próprio .docx sai sempre, com ou sem isto. Não repita a exportação sozinha nas gerações seguintes " \
+          "só porque saiu uma vez — cada geração decide de novo com base no que está acontecendo nesta."
+
   param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
@@ -183,6 +191,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS]
+    export_ms_project = export_ms_project?(args)
 
     # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
     # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
@@ -197,7 +206,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       failed_schedule_types = []
-      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
+      schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
@@ -213,7 +222,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       attach!(files[:technical], technical_filename, "tecnica", description)
       attach!(files[:commercial], commercial_filename, "comercial", description)
       failed_schedule_types = []
-      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
+      schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
           "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
@@ -222,7 +231,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
       attach!(bytes, combined_filename, "combined", description)
       failed_schedule_types = []
-      schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
+      schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
     end
@@ -504,10 +513,22 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       )
     end
 
+    # Sob demanda, não por padrão (2026-09, pedido do consultor): antes, todo cronograma virava
+    # também um .xml de MS Project em TODA geração — a maioria das propostas nunca chega a ser
+    # importada em nenhum MS Project, então o arquivo saía à toa quase sempre. A IA só marca
+    # exportar_cronograma_ms_project quando o consultor pediu no chat ou o ET/TR exige esse
+    # formato (ver descrição do parâmetro); ActiveModel::Type::Boolean tolera vir como string
+    # ("true"/"false", alguns modelos serializam assim) e trata ausência do parâmetro como false.
+    # A tabela do cronograma dentro do próprio .docx nunca depende disto — sai sempre.
+    def export_ms_project?(args)
+      ActiveModel::Type::Boolean.new.cast(args[:exportar_cronograma_ms_project]) == true
+    end
+
     # MSPDI (XML do MS Project) por tipo de cronograma presente — ver ScheduleMspdiExporter/
-    # CLAUDE.md seção 8. Sai igual em qualquer status da proposta (não é dado de preço), mesmo
-    # critério do cronograma dentro do .docx. Falha aqui (ex.: JRE ausente no servidor) não pode
-    # derrubar a geração do .docx inteiro — só fica sem o arquivo extra, logado pra investigar.
+    # CLAUDE.md seção 8. Só roda quando #export_ms_project? diz sim (ver acima). Sai igual em
+    # qualquer status da proposta (não é dado de preço), mesmo critério do cronograma dentro do
+    # .docx. Falha aqui (ex.: JRE ausente no servidor) não pode derrubar a geração do .docx
+    # inteiro — só fica sem o arquivo extra, logado pra investigar.
     SCHEDULE_UNITS = { "servico" => :week, "implantacao" => :month }.freeze
     SCHEDULE_NAMES = {
       "servico" => "Cronograma do Serviço",
