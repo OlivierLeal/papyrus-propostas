@@ -19,6 +19,15 @@ class GeneralMessagesControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Isso vale pra RJ também?", message.content
   end
 
+  # Guardado por consistência com Message (ver seção 2 do CLAUDE.md) — GeneralChat é sempre
+  # privado a 1 consultor, então isso não muda o que aparece na tela, só o dado gravado.
+  test "create records who sent the message" do
+    post general_chat_general_messages_path(@general_chat), params: { content: "Isso vale pra RJ também?" }
+
+    message = @general_chat.messages.order(:created_at).last
+    assert_equal @user, message.user
+  end
+
   test "create does nothing for blank content" do
     assert_no_enqueued_jobs(only: RespondToGeneralChatMessageJob) do
       assert_no_difference "@general_chat.messages.count" do

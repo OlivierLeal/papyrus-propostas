@@ -102,8 +102,42 @@ RS→FEPAM, RJ→INEA, SC→IMA, BA→INEMA, SP→CETESB, MG→SEMAD/SUPRAM, out
 **Núcleo da conversa** (via gem `ruby_llm` — `acts_as_chat`/`acts_as_message`, ver seção 12):
 - `users` — id, email, name, role, password_digest
 - `conversations` — `acts_as_chat`; colunas de domínio: user_id, client_name, status, study_type_id, setup_completed_at (colunas nativas da gem: model_id)
-- `messages` — `acts_as_message`; colunas nativas da gem: conversation_id, role, content, content_raw, tokens de entrada/saída/cache. Anexos (ET, TR, KMZ, complementares) via Active Storage nativo (`has_many_attached :attachments`), **não** uma tabela `attachments` própria — o upload na Tela de Setup é a primeira mensagem do usuário na conversa, já com os arquivos anexados
+- `messages` — `acts_as_message`; colunas nativas da gem: conversation_id, role, content, content_raw, tokens de entrada/saída/cache. Anexos (ET, TR, KMZ, complementares) via Active Storage nativo (`has_many_attached :attachments`), **não** uma tabela `attachments` própria — o upload na Tela de Setup é a primeira mensagem do usuário na conversa, já com os arquivos anexados. `user_id` (opcional — ver "Quem mandou cada mensagem" abaixo)
 - `tool_calls` / `models` — tabelas nativas da gem (function-calling e registro de modelos LLM com pricing/capabilities); não fazem parte do domínio, mas ficam disponíveis para uso futuro (ex.: extração estruturada de dados do ET)
+
+**Quem mandou cada mensagem, pro chat mostrar o nome de cada um (2026-09).** `Conversation`
+(diferente de `GeneralChat`) não é escopado por usuário — `Conversation.find`/`MessagesController
+#set_conversation` não filtram por `current_user`, de propósito: mais de um consultor pode
+acompanhar/participar da mesma proposta, e o broadcast de uma mensagem nova (`broadcast_render_to`,
+ver seção 6) chega em toda aba aberta dela, não só em quem mandou. Sem saber QUEM escreveu, o chat
+rotulava toda mensagem `role: "user"` como "Você" pra qualquer um que estivesse olhando — errado
+pro consultor B ler a mensagem do consultor A.
+- `messages.user_id`/`general_messages.user_id` (`belongs_to :user, optional: true`) —
+  `Message#assign_current_user`/`GeneralMessage#assign_current_user` (`before_create`, só quando
+  `role == "user"` e `user_id` ainda não veio setado) grava `Current.user` sozinho, sem precisar
+  tocar em `MessagesController`/`ConversationsController#create` (a mensagem de setup) nem em
+  nenhum outro ponto que já cria mensagem "user". **`before_create`, não `before_save`** (diferente
+  de `hide_tool_result!` — ver comentário no model): mensagem "user" sempre nasce com o role já
+  definido (`ChatMethods#add_message` → `create!` direto), nunca o placeholder
+  assistant-depois-atualizado que só existe pra streaming da resposta da IA.
+- Fica `nil` de propósito pras mensagens "user" INTERNAS do `ask_internally` (o snapshot
+  `[ESTADO ATUAL DA PROPOSTA]`, instruções da checklist) — rodam em background job, sem
+  `Current.user` (fora do ciclo de uma request), e nenhum humano "digitou" aquilo mesmo. Também
+  fica `nil` em mensagens de antes desta coluna existir.
+- **`conversations/_message.html.erb` mostra `message.user&.name || "Você"`, DELIBERADAMENTE sem
+  comparar com `current_user`.** `broadcast_render_to` roda num job à parte
+  (`Turbo::Streams::ActionBroadcastJob`) — a mesma HTML renderizada ali é transmitida pra TODO
+  mundo que está com a proposta aberta, então comparar com `current_user` acertaria só pra quem
+  originou o request (ou nem isso — `Current` é resetado entre jobs) e erraria pro resto. Mostrar
+  sempre o nome de verdade evita depender de em qual contexto (request normal vs. broadcast
+  assíncrono) a mensagem está sendo renderizada.
+- `general_chats/_message.html.erb` **não muda** — `GeneralChat` é sempre escopado por
+  `current_user.general_chats` (`GeneralChatsController`/`GeneralMessagesController`), nunca
+  compartilhado entre consultores, então "Você"/"IA" já era (e continua sendo) sempre correto ali;
+  o `user_id` em `general_messages` é gravado só por consistência com `Message`, sem uso na view.
+- Verificado com teste de controller (resposta HTML de verdade, não só o model): consultor B abre
+  a proposta do consultor A, a mensagem de A aparece com "Consultora Um" (nome de A), e a de B
+  aparece como "Você".
 
 **Proposta e precificação (implementado):**
 - `proposals` — conversation_id, content_json, pdf_url, version, status (`draft`/`priced`/`approved`)

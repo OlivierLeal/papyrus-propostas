@@ -1,6 +1,7 @@
 class Message < ApplicationRecord
   acts_as_message chat: :conversation
   has_many_attached :attachments
+  belongs_to :user, optional: true
 
   # Resultado bruto de uma tool call (SearchHistoricalArchiveTool, GenerateProposalDocumentTool
   # etc.) nasce com role "tool" e internal: false por padrão — sem isso, visto na prática em
@@ -16,6 +17,18 @@ class Message < ApplicationRecord
   # antes de saber o role final) e só depois #persist_message_completion faz um UPDATE trocando
   # pra role: :tool quando é o caso. Um before_create nunca veria o role final, só o placeholder.
   before_save :hide_tool_result!
+
+  # Quem digitou a mensagem, pra mostrar o nome de cada consultor no chat (2026-09 — mais de uma
+  # pessoa pode acompanhar/participar da mesma proposta, ver comentário de MessagesController#
+  # create sobre "outro consultor olhando a mesma proposta"). before_create (não before_save,
+  # diferente de hide_tool_result! acima): mensagem "user" nasce SEMPRE com o role já definido
+  # desde a criação (Conversation#create_user_message → ChatMethods#add_message → create! direto,
+  # nunca o placeholder assistant-depois-atualizado que só existe pra streaming da IA), então dá
+  # pra pegar Current.user já na criação. Current.user só existe dentro do ciclo de uma request —
+  # fica nil (não sobrescreve nada) pra mensagens "user" internas do ask_internally (nenhum
+  # humano digitou aquilo, rodam em background job) e pra mensagens antigas de antes desta coluna
+  # existir; a view cai pro rótulo genérico "Você" nesses casos.
+  before_create :assign_current_user, if: -> { role == "user" && user_id.nil? }
 
   # Códigos de citação que a IA escreveu neste texto ("[F12]"), resolvidos para os achados reais
   # desta conversa. Código que não corresponde a nenhum achado ativo daqui não vira citação: uma
@@ -33,6 +46,10 @@ class Message < ApplicationRecord
   private
     def hide_tool_result!
       self.internal = true if role == "tool"
+    end
+
+    def assign_current_user
+      self.user = Current.user
     end
     # O KMZ é geoespacial (RGeo/PostGIS), não é lido pela IA (ver CLAUDE.md seção 3). Sem esse
     # filtro, o ruby_llm reenvia TODOS os anexos do histórico em toda chamada — e como o Gemini

@@ -12,8 +12,22 @@
     </div>
   </div>
 
+  <%# Nome de quem mandou — mais de um consultor pode acompanhar a mesma proposta (ver
+      MessagesController#create), então não dá pra rotular toda mensagem "user" como "Você": pra
+      um consultor B vendo o painel, uma mensagem do consultor A tem que trazer o nome de A.
+      DELIBERADAMENTE sem comparar com current_user aqui: esta mensagem é rendida uma vez e
+      transmitida pro WebSocket de todo mundo que está olhando esta proposta agora
+      (broadcast_render_to, MessagesController#create) — comparar com current_user acertaria só
+      pra quem originou o request e erraria (ou ficaria nil) pra quem só está recebendo o
+      broadcast. Sem message.user (mensagem antiga, de antes dessa coluna existir) cai num rótulo
+      genérico — degradação aceitável, sem como saber quem foi. %>
+  <% sender_label = if !is_user
+    "IA"
+  else
+    message.user&.name || "Você"
+  end %>
   <div class="flex flex-col gap-1 min-w-0 <%= is_user ? "items-end" : "items-start" %>">
-    <span class="text-xs text-base-content/40 px-1"><%= is_user ? "Você" : "IA" %></span>
+    <span class="text-xs text-base-content/40 px-1"><%= sender_label %></span>
 
     <div class="w-fit max-w-full rounded-box px-4 py-3 text-sm <%= is_user ? "bg-primary text-primary-content" : "bg-base-200 text-base-content" %>">
       <% if parsed_content.is_a?(Hash) && parsed_content["success"] && parsed_content["version"].present? %>

@@ -153,6 +153,14 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "skipped", conversation.processing_step_status("kmz")
   end
 
+  test "create records who set up the conversation on the first (setup) message" do
+    post conversations_path, params: { conversation: { client_name: "Cliente Sem Arquivos" } }
+
+    conversation = Conversation.order(:created_at).last
+    setup_message = conversation.messages.find_by!(role: "user")
+    assert_equal @user, setup_message.user
+  end
+
   test "create re-renders the form with errors when client_name is missing" do
     assert_no_difference "Conversation.count" do
       post conversations_path, params: { conversation: { client_name: "" } }
@@ -238,6 +246,26 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
   test "show renders an existing conversation" do
     get conversation_path(conversations(:reviewing_conversation))
     assert_response :success
+  end
+
+  # Qualquer consultor autenticado pode abrir a proposta de outro (Conversation.find sem escopo
+  # por usuário, ver comentário em MessagesController#create) — a bolha de quem mandou tem que
+  # trazer o NOME de quem escreveu, não "Você" genérico, senão um consultor B vendo o painel do
+  # consultor A leria a mensagem de A como se fosse dele mesmo.
+  test "show labels each message with the name of whoever actually sent it, not always 'Você'" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.messages.create!(role: "user", content: "Mensagem da consultora Um", internal: false, user: users(:one))
+    conversation.messages.create!(role: "user", content: "Mensagem do consultor Dois", internal: false, user: users(:two))
+
+    sign_out
+    sign_in_as users(:two)
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_match "Mensagem da consultora Um", response.body
+    assert_match users(:one).name, response.body
+    assert_match "Mensagem do consultor Dois", response.body
+    assert_match "Você", response.body
   end
 
   test "show renders a document attached to a message as a chip inside the bubble, not just in the sidebar" do

@@ -1,14 +1,23 @@
 class GeneralMessage < ApplicationRecord
   acts_as_message chat: :general_chat, tool_calls: :general_tool_calls
   has_many_attached :attachments
+  belongs_to :user, optional: true
 
   # Mesmo motivo de Message#hide_tool_result! — o JSON cru de uma tool call (search_historical_
   # archive, search_legal_norms) nasce com role "tool" e não deve virar bolha própria no chat.
   before_save :hide_tool_result!
 
+  # Mesmo motivo de Message#assign_current_user — ver lá pro porquê de before_create (não
+  # before_save) ser seguro aqui.
+  before_create :assign_current_user, if: -> { role == "user" && user_id.nil? }
+
   private
     def hide_tool_result!
       self.internal = true if role == "tool"
+    end
+
+    def assign_current_user
+      self.user = Current.user
     end
 
     # Mesmo motivo de Message#attachment_sources: cada arquivo só precisa ser lido bruto UMA VEZ

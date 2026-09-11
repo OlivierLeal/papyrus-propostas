@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_142103) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_11_092245) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -87,10 +87,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_142103) do
     t.text "thinking_text"
     t.integer "thinking_tokens"
     t.datetime "updated_at", null: false
+    t.bigint "user_id"
     t.index ["general_chat_id"], name: "index_general_messages_on_general_chat_id"
     t.index ["general_tool_call_id"], name: "index_general_messages_on_general_tool_call_id"
     t.index ["model_id"], name: "index_general_messages_on_model_id"
     t.index ["role"], name: "index_general_messages_on_role"
+    t.index ["user_id"], name: "index_general_messages_on_user_id"
   end
 
   create_table "general_tool_calls", force: :cascade do |t|
@@ -233,10 +235,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_142103) do
     t.integer "thinking_tokens"
     t.bigint "tool_call_id"
     t.datetime "updated_at", null: false
+    t.bigint "user_id"
     t.index ["conversation_id"], name: "index_messages_on_conversation_id"
     t.index ["model_id"], name: "index_messages_on_model_id"
     t.index ["role"], name: "index_messages_on_role"
     t.index ["tool_call_id"], name: "index_messages_on_tool_call_id"
+    t.index ["user_id"], name: "index_messages_on_user_id"
   end
 
   create_table "models", force: :cascade do |t|
@@ -583,6 +587,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_142103) do
   add_foreign_key "general_messages", "general_chats"
   add_foreign_key "general_messages", "general_tool_calls"
   add_foreign_key "general_messages", "models"
+  add_foreign_key "general_messages", "users"
   add_foreign_key "general_tool_calls", "general_messages"
   add_foreign_key "geospatial_results", "conversations"
   add_foreign_key "historical_proposal_chunks", "historical_proposals"
@@ -594,6 +599,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_142103) do
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"
+  add_foreign_key "messages", "users"
   add_foreign_key "project_conflict_findings", "project_conflicts"
   add_foreign_key "project_conflict_findings", "project_findings"
   add_foreign_key "project_conflicts", "conversations"

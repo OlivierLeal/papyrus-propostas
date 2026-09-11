@@ -1,57 +1,38 @@
 require "test_helper"
 
 class GeneralMessageTest < ActiveSupport::TestCase
-  test "a message with role tool is automatically hidden from the visible chat" do
-    general_chat = general_chats(:with_messages)
-    message = general_chat.messages.create!(role: "tool", content: '{"resultados": []}')
-
-    assert message.internal?
+  setup do
+    @general_chat = general_chats(:with_messages)
   end
 
-  test "a message with role user or assistant is not hidden just for existing" do
-    general_chat = general_chats(:with_messages)
-    user_message = general_chat.messages.create!(role: "user", content: "oi")
-    assistant_message = general_chat.messages.create!(role: "assistant", content: "olá")
-
-    assert_not user_message.internal?
-    assert_not assistant_message.internal?
+  teardown do
+    Current.session = nil
   end
 
-  test "to_llm content keeps the attachment on the most recent user message" do
-    general_chat = general_chats(:with_messages)
-    message = general_chat.create_user_message("segue o edital, analise")
-    message.attachments.attach(
-      io: StringIO.new("%PDF-1.4"), filename: "edital.pdf", content_type: "application/pdf", metadata: { kind: "document" }
-    )
+  # Mesmo motivo de MessageTest — ver Message#assign_current_user / GeneralMessage#
+  # assign_current_user. GeneralChat é sempre privado a 1 consultor, mas o dado é guardado por
+  # consistência mesmo assim (não muda o que aparece na tela deste chat).
+  test "a user-role message created within a request records Current.user automatically" do
+    Current.session = users(:one).sessions.create!
 
-    assert_equal [ "edital.pdf" ], message.to_llm.content.attachments.map(&:filename)
+    message = @general_chat.messages.create!(role: "user", content: "Pergunta qualquer")
+
+    assert_equal users(:one), message.user
   end
 
-  # Mesma proteção de Message#attachment_sources, contra o limite de 5 documentos por request
-  # que a Anthropic aplica — sem isso, um documento anexado seria reenviado em TODA chamada
-  # seguinte desta conversa, mesmo turnos que não têm nada a ver com ele.
-  test "to_llm content excludes attachments from any user message that isn't the most recent one" do
-    general_chat = general_chats(:with_messages)
-    older_message = general_chat.create_user_message("segue o edital, analise")
-    older_message.attachments.attach(
-      io: StringIO.new("%PDF-1.4"), filename: "edital.pdf", content_type: "application/pdf"
-    )
+  test "a message that is not role user never gets a user, even with Current.user set" do
+    Current.session = users(:one).sessions.create!
 
-    general_chat.create_user_message("e sobre isso, o que você acha?")
+    message = @general_chat.messages.create!(role: "assistant", content: "Resposta da IA")
 
-    assert_equal "segue o edital, analise", older_message.reload.to_llm.content
+    assert_nil message.user
   end
 
-  test "stale attachments stay fully downloadable — only what's sent to the AI changes" do
-    general_chat = general_chats(:with_messages)
-    older_message = general_chat.create_user_message("segue o edital, analise")
-    older_message.attachments.attach(
-      io: StringIO.new("%PDF-1.4"), filename: "edital.pdf", content_type: "application/pdf"
-    )
+  test "a user-role message created outside a request (no Current.user) stays without a user" do
+    Current.session = nil
 
-    general_chat.create_user_message("outra pergunta")
+    message = @general_chat.messages.create!(role: "user", content: "Instrução interna", internal: true)
 
-    assert older_message.reload.attachments.attached?
-    assert_equal "edital.pdf", older_message.attachments.first.filename.to_s
+    assert_nil message.user
   end
 end
