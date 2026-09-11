@@ -132,6 +132,26 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     assert_nil @conversation.project_findings.find_by(field: "municipios")
   end
 
+  # 2026-09: KMZ passou a poder chegar a qualquer momento pelo chat (MessagesController#create),
+  # não só no setup — o consultor pode mandar um KMZ substituto/corrigido depois do primeiro.
+  # geospatial_result é 1-1 (índice único em conversation_id); sem destruir o antigo antes,
+  # create_geospatial_result! levantaria RecordNotUnique e o job cairia no rescue como "failed".
+  test "reprocessing with a second KMZ replaces the previous geospatial result instead of raising" do
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    attach_kmz(VALID_KML)
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
+    first_result_id = @conversation.reload.geospatial_result.id
+
+    attach_kmz(LINE_KML)
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
+
+    @conversation.reload
+    assert_equal "done", @conversation.processing_step_status("kmz")
+    refute_equal first_result_id, @conversation.geospatial_result.id
+    assert_nil @conversation.geospatial_result.area_ha
+    assert_not_nil @conversation.geospatial_result.length_km
+  end
+
   test "triggers GenerateSummaryJob once tr and comp_docs are already resolved" do
     @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
 

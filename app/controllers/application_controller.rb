@@ -18,4 +18,11 @@ class ApplicationController < ActionController::Base
         metadata: { kind: kind }
       )
     end
+
+    # Compartilhado entre ConversationsController (campo KMZ dedicado do setup) e
+    # MessagesController (detecção por extensão entre os anexos soltos do chat, ver
+    # MessagesController#create) — mesmo critério nos dois lugares.
+    def kmz_filename?(file)
+      file.original_filename.match?(/\.(kmz|kml)\z/i)
+    end
 end

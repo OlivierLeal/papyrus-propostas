@@ -380,8 +380,13 @@ class Conversation < ApplicationRecord
     messages.where(internal: false).flat_map(&:attachments).select { |attachment| attachment.blob.metadata["kind"] == kind.to_s }
   end
 
+  # .last, não .first: só existe um chamador hoje (ProcessKmzJob, kind "kmz"), e desde que o KMZ
+  # passou a poder chegar a qualquer momento da conversa (não só no setup, ver
+  # MessagesController#create), um consultor pode enviar um KMZ substituto depois — o mais RECENTE
+  # é o que vale, igual "só a mensagem de usuário mais recente reenvia o anexo bruto pra IA" em
+  # Message#stale_for_llm?.
   def attachment_of_kind(kind)
-    attachments_of_kind(kind).first
+    attachments_of_kind(kind).last
   end
 
   def processing_step_status(step)

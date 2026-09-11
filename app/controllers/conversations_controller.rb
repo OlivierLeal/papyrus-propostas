@@ -123,10 +123,6 @@ class ConversationsController < ApplicationController
       ].include?(file.content_type)
     end
 
-    def kmz_filename?(file)
-      file.original_filename.match?(/\.(kmz|kml)\z/i)
-    end
-
     def setup_message_content(ets, trs, kmz, complementary_documents, notes)
       parts = []
       parts << "ET: #{ets.map(&:original_filename).join(', ')}" if ets.any?

@@ -223,6 +223,25 @@ class ConversationTest < ActiveSupport::TestCase
     assert_equal "tr.pdf", conversation.attachment_of_kind("tr").filename.to_s
   end
 
+  # 2026-09: KMZ passou a poder chegar a qualquer momento pelo chat (MessagesController#create),
+  # não só no setup — um consultor pode mandar um KMZ substituto depois do primeiro. attachment_of_
+  # kind precisa devolver o mais RECENTE, não o primeiro que chegou (ver ProcessKmzJob).
+  test "attachment_of_kind returns the MOST RECENT attachment when more than one exists" do
+    conversation = conversations(:reviewing_conversation)
+    first_message = conversation.messages.first
+    first_message.attachments.attach(
+      io: StringIO.new("conteúdo"), filename: "area_antiga.kmz", content_type: "application/vnd.google-earth.kmz",
+      metadata: { kind: "kmz" }
+    )
+    later_message = conversation.messages.create!(role: "user", content: "KMZ atualizado")
+    later_message.attachments.attach(
+      io: StringIO.new("conteúdo"), filename: "area_atualizada.kmz", content_type: "application/vnd.google-earth.kmz",
+      metadata: { kind: "kmz" }
+    )
+
+    assert_equal "area_atualizada.kmz", conversation.attachment_of_kind("kmz").filename.to_s
+  end
+
   test "attachments_of_kind ignores copies ruby_llm persists onto the internal instruction message" do
     conversation = conversations(:reviewing_conversation)
     message = conversation.messages.first

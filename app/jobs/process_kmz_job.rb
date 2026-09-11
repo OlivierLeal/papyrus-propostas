@@ -13,6 +13,13 @@ class ProcessKmzJob < ApplicationJob
     conversation.mark_step!("kmz", "running")
     result = KmzGeometryExtractor.new(attachment.blob.download).call
 
+    # `geospatial_result` é 1-1 (índice único em conversation_id) — só nasce vazio na 1ª vez
+    # (setup). Desde que o KMZ passou a poder chegar a qualquer momento pelo chat (ver
+    # MessagesController#create), um KMZ substituto/atualizado depois teria que conviver com o
+    # anterior sem essa destruição — create_geospatial_result! levantaria RecordNotUnique.
+    # dependent: :destroy já cuida do croqui/mapa anexado junto.
+    conversation.geospatial_result&.destroy!
+
     geospatial_result = conversation.create_geospatial_result!(
       geometry_type: result.geometry_type, area_ha: result.area_ha, perimeter_km: result.perimeter_km,
       length_km: result.length_km, centroid: result.centroid, geometry: result.geometry

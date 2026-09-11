@@ -40,7 +40,32 @@ A IA nunca faz conta de dinheiro. Ela só identifica escopo; quem precifica é o
 9. IA escreve o texto das seções; o backend monta o PDF no layout padrão Papyrus.
 10. PDF pronto para download; proposta salva no histórico (arquivos + PDF + conversa completos).
 
-Documentos complementares podem ser enviados a qualquer momento da conversa, não só no início.
+Documentos complementares podem ser enviados a qualquer momento da conversa, não só no início —
+e desde 2026-09 o **KMZ/KML também** (ver "KMZ enviado pelo chat" logo abaixo).
+
+**KMZ enviado pelo chat, não só na Tela de Setup (2026-09, pedido do consultor: proposta criada
+sem KMZ, quer jogar o arquivo no chat depois e ter o mapa/análise geoespacial do mesmo jeito).**
+Antes, `ProcessKmzJob` só era enfileirado uma vez, por `ConversationsController#create` — uma
+proposta que nasceu sem KMZ ficava sem mapa/achados geoespaciais pra sempre, a não ser recriando a
+conversa inteira. `MessagesController#create` agora detecta `.kmz`/`.kml` por extensão entre os
+anexos soltos do composer do chat (mesmo critério de `ConversationsController#kmz_filename?`,
+extraído pra `ApplicationController` pra servir os dois), marca `kind: "kmz"` em vez de
+`"complementary"` e enfileira `ProcessKmzJob` na hora — o job em si não muda nada (mesma extração
+de geometria, cruzamento com `ibge_municipalities`, mapa/croqui, achados de área/perímetro/
+município), só passou a poder ser disparado a qualquer momento, não só no setup.
+- `Conversation#attachment_of_kind` trocou de `.first` pra `.last` — com o KMZ podendo chegar a
+  qualquer momento, um consultor pode mandar um substituto/corrigido depois do primeiro, e o mais
+  RECENTE é o que vale (mesmo princípio de `Message#stale_for_llm?` pros documentos que vão pra
+  IA). `ProcessKmzJob` ganhou `conversation.geospatial_result&.destroy!` antes de criar o novo —
+  `geospatial_result` é 1-1 (índice único em `conversation_id`), sem isso um KMZ substituto
+  derrubava o job com `RecordNotUnique` (capturado pelo `rescue` como "failed", silencioso).
+- `RespondToMessageJob` roda em paralelo com `ProcessKmzJob` (que processa em background e pode
+  levar alguns segundos — extração de geometria, PostGIS, chamada à Mapbox) — a resposta da IA
+  deste turno pode não ter ainda o mapa/achados prontos; eles ficam disponíveis pro turno seguinte,
+  mesmo padrão de "peça de novo em instantes" já usado pro cronograma (seção 8). O card do mapa na
+  Tela de Resultado (`conversations/show.html.erb`) só depende de `geospatial_result.present?`, não
+  de `processing_steps` — aparece sozinho assim que o job termina (`mark_step!` já dispara
+  `broadcast_refresh`).
 
 **Escolher arquivos em mais de uma rodada no mesmo campo (2026-09, achado ao vivo, relato do
 consultor).** Todo campo `<input type="file" multiple>` do sistema (ET/TR/KMZ/complementares na
@@ -1483,6 +1508,18 @@ primeiro `{` até o **último** `}` (guloso, não `.*?`) — precisa ser guloso 
 aninhados (`achados` é um array de hashes) e um regex não-guloso pararia no primeiro `}` interno.
 
 **Ainda não implementado:** paginação automática (`cal.normas.search_all`, hoje só a 1ª página).
+
+**Ainda não implementado (2026-09, ideia do consultor): persistir o anexo baixado de cada norma.**
+`Cal::Documento#texto` já baixa o PDF do anexo (`Cal::Client#download`) e extrai o texto
+(`Rag::TextExtractor`, `ocr: false`) pra responder a `SearchLegalNormsTool`, mas descarta tudo
+depois — nem o PDF nem o texto extraído ficam salvos, então a mesma norma é rebaixada e
+reprocessada do zero a cada consulta, em qualquer proposta. Ideia: guardar o PDF e o texto numa
+tabela própria (ex.: `cal_documentos`, chave o `codigo`/`anexo_id` da norma), mesmo princípio de
+cache-por-conteúdo já usado no OCR do RAG do acervo (seção 11.1). Além de parar de rebaixar/
+reprocessar a mesma norma toda hora, abre a porta pra rodar OCR (hoje `ocr: false`, nunca tenta)
+UMA vez nos PDFs escaneados e guardar o resultado — sem pagar esse custo de novo a cada consulta
+(achado ao vivo na conversa 38, ver revisão de proposta acima: quase toda norma que a IA tentou
+ler de verdade veio "não consegui ler o texto do documento", provavelmente PDF escaneado).
 
 ---
 

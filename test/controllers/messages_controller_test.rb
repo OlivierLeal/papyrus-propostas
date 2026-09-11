@@ -79,4 +79,40 @@ class MessagesControllerTest < ActionDispatch::IntegrationTest
     assert_includes message.content, "comp_sample.pdf"
     assert_equal "complementary", message.attachments.first.blob.metadata["kind"]
   end
+
+  # 2026-09, pedido do consultor: proposta criada sem KMZ no setup, ele quer jogar o arquivo no
+  # chat depois e ter o mapa/análise geoespacial do mesmo jeito — antes, ProcessKmzJob só era
+  # enfileirado uma vez, no setup (ConversationsController#create).
+  test "create tags a .kmz upload with kind kmz (not complementary) and enqueues ProcessKmzJob" do
+    kmz = fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz")
+
+    assert_enqueued_with(job: ProcessKmzJob, args: [ @conversation.id ]) do
+      post conversation_messages_path(@conversation), params: { documents: [ kmz ] }
+    end
+
+    message = @conversation.messages.order(:created_at).last
+    assert_equal "kmz", message.attachments.first.blob.metadata["kind"]
+    assert_includes message.content, "KMZ: area_sample.kmz"
+  end
+
+  test "create does not enqueue ProcessKmzJob when no kmz/kml file was sent" do
+    doc = fixture_file_upload("comp_sample.pdf", "application/pdf")
+
+    assert_no_enqueued_jobs(only: ProcessKmzJob) do
+      post conversation_messages_path(@conversation), params: { documents: [ doc ] }
+    end
+  end
+
+  test "create separates a kmz and a complementary document sent together, tagging each correctly" do
+    kmz = fixture_file_upload("area_sample.kmz", "application/vnd.google-earth.kmz")
+    doc = fixture_file_upload("comp_sample.pdf", "application/pdf")
+
+    assert_enqueued_with(job: ProcessKmzJob, args: [ @conversation.id ]) do
+      post conversation_messages_path(@conversation), params: { documents: [ kmz, doc ] }
+    end
+
+    message = @conversation.messages.order(:created_at).last
+    kinds = message.attachments.map { |a| a.blob.metadata["kind"] }
+    assert_equal %w[complementary kmz].sort, kinds.sort
+  end
 end
