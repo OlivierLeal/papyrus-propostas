@@ -1102,6 +1102,36 @@ semanal"). Duas mudanças, sem flag nova (vale pros dois fluxos — geração no
   Sr. X") a partir do e-mail do cliente anexado como complementar, e o achado "capa" / "dados
   bancários" (o consultor pediu pra deixar de fora desta rodada).
 
+**"Papyrus" sempre maiúsculo e em negrito, em TODO o corpo do documento (2026-09, pedido do
+consultor).** Até aqui, "PAPYRUS" em negrito só existia em pedaços fixos do modelo, editados um
+por um na mão (ver "CONTRATADA → PAPYRUS em negrito" acima) — o texto que a IA escreve nos
+parâmetros da ferramenta (`objetivo_dos_servicos`, `escopo_e_metodologia`,
+`caracterizacao_do_empreendimento` etc.) nunca passava por tratamento nenhum, então saía como a
+IA tivesse escrito ("a Papyrus", "papyrus", sem padrão). Agora é uma transformação de verdade,
+não mais edição pontual de template: `ProposalDocxFiller#uppercase_and_bold_papyrus!` roda por
+ÚLTIMO em `#build` — depois de placeholders, tabelas e cronograma já resolvidos (nunca antes, pra
+não arriscar cortar um `{{TOKEN}}` que ainda não virou conteúdo) — e varre TODO `<w:t>` do corpo
+procurando "papyrus" (qualquer capitalização, `\bpapyrus\b` — a fronteira de palavra evita casar
+"papyrus" embutido noutra palavra, como os e-mails do próprio modelo,
+`bemvindo@somospapyrus.com.br`, que continuam intocados).
+
+Como um `<w:r>` (run) só tem UMA formatação pro texto inteiro dele, e só a palavra "Papyrus" deve
+ficar em negrito (não a frase ao redor), o run é despedaçado: o texto normal em volta vira um run
+CLONADO do original (preserva fonte/cor/tamanho herdados do `<w:rPr>`), e cada ocorrência de
+"Papyrus" vira outro run também clonado do mesmo original, só que MAIÚSCULO e com `<w:b/>`
+acrescentado ao `<w:rPr>` (reaproveita `bold_run!`, mesmo helper que já existia pra
+`**negrito**` nos tópicos de escopo — idempotente, não duplica `<w:b/>` se o run já vinha em
+negrito, como as ocorrências fixas do modelo que já foram bold antes desta mudança). Um `<w:t>`
+com várias ocorrências ("A Papyrus... apoio técnico da Papyrus") vira quantos runs forem
+necessários, não só um por chamada.
+
+Verificado ao vivo (LibreOffice headless → PDF → captura de tela, proposta real): "PAPYRUS" sai
+maiúsculo e em negrito em todo texto que a IA escreveu mencionando o nome, sem tocar
+`www.somospapyrus.com.br` nem `PAPYRUS CONSULTORIA AMBIENTAL LTDA` (que já era maiúsculo,
+ganhou negrito só na palavra "PAPYRUS", mantendo "CONSULTORIA AMBIENTAL LTDA" como estava).
+Teste em `proposal_docx_filler_test.rb` trava a formatação preservada (fonte/cor do `<w:rPr>`
+original) e que o e-mail do modelo não vira maiúsculo.
+
 **Quadro SUMÁRIO DE REVISÕES: linha duplicada/descrição em branco (2026-09, correção do
 consultor).** Duas falhas na tabela de revisões (página 2 do modelo):
 1. **Linha duplicada** — `Proposal#docx_revision_rows` montava as linhas PASSADAS a partir de

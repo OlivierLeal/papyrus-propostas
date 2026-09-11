@@ -41,8 +41,54 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes xml, "Elaborar o EIA/RIMA do Parque Eólico Serra Verde."
     assert_not_includes xml, "{{NOME_CLIENTE}}"
     assert_not_includes xml, "{{OBJETIVO_SERVICOS}}"
-    # Institutional/fixed content from the template stays untouched.
-    assert_includes xml, "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
+    # Institutional/fixed content from the template stays untouched (o texto de "PAPYRUS" — só a
+    # palavra em si — some da string CRUA porque uppercase_and_bold_papyrus! quebra o run em dois;
+    # document_text junta o texto visível de novo, ignorando a marcação entre os runs).
+    assert_includes document_text(bytes), "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
+  end
+
+  # "Papyrus" sempre maiúsculo e em negrito no corpo do documento (2026-09, pedido do consultor).
+  test "fill uppercases and bolds every occurrence of Papyrus coming from AI-written placeholder text" do
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge("OBJETIVO_SERVICOS" => "A Papyrus vai elaborar o EIA/RIMA, com apoio técnico da Papyrus."),
+      tables: @tables
+    )
+    doc = parsed_document(bytes)
+
+    # Escopado ao parágrafo com "EIA/RIMA" (texto único deste teste) — o modelo já tem VÁRIAS
+    # outras ocorrências fixas de "PAPYRUS", algumas já em negrito antes desta funcionalidade
+    # existir (ver CLAUDE.md seção 8, "CONTRATADA → PAPYRUS em negrito").
+    paragraph = doc.at_xpath("//w:p[.//w:t[contains(text(), 'EIA/RIMA')]]", NS)
+    bold_papyrus_runs = paragraph.xpath(".//w:r[w:t[text()='PAPYRUS'] and w:rPr/w:b]", NS)
+    assert_equal 2, bold_papyrus_runs.size
+    assert_includes document_text(bytes), "A PAPYRUS vai elaborar o EIA/RIMA, com apoio técnico da PAPYRUS."
+  end
+
+  test "fill does not touch 'papyrus' embedded inside another word (e.g. the model's e-mail addresses)" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+
+    # somospapyrus.com.br já vem no modelo (contatos) — não é a palavra "Papyrus" isolada.
+    assert_includes document_text(bytes), "somospapyrus.com.br"
+    assert_not_includes document_text(bytes), "SOMOSPAPYRUS.COM.BR"
+  end
+
+  test "fill preserves the surrounding run formatting (font/color) when splitting a run around Papyrus" do
+    bytes = @filler.fill(
+      placeholders: @placeholders.merge("OBJETIVO_SERVICOS" => "Serviço prestado pela Papyrus com excelência."),
+      tables: @tables
+    )
+    doc = parsed_document(bytes)
+
+    # O run de "OBJETIVO_SERVICOS" no modelo já vem com <w:rFonts .../><w:color w:val="000000"/> —
+    # o run novo da palavra "PAPYRUS" precisa manter os DOIS, só ACRESCENTANDO <w:b/>, não
+    # substituir o <w:rPr> inteiro por um negrito puro sem fonte/cor. Escopado ao parágrafo com
+    # "excelência" (texto único deste teste) pra não pegar outra ocorrência de "PAPYRUS" no modelo
+    # (ex.: "PAPYRUS CONSULTORIA AMBIENTAL LTDA", que tem formatação própria diferente).
+    paragraph = doc.at_xpath("//w:p[.//w:t[contains(text(), 'excelência')]]", NS)
+    papyrus_run_pr = paragraph.at_xpath(".//w:r[w:t[text()='PAPYRUS']]/w:rPr", NS)
+    assert_equal "Metropolis", papyrus_run_pr.at_xpath("w:rFonts", NS)["w:ascii"]
+    assert_equal "000000", papyrus_run_pr.at_xpath("w:color", NS)["w:val"]
+    assert papyrus_run_pr.at_xpath("w:b", NS).present?
   end
 
   test "fill leaves placeholders with no supplied value as-is instead of blanking them" do
@@ -462,7 +508,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes xml, "Mobilização"
     # O resto do documento continua intacto depois da tabela.
     assert_includes xml, "VALIDADE DA PROPOSTA"
-    assert_includes xml, "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
+    assert_includes document_text(bytes), "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
   end
 
   # REGRESSÃO: a tabela nova nasce ENTRE a de equipe (índice 2) e a de preço/desembolso (índices
@@ -630,6 +676,14 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     def parsed_document(bytes)
       Nokogiri::XML(document_xml(bytes))
+    end
+
+    # Texto visível, sem marcação — junta o conteúdo de todo <w:t>, sem separador (é assim que o
+    # Word concatena runs dentro do mesmo parágrafo). Útil quando um trecho pode estar partido em
+    # runs diferentes (ex.: uppercase_and_bold_papyrus! separa "PAPYRUS" do resto do texto ao redor
+    # pra deixar só a palavra em negrito) — comparar a string XML crua não bate mais nesse caso.
+    def document_text(bytes)
+      parsed_document(bytes).xpath("//w:t", NS).map(&:text).join
     end
 
     def cell_texts(row)

@@ -137,6 +137,9 @@ class ProposalDocxFiller
           end
           insert_schedule_tables!(doc, schedules, zip)
           fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
+          # Por ÚLTIMO, depois de todo texto (placeholders, tabelas, cronograma) já estar resolvido
+          # — nunca antes, pra não arriscar cortar um "{{...}}" que ainda não virou conteúdo.
+          uppercase_and_bold_papyrus!(doc)
 
           # O bloco de assinatura técnico (ver TECHNICAL_SIGNATURE_*) só faz sentido separado do
           # comercial quando o documento REALMENTE sai em dois arquivos (fill_split, com bloco —
@@ -538,6 +541,46 @@ class ProposalDocxFiller
         run.prepend_child(run_pr)
       end
       run_pr.add_child(Nokogiri::XML::Node.new("w:b", run.document)) unless run_pr.at_xpath("w:b", NS)
+    end
+
+    # "Papyrus" (qualquer capitalização) vira MAIÚSCULO e negrito em TODO o corpo do documento
+    # (2026-09, pedido do consultor) — roda por último, depois de placeholders/tabelas/cronograma
+    # já resolvidos, então nunca vê um "{{...}}" ainda não substituído. \b nos dois lados evita
+    # casar "papyrus" embutido noutra palavra (ex.: os e-mails do modelo, "somospapyrus.com.br",
+    # que devem continuar em minúsculo/sem negrito).
+    PAPYRUS_WORD = /\b(papyrus)\b/i
+
+    def uppercase_and_bold_papyrus!(doc)
+      doc.xpath("//w:t", NS).each do |t|
+        split_run_for_papyrus!(t) if t.content.match?(PAPYRUS_WORD)
+      end
+    end
+
+    # Um <w:t> pode ter texto de sobra em volta de "Papyrus" ("a Papyrus é uma empresa..."), e só
+    # a palavra em si deve ficar em negrito — o resto do run continua com a formatação original.
+    # Troca o <w:r> por uma sequência de runs CLONADOS dele mesmo (preserva fonte/tamanho/cor do
+    # <w:rPr> original em cada pedaço), um por trecho de texto normal e um por ocorrência de
+    # "Papyrus" (maiúsculo + bold_run!).
+    def split_run_for_papyrus!(text_node)
+      run = text_node.at_xpath("ancestor::w:r", NS)
+      return unless run
+
+      parts = text_node.content.split(PAPYRUS_WORD)
+      return if parts.size <= 1
+
+      parts.each_with_index do |part, index|
+        next if part.empty?
+
+        is_papyrus = index.odd? # split com grupo de captura intercala [texto, match, texto, match, ...]
+        new_run = run.dup
+        new_text = new_run.at_xpath("w:t", NS)
+        new_text.content = is_papyrus ? part.upcase : part
+        new_text["xml:space"] = "preserve"
+        bold_run!(new_text) if is_papyrus
+        run.add_previous_sibling(new_run)
+      end
+
+      run.remove
     end
 
     # Quadro SUMÁRIO DE REVISÕES (índice 0) — duas diferenças do resto das tabelas:
