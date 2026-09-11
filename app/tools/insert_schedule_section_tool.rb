@@ -33,6 +33,8 @@ class InsertScheduleSectionTool < RubyLLM::Tool
         "peça pra inserir de novo em instantes, ou monte o cronograma na Tela de Precificação." }.to_json
     end
 
+    schedule_background_task = ensure_schedule_background_work!(pricing)
+
     default_missing_dates!(pricing)
     schedules = build_schedules(pricing)
     return { error: "O cronograma desta proposta não tem data de início definida — informe na Tela de Precificação e tente de novo." }.to_json if schedules.empty?
@@ -46,10 +48,16 @@ class InsertScheduleSectionTool < RubyLLM::Tool
       metadata: { kind: "revised_with_schedule", version: @proposal.version, description: "Documento revisado + cronograma" }
     )
 
+    message = "Inseri a seção de cronograma (tabela + infográfico) no seu documento, logo depois de \"PRAZO DE EXECUÇÃO\". " \
+      "Baixe abaixo — o resto do documento não foi tocado."
+    if schedule_background_task == :key_points
+      message += " Estou selecionando os principais marcos do cronograma pro infográfico em segundo plano — " \
+        "peça pra gerar de novo em alguns instantes pra ele já sair resumido."
+    end
+
     {
       success: true, version: @proposal.version, filenames: [ filename ],
-      message: "Inseri a seção de cronograma (tabela + infográfico) no seu documento, logo depois de \"PRAZO DE EXECUÇÃO\". " \
-        "Baixe abaixo — o resto do documento não foi tocado."
+      message: message
     }.to_json
   rescue ProposalDocxFiller::SectionAnchorError => e
     { error: e.message }.to_json
@@ -88,10 +96,25 @@ class InsertScheduleSectionTool < RubyLLM::Tool
       }.compact
     end
 
+    def ensure_schedule_background_work!(pricing)
+      return nil unless pricing
+
+      if pricing.schedule_key_points.blank? && pricing.schedule_items.for_type("servico").exists?
+        ElectScheduleKeyPointsJob.perform_later(@proposal.id)
+        return :key_points
+      end
+
+      nil
+    end
+
     def schedule_payload(pricing, type, start_date)
       items = pricing.schedule_items.select { |item| item.schedule_type == type }
       return nil if items.empty? || start_date.blank?
 
-      { start_date: start_date, items: items }
+      payload = { start_date: start_date, items: items }
+      if type == "servico"
+        payload[:key_points] = pricing.schedule_key_points.presence || @proposal.default_schedule_key_points
+      end
+      payload
     end
 end

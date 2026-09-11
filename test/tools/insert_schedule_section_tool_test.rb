@@ -28,6 +28,37 @@ class InsertScheduleSectionToolTest < ActiveSupport::TestCase
     assert_includes xml, 'w:orient="landscape"'
   end
 
+  test "só o payload de servico carrega os marcos do infográfico (schedule_key_points)" do
+    add_schedule_items
+    @pricing.update!(
+      schedule_empreendimento_start_date: Date.new(2026, 3, 1),
+      schedule_key_points: [ { "nome" => "Protocolo no órgão", "periodo" => 3 } ]
+    )
+    @pricing.schedule_items.create!(schedule_type: "implantacao", phase_name: "Obra",
+      activity_name: "Terraplenagem", start_period: 1, duration_periods: 4, position: 0)
+
+    schedules = @tool.send(:build_schedules, @pricing.reload)
+
+    assert_equal [ { "nome" => "Protocolo no órgão", "periodo" => 3 } ], schedules["servico"][:key_points]
+    assert_not schedules["implantacao"].key?(:key_points)
+  end
+
+  test "enfileira ElectScheduleKeyPointsJob e usa default_schedule_key_points quando schedule_key_points está vazio" do
+    add_schedule_items
+    @pricing.update!(schedule_key_points: [])
+    attach_docx("proposta_revisada.docx")
+
+    assert_enqueued_with(job: ElectScheduleKeyPointsJob, args: [ @proposal.id ]) do
+      result = JSON.parse(@tool.execute)
+      assert result["success"]
+      assert_includes result["message"], "selecionando os principais marcos"
+    end
+
+    schedules = @tool.send(:build_schedules, @pricing.reload)
+    assert_operator schedules["servico"][:key_points].size, :<=, 6
+    assert_operator schedules["servico"][:key_points].size, :>=, 1
+  end
+
   test "sem nenhum .docx anexado, devolve erro e não anexa nada" do
     add_schedule_items
 

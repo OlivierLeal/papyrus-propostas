@@ -4,6 +4,9 @@ require "test_helper"
 # disciplina de AreaSketchRendererTest, contagem/regex de tag). A rasterização de verdade
 # (#call) tem sua própria seção, rodando o binário real — mesma metodologia de
 # ScheduleMspdiExporterTest com o helper Java: só isso garante que o arquivo abre de verdade.
+#
+# Cada CÍRCULO é uma FASE, não uma atividade (2026-09, pedido do cliente: infográfico "gigante"
+# com 34 círculos em 3 imagens → resumo executivo de ~6-10 fases numa imagem só).
 class ScheduleTimelineRendererTest < ActiveSupport::TestCase
   test "svgs returns [] when there are no items" do
     assert_empty renderer(items: []).svgs
@@ -13,111 +16,186 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
     assert_empty renderer(items: []).call
   end
 
-  test "exactly one main circle and one badge circle per item, and one connecting line per row" do
-    items = (1..8).map { |n| item("Atividade #{n}", start_period: n) }
+  test "one circle per PHASE, not per activity — activities in the same phase collapse into one" do
+    items = [
+      activity("Mobilização", "Kick-off", start: 1),
+      activity("Mobilização", "Levantamento", start: 2),
+      activity("Diagnóstico", "Campo", start: 3),
+      activity("Diagnóstico", "Relatório", start: 5),
+      activity("Licenciamento", "Protocolo", start: 8)
+    ]
 
     svg = renderer(items: items).svgs.first
 
-    # 8 itens = 2 linhas (ITEMS_PER_ROW = 6): 6 na primeira, 2 na segunda — 2 linhas CONECTORAS
-    # (a segunda linha, de 2 itens, também tem 1 <line> — só uma linha com 1 item só não teria).
-    # Cada item também desenha um <line> de sublinhado sob o título — por isso a busca é só pela
-    # linha conectora em degradê (stroke="url(#...)"), não por "<line " genérico.
-    assert_equal 2, svg.scan('stroke="url(#').size
-    # círculo principal (r=40) + badge (r=15) por item = 16, mais o que cada ícone desenha por
-    # dentro (varia por ícone) — aqui todos batem "aprova"/genérico, então só os círculos fixos.
-    assert_equal 8, svg.scan('r="40"').size
-    assert_equal 8, svg.scan('r="15"').size
+    assert_equal 3, svg.scan('r="40"').size # 3 fases, não 5 atividades
+    assert_equal 3, svg.scan('r="15"').size
+    assert_includes svg, ">Mobilização<"
+    assert_includes svg, ">Diagnóstico<"
+    assert_includes svg, ">Licenciamento<"
   end
 
-  test "numbers circles sequentially across the whole schedule, not restarting per row" do
-    items = (1..8).map { |n| item("Atividade #{n}", start_period: n) }
+  test "non-contiguous activities in the same phase collapse into one phase circle" do
+    items = [
+      activity("Mobilização", "Kick-off", start: 1),
+      activity("Diagnóstico", "Campo", start: 3),
+      activity("Mobilização", "Reunião de Alinhamento", start: 5)
+    ]
 
     svg = renderer(items: items).svgs.first
 
-    (1..8).each { |n| assert_includes svg, format(">%02d<", n) }
+    assert_equal 2, svg.scan('r="40"').size # 2 fases únicas, não 3 fragmentos
+    assert_includes svg, ">Mobilização<"
+    assert_includes svg, ">Diagnóstico<"
   end
 
-  # A cor do anel/ícone/selo segue o degradê contínuo pela posição no cronograma (ver
-  # GRADIENT_STOPS) — marco não muda mais a cor do círculo, só o texto da duração (abaixo).
-  test "ring color follows the gradient by position, not a fixed color per item" do
-    items = (1..3).map { |n| item("Atividade #{n}", start_period: n) }
+  test "numbers the phase circles 01..N sequentially" do
+    items = (1..4).flat_map { |n| [ activity("Fase #{n}", "A", start: n), activity("Fase #{n}", "B", start: n) ] }
+
+    svg = renderer(items: items).svgs.first
+
+    (1..4).each { |n| assert_includes svg, format(">%02d<", n) }
+    assert_not_includes svg, ">05<"
+  end
+
+  test "ring color follows the gradient by phase position" do
+    items = (1..3).map { |n| activity("Fase #{n}", "A", start: n) }
 
     svg = renderer(items: items).svgs.first
 
     assert_equal 3, svg.scan(/stroke="#[0-9A-F]{6}" stroke-width="4"/).size
   end
 
-  test "picks the icon by keyword in the activity name, and the generic icon when nothing matches" do
-    mobilizacao = renderer(items: [ item("Mobilização das equipes") ]).svgs.first
-    campo = renderer(items: [ item("Campanha de campo") ]).svgs.first
-    generico = renderer(items: [ item("Assinatura do Contrato e Kick-Off") ]).svgs.first
+  test "picks the icon by keyword in the PHASE name, generic when nothing matches" do
+    mobilizacao = renderer(items: [ activity("Mobilização das equipes", "x", start: 1) ]).svgs.first
+    campo = renderer(items: [ activity("Campanha de campo", "x", start: 1) ]).svgs.first
+    generico = renderer(items: [ activity("Assinatura do Contrato e Kick-Off", "x", start: 1) ]).svgs.first
 
-    # Cada ícone (Heroicons real — PEOPLE_PATHS, PIN_PATHS etc.) tem um "d" de path diferente —
-    # só confere que a palavra-chave muda o ícone escolhido, sem depender do desenho exato.
     assert_not_equal mobilizacao, campo
-    # GENERIC_PATHS é um <circle r="5"> dentro do grupo do ícone — não existe em nenhum outro
-    # ícone (os outros círculos do infográfico são r="40" do círculo principal e r="15" do badge).
+    # GENERIC_PATHS é um <circle r="5"> dentro do grupo do ícone.
     assert_includes generico, 'r="5"'
   end
 
-  # Só a duração em dias, sem nenhuma data (pedido do consultor) — mas a conta de dias tem que
-  # continuar batendo com ScheduleMspdiExporter#item_start/#item_finish.
-  test "shows only the duration in days, no dates" do
-    schedule_item = item("Campanha de campo", start_period: 2, duration_periods: 2)
+  # Só a duração em dias, sem nenhuma data — a conta bate com ScheduleMspdiExporter#item_start/
+  # #item_finish sobre o span da fase (início da 1ª atividade → fim da última).
+  test "shows only the duration in days of the whole phase, no dates" do
+    items = [ activity("Diagnóstico", "Campo", start: 2, duration: 2) ]
 
-    svg = renderer(items: [ schedule_item ], start_date: Date.new(2026, 10, 1), unit: :week).svgs.first
+    svg = renderer(items: items, start_date: Date.new(2026, 10, 1), unit: :week).svgs.first
 
-    assert_includes svg, "14 dias" # 2 semanas de duração = 14 dias corridos
-    assert_no_match(%r{\d{2}/\d{2}/\d{4}}, svg, "não pode sobrar nenhuma data no infográfico")
+    assert_includes svg, "14 dias" # 2 semanas
+    assert_no_match(%r{\d{2}/\d{2}/\d{4}}, svg)
   end
 
-  # Marco (ponto no tempo) mostra "-" em vez de uma duração calculada — igual a referência
-  # trazida pelo consultor, onde etapas pontuais não trazem número de dias nenhum.
-  test "milestone item shows '-' instead of a computed duration, regular item shows days" do
+  test "a phase whose activities are all milestones shows '-' instead of a duration" do
     items = [
-      item("Assinatura", start_period: 1, duration_periods: 1, milestone: true),
-      item("Atividade normal", start_period: 2, duration_periods: 2, milestone: false)
+      activity("Emissão da Licença", "LP", start: 1, milestone: true),
+      activity("Execução", "Obra", start: 2, duration: 3, milestone: false)
     ]
 
     svg = renderer(items: items, start_date: Date.new(2026, 10, 1), unit: :week).svgs.first
 
     assert_includes svg, ">-<"
-    assert_includes svg, "dias"
+    assert_includes svg, "dias" # a fase de execução tem duração
   end
 
-  test "long activity names wrap into multiple lines instead of overflowing the column" do
-    long_name = "Revisão técnica, emissão da ART e revisão completa de todos os produtos entregáveis do estudo"
+  test "long phase names wrap into multiple lines instead of overflowing the column" do
+    long_name = "Elaboração dos Estudos Ambientais, Consolidação dos Diagnósticos e Revisão Técnica Completa"
 
-    svg = renderer(items: [ item(long_name) ]).svgs.first
+    svg = renderer(items: [ activity(long_name, "x", start: 1) ]).svgs.first
 
-    assert_operator svg.scan("<text").size, :>=, 3 # badge + pelo menos 2 linhas de título
+    assert_operator svg.scan("<text").size, :>=, 3
   end
 
-  # Achado ao vivo (proposta 21, 34 itens/6 linhas): uma imagem só ficava mais alta que uma
-  # página paisagem inteira, e o Word/LibreOffice cortava as linhas de baixo sem aviso nenhum.
-  test "splits into more than one image when the schedule has more rows than fit on one page" do
-    items = (1..19).map { |n| item("Atividade #{n}", start_period: n) }
+  test "a schedule with many activities but few phases still fits in a single image" do
+    # 6 fases contíguas × 5 atividades = 30 atividades, mas só 6 círculos.
+    items = (1..6).flat_map do |phase|
+      (1..5).map { |a| activity("Fase #{phase}", "Atividade #{phase}.#{a}", start: ((phase - 1) * 5) + a) }
+    end
+
+    assert_equal 1, renderer(items: items).svgs.size
+  end
+
+  # Rede de segurança: um número irreal de FASES ainda quebra em várias imagens (Word/LibreOffice
+  # cortam sem aviso uma imagem mais alta que a página).
+  test "splits into more than one image only when there are too many phases for one page" do
+    items = (1..20).map { |n| activity("Fase #{n}", "A", start: n) }
 
     svgs = renderer(items: items).svgs
 
-    assert_operator svgs.size, :>, 1, "19 itens (4 linhas) deveriam estourar MAX_IMAGE_HEIGHT_EMU e virar mais de uma imagem"
+    assert_operator svgs.size, :>, 1
+    assert_not_includes svgs.first, ">20<"
+    assert_includes svgs.last, ">20<"
+    assert_not_includes svgs.last, ">01<"
   end
 
-  test "numbering continues across images instead of restarting at 01 on the second image" do
-    items = (1..19).map { |n| item("Atividade #{n}", start_period: n) }
+  # key_points: os ≤6 marcos que a IA elege do cronograma_servico (2026-09) — quando presentes,
+  # cada marco vira um círculo e a duração abaixo dele é o trecho do marco anterior até ele.
+  test "with key_points, renders one circle per elected marco named by the marco" do
+    items = (1..8).map { |n| activity("Fase #{n}", "Atividade #{n}", start: n) }
+    key_points = [ key_point("Assinatura do contrato", 1), key_point("Protocolo no órgão", 4),
+      key_point("Emissão da LP", 7), key_point("Entrega final", 8) ]
 
-    svgs = renderer(items: items).svgs
+    svg = renderer(items: items, key_points: key_points).svgs.first
 
-    assert_not_includes svgs.first, ">19<"
-    assert_includes svgs.last, ">19<"
-    assert_not_includes svgs.last, ">01<" # o primeiro item da 2ª imagem não é o 01 de novo
+    assert_equal 4, svg.scan('r="40"').size
+    assert_includes svg, ">Assinatura do contrato<"
+    assert_includes svg, ">Protocolo no órgão<"
+    assert_includes svg, ">Emissão da LP<"
+    assert_includes svg, ">Entrega final<"
   end
 
-  # Rasterização de verdade — roda o rsvg-convert real, mesma disciplina de
-  # ScheduleMspdiExporterTest com o helper Java: só isso garante que o arquivo abre de verdade,
-  # não só que o XML "parece certo".
+  test "the duration under each key_point is the span from the previous marco to it" do
+    items = (1..10).map { |n| activity("Fase #{n}", "A", start: n) }
+    key_points = [ key_point("Início", 3), key_point("Meio", 6) ]
+
+    svg = renderer(items: items, key_points: key_points, unit: :week).svgs.first
+
+    assert_includes svg, "14 dias" # marco 1: semanas 1..3 → 2 semanas
+    assert_includes svg, "21 dias" # marco 2: semanas 3..6 → 3 semanas
+  end
+
+  test "a key_point at the very start of the schedule shows '-' instead of a fake span" do
+    items = (1..5).map { |n| activity("Fase #{n}", "A", start: n) }
+    key_points = [ key_point("Assinatura", 1), key_point("Fim", 5) ]
+
+    svg = renderer(items: items, key_points: key_points).svgs.first
+
+    assert_includes svg, ">-<"
+  end
+
+  test "key_points are capped at 6 circles" do
+    items = (1..12).map { |n| activity("Fase #{n}", "A", start: n) }
+    key_points = (1..8).map { |n| key_point("Marco #{n}", n) }
+
+    svg = renderer(items: items, key_points: key_points).svgs.first
+
+    assert_equal 6, svg.scan('r="40"').size
+    assert_equal 1, renderer(items: items, key_points: key_points).svgs.size
+  end
+
+  test "a key_point period past the end of the schedule is clamped, never a negative span" do
+    items = (1..4).map { |n| activity("Fase #{n}", "A", start: n) } # cronograma termina na semana 5
+    key_points = [ key_point("Início", 2), key_point("Muito depois", 99) ]
+
+    svg = renderer(items: items, key_points: key_points, unit: :week).svgs.first
+
+    assert_equal 2, svg.scan('r="40"').size
+    assert_includes svg, "21 dias" # marco 2: semana 2 → semana 5 (clampado), 3 semanas
+    assert_no_match(/-\d+ dias/, svg)
+  end
+
+  test "empty key_points falls back to the per-phase summary" do
+    items = [ activity("Mobilização", "Kick-off", start: 1), activity("Mobilização", "Levantamento", start: 2),
+      activity("Diagnóstico", "Campo", start: 3) ]
+
+    svg = renderer(items: items, key_points: []).svgs.first
+
+    assert_equal 2, svg.scan('r="40"').size # 2 fases, comportamento de sempre
+  end
+
   test "call rasterizes into a real, valid PNG" do
-    result = renderer(items: [ item("Aprovação da proposta", milestone: true), item("Mobilização das equipes") ]).call.first
+    items = [ activity("Mobilização", "Kick-off", start: 1), activity("Diagnóstico", "Campo", start: 2) ]
+    result = renderer(items: items).call.first
 
     assert result, "esperava um Result — confirme que rsvg-convert (pacote librsvg2-bin) está instalado"
     assert result.png_bytes.start_with?("\x89PNG".b), "não parece um PNG de verdade"
@@ -125,22 +203,17 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
     assert_operator result.height_emu, :>, 0
   end
 
-  test "call returns one Result per image when the schedule spans more than one page" do
-    items = (1..19).map { |n| item("Atividade #{n}", start_period: n) }
-
-    results = renderer(items: items).call
-
-    assert_operator results.size, :>, 1
-    results.each { |result| assert result.png_bytes.start_with?("\x89PNG".b) }
-  end
-
   private
-    def renderer(items:, start_date: Date.new(2026, 10, 1), unit: :week)
-      ScheduleTimelineRenderer.new(items: items, start_date: start_date, unit: unit)
+    def renderer(items:, start_date: Date.new(2026, 10, 1), unit: :week, key_points: [])
+      ScheduleTimelineRenderer.new(items: items, start_date: start_date, unit: unit, key_points: key_points)
     end
 
-    def item(activity_name, start_period: 1, duration_periods: 1, milestone: false)
-      ScheduleItem.new(schedule_type: "servico", phase_name: "Fase", activity_name: activity_name,
-        start_period: start_period, duration_periods: duration_periods, milestone: milestone, position: 0)
+    def activity(phase, name, start: 1, duration: 1, milestone: false)
+      ScheduleItem.new(schedule_type: "servico", phase_name: phase, activity_name: name,
+        start_period: start, duration_periods: duration, milestone: milestone, position: 0)
+    end
+
+    def key_point(nome, periodo)
+      { "nome" => nome, "periodo" => periodo }
     end
 end

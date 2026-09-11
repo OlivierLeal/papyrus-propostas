@@ -16,10 +16,13 @@ class ScheduleTableBuilder
   # da raiz <w:document>.
   NS_DECL = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'.freeze
 
-  # Larguras em dxa (1/20 pt), confirmadas no exemplo real. USABLE_WIDTH = largura útil da página
-  # paisagem (16838 - 1418×2 de margem).
+  # Larguras em dxa (1/20 pt). USABLE_WIDTH = largura útil da página paisagem (16838 - 1418×2 de
+  # margem). NAME_COL_WIDTH era 1632 (do exemplo real, cronograma pequeno) — subiu pra 2800 quando
+  # a tabela do Serviço passou a ser mensal (2026-09): com poucas colunas de mês sobra largura, e
+  # nome de atividade largo o bastante pra não quebrar em 3 linhas encurta o cronograma de ~5
+  # páginas pra ~2-3.
   ID_COL_WIDTH = 407
-  NAME_COL_WIDTH = 1632
+  NAME_COL_WIDTH = 2800
   USABLE_WIDTH = 14002
 
   HEADER_GROUP_FILL = "1F4E79"
@@ -47,11 +50,29 @@ class ScheduleTableBuilder
   # monitoramento, sugerido pela própria IA) saía com o cabeçalho inteiro em branco.
   MIN_COLUMN_WIDTH = 400
 
+  # Fase por linha (fase + atividade) — só o que #data_rows_xml lê. Usado ao converter o
+  # cronograma semanal do Serviço pra colunas mensais (ver #initialize).
+  MonthlyItem = Data.define(:phase_name, :activity_name, :start_period, :duration_periods, :milestone) do
+    def milestone? = milestone
+  end
+
   # unit: :week (cronograma do serviço) ou :month (cronograma de implantação do empreendimento).
+  #
+  # O Serviço é montado em SEMANAS (Tela de Precificação / sugestão da IA), mas o cliente da
+  # Papyrus achou a tabela "gigante" (11 páginas, dezenas de colunas de semana) e liberou deixar
+  # mensal. Aqui a gente converte pra intervalos de MÊS CIVIL só na EXIBIÇÃO — o ScheduleItem no
+  # banco continua semanal, e o .xml do MS Project continua semanal (é o detalhe fino). A partir
+  # daí o caminho `:month` já existente (month_grouping / period_label "Mês" / consolidação
+  # bucket_size) toma conta.
   def initialize(items, start_date:, unit:)
-    @items = items
     @start_date = start_date
-    @unit = unit
+    if unit == :week
+      @items = to_monthly(items)
+      @unit = :month
+    else
+      @items = items
+      @unit = unit
+    end
   end
 
   def build_xml
@@ -64,6 +85,28 @@ class ScheduleTableBuilder
   end
 
   private
+    # Converte itens semanais (start_period/duration em semanas a partir de @start_date) pra
+    # itens com start_period/duration em MESES CIVIS a partir de @start_date. Um item que começa
+    # na semana 1 e dura 8 semanas, com @start_date em 15/01, cai em "mês 1 (Jan) a mês 3 (Mar)".
+    def to_monthly(items)
+      items.map do |item|
+        first_week = @start_date + ((item.start_period - 1) * 7)
+        last_week = @start_date + ((item.start_period + item.duration_periods - 2) * 7)
+        start_month = months_between(@start_date, first_week) + 1
+        end_month = months_between(@start_date, last_week) + 1
+
+        MonthlyItem.new(
+          phase_name: item.phase_name, activity_name: item.activity_name,
+          start_period: start_month, duration_periods: [ end_month - start_month + 1, 1 ].max,
+          milestone: item.milestone?
+        )
+      end
+    end
+
+    def months_between(from, to)
+      ((to.year * 12) + to.month) - ((from.year * 12) + from.month)
+    end
+
     # Quantidade real de semanas/meses cobertos pelos itens — usada pra mapear o intervalo
     # [start_period, start_period+duration) de cada atividade pro "bucket" (coluna consolidada)
     # certo. Nunca vira coluna diretamente quando bucket_size > 1 (ver #display_periods).

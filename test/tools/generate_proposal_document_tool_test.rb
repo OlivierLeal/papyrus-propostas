@@ -649,6 +649,51 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "Mobilização"
   end
 
+  test "elects the ≤6 infographic marcos in background when the schedule exists but has none yet" do
+    pricing = @proposal.project_pricing
+    pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1), schedule_key_points: [])
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_enqueued_with(job: ElectScheduleKeyPointsJob, args: [ @proposal.id ]) do
+      tool.execute(**@args)
+    end
+  end
+
+  test "does not re-elect the infographic marcos once schedule_key_points is populated" do
+    pricing = @proposal.project_pricing
+    pricing.update!(
+      schedule_papyrus_start_date: Date.new(2026, 9, 1),
+      schedule_key_points: [ { "nome" => "Contrato", "periodo" => 1 } ]
+    )
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_no_enqueued_jobs(only: ElectScheduleKeyPointsJob) { tool.execute(**@args) }
+  end
+
+  test "still builds the schedule section when the pricing has elected infographic marcos" do
+    pricing = @proposal.project_pricing
+    pricing.update!(
+      schedule_papyrus_start_date: Date.new(2026, 9, 1),
+      schedule_key_points: [ { "nome" => "Assinatura do contrato", "periodo" => 1 },
+        { "nome" => "Protocolo no órgão", "periodo" => 4 }, { "nome" => "Emissão da LP", "periodo" => 8 } ]
+    )
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+      start_period: 1, duration_periods: 1, position: 0)
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Diagnóstico", activity_name: "Campo",
+      start_period: 2, duration_periods: 6, position: 1)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
+    assert_includes zip_entry_names(@proposal.generated_documents.first), "word/media/cronograma_servico_1.png"
+  end
+
   test "includes a schedule type that has items but no start date set, defaulting to next month" do
     pricing = @proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Assinatura do Contrato",

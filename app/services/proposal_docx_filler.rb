@@ -96,7 +96,8 @@ class ProposalDocxFiller
         document_xml = zip.read("word/document.xml")
         doc = Nokogiri::XML(document_xml)
         ensure_png_content_type!(zip)
-        insert_or_replace_schedule_block!(doc, schedules, zip, sect_props_from_xml(document_xml))
+        sect_props = sect_props_from_xml(document_xml, zip.read("word/_rels/document.xml.rels"))
+        insert_or_replace_schedule_block!(doc, schedules, zip, sect_props)
         zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
       end
 
@@ -122,13 +123,17 @@ class ProposalDocxFiller
 
           # tables.each ANTES de insert_schedule_tables! — os índices em `tables` são a POSIÇÃO da
           # tabela no corpo (ver build_tables no chamador). Minha tabela de cronograma nasce ENTRE
-          # a tabela 2 (equipe) e a 3 (desembolso) — inseri-la antes deslocaria "//w:tbl"[3] pra
-          # apontar pra ela em vez do Desembolso, e fill_table! reescreveria o cronograma por
-          # cima. Preencher as tabelas originais primeiro resolve os índices antes de qualquer
-          # tabela nova existir, então a ordem de inserção deixa de importar.
+          # a tabela 2 (equipe) e a 3 (preço) — inseri-la antes deslocaria "//w:tbl"[3] pra apontar
+          # pra ela em vez do Preço, e fill_table! reescreveria o cronograma por cima. Preencher as
+          # tabelas originais primeiro resolve os índices antes de qualquer tabela nova existir,
+          # então a ordem de inserção deixa de importar.
           tables.each do |table_index, config|
             table_node = doc.xpath("//w:tbl", NS)[table_index]
-            fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false))
+            if table_index == 0
+              fill_revisions_table!(table_node, config.fetch(:rows))
+            else
+              fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false))
+            end
           end
           insert_schedule_tables!(doc, schedules, zip)
           fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
@@ -266,12 +271,18 @@ class ProposalDocxFiller
     }.freeze
     SCHEDULE_UNITS = { "servico" => :week, "implantacao" => :month }.freeze
 
-    # Únicas propriedades de seção (cabeçalho/rodapé/margens) que o modelo usa hoje — o mesmo
-    # <w:sectPr> retrato do fim do corpo, e uma variante paisagem com o mesmo cabeçalho/rodapé.
-    SECT_HEADER_FOOTER_XML = '<w:headerReference w:type="default" r:id="rId15"/><w:footerReference w:type="default" r:id="rId16"/>'
+    # Propriedades de seção (cabeçalho/rodapé/margens). O rodapé do modelo (`footer1.xml`, rId16)
+    # tem os text boxes "www…"/"Sistema de Gestão…" ancorados e dimensionados pra coluna RETRATO —
+    # numa página paisagem eles saem deslocados pra esquerda ("torto", relato do consultor no chat
+    # 32). `footer2.xml` (rId20) é a cópia com esses offsets recentralizados pra coluna paisagem
+    # (mesma mecânica de `header2.xml` da página 1). Só a variante PAISAGEM usa rId20; o retrato
+    # (que não tem esse problema) fica no rId16 de sempre.
+    HEADER_REF_XML = '<w:headerReference w:type="default" r:id="rId15"/>'
+    SECT_HEADER_FOOTER_XML = "#{HEADER_REF_XML}<w:footerReference w:type=\"default\" r:id=\"rId16\"/>"
+    LANDSCAPE_HEADER_FOOTER_XML = "#{HEADER_REF_XML}<w:footerReference w:type=\"default\" r:id=\"rId20\"/>"
     PORTRAIT_SECT_XML = "#{SECT_HEADER_FOOTER_XML}<w:pgSz w:w=\"11906\" w:h=\"16838\"/>" \
       '<w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/>'
-    LANDSCAPE_SECT_XML = "#{SECT_HEADER_FOOTER_XML}<w:pgSz w:orient=\"landscape\" w:w=\"16838\" w:h=\"11906\"/>" \
+    LANDSCAPE_SECT_XML = "#{LANDSCAPE_HEADER_FOOTER_XML}<w:pgSz w:orient=\"landscape\" w:w=\"16838\" w:h=\"11906\"/>" \
       '<w:pgMar w:top="1701" w:right="1418" w:bottom="1701" w:left="1418" w:header="708" w:footer="708" w:gutter="0"/>'
 
     # Insere a(s) tabela(s) de cronograma numa página PAISAGEM logo depois do prazo de execução —
@@ -389,7 +400,7 @@ class ProposalDocxFiller
     # Props de seção (cabeçalho/rodapé/tamanho de página) a partir do <w:sectPr> final do corpo do
     # .docx enviado — string, não Nokogiri, pra a saída ser previsível e não arrastar declaração de
     # namespace redundante. Fallback pras constantes do modelo se não achar.
-    def sect_props_from_xml(document_xml)
+    def sect_props_from_xml(document_xml, rels_xml = "")
       final = document_xml[%r{<w:sectPr\b[^>]*>.*?</w:sectPr>(?=\s*</w:body>)}m]
       return [ PORTRAIT_SECT_XML, LANDSCAPE_SECT_XML ] unless final
 
@@ -404,8 +415,19 @@ class ProposalDocxFiller
         '<w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/>'
 
       portrait = "#{refs}#{pgsz}#{pgmar}"
-      landscape = %(#{refs}<w:pgSz w:orient="landscape" w:w="#{height}" w:h="#{width}"/>#{LANDSCAPE_PGMAR_XML})
+      landscape = %(#{landscape_refs(refs, rels_xml)}<w:pgSz w:orient="landscape" w:w="#{height}" w:h="#{width}"/>#{LANDSCAPE_PGMAR_XML})
       [ portrait, landscape ]
+    end
+
+    # Troca o footerReference pelo rodapé paisagem (footer2.xml, offsets recentralizados) quando o
+    # .docx já o traz registrado — todo .docx gerado a partir do modelo atual traz. Se não trouxer
+    # (gerado por um modelo antigo), mantém o rodapé retrato: sai levemente torto na paisagem, mas
+    # nunca dangling ref (que o Word abre com aviso).
+    def landscape_refs(portrait_refs, rels_xml)
+      footer2_id = rels_xml[%r{<Relationship[^>]*Target="footer2\.xml"[^>]*/>}]&.[](/Id="([^"]+)"/, 1)
+      return portrait_refs unless footer2_id
+
+      portrait_refs.sub(%r{(<w:footerReference\b[^>]*\br:id=")[^"]+(")}, "\\1#{footer2_id}\\2")
     end
 
     # word/media/*.png já é declarado pelo [Content_Types].xml de todo .docx gerado pelo sistema
@@ -424,7 +446,8 @@ class ProposalDocxFiller
     # filosofia não-bloqueante do mapa (Mapbox) e do MSPDI.
     def schedule_timeline_xml(type, payload, zip)
       results = ScheduleTimelineRenderer.new(
-        items: payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type)
+        items: payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type),
+        key_points: payload[:key_points] || []
       ).call
 
       # Um Result por IMAGEM (normalmente uma só; mais de uma quando o cronograma tem linhas
@@ -515,15 +538,41 @@ class ProposalDocxFiller
       run_pr.add_child(Nokogiri::XML::Node.new("w:b", run.document)) unless run_pr.at_xpath("w:b", NS)
     end
 
-    # tbl: nó <w:tbl>. A 2ª linha (1ª de dados) vira o "molde": clonada se faltar linha,
-    # removida se sobrar. auto_number preenche a 1ª coluna com 1..N e desloca rows_data uma
+    # Quadro SUMÁRIO DE REVISÕES (índice 0) — duas diferenças do resto das tabelas:
+    #
+    # 1. `header_rows: 2` — as outras tabelas têm 1 linha de cabeçalho (rótulos das colunas) antes
+    #    da 1ª linha de dado; esta tem DUAS ("SUMÁRIO DE REVISÕES", título mesclado, e só depois
+    #    "Revisão | Descrição da Revisão | Data", os rótulos de verdade). Usar o `header_rows: 1`
+    #    genérico aqui pegava a linha de RÓTULOS como se fosse a 1ª linha de dado (o "molde") —
+    #    achado ao vivo nesta sessão: o cabeçalho sumia de todo `.docx` gerado, sobrescrito pelos
+    #    valores da revisão "00" ("Revisão"→"00", "Descrição da Revisão"→"Emissão Inicial" etc.).
+    # 2. `trim: false` — o molde do modelo já vem com as linhas "00" a "10" pré-numeradas (11
+    #    linhas, Descrição/Data em branco) — pedido do consultor (2026-09) pra SEMPRE aparecerem,
+    #    mesmo numa proposta com poucas revisões, em vez de sumirem (o `fill_table!` de sempre
+    #    apaga a linha do molde que sobra sem dado, comportamento certo pras OUTRAS tabelas —
+    #    equipe/produtos/desembolso não têm "linha vazia de reserva"). Sem `trim`, sobra
+    #    exatamente o molde original quando `rows_data` for menor que ele, e ainda clona linha
+    #    nova se um dia passar de 10 revisões (version > 11) — mesma lógica de crescimento de
+    #    sempre.
+    #
+    # `auto_number: false` porque a 1ª coluna já vem pronta em Proposal#docx_revision_rows,
+    # formatada "01"/"02"..., porque é `version - 1`, não uma contagem de linha; auto_number
+    # reescreveria por cima errado.
+    def fill_revisions_table!(tbl, rows_data)
+      fill_table!(tbl, rows_data, auto_number: false, trim: false, header_rows: 2)
+    end
+
+    # tbl: nó <w:tbl>. A linha logo após `header_rows` (1 por padrão — a linha de rótulos das
+    # colunas) vira o "molde": clonada se faltar linha; removida se sobrar, a menos que
+    # `trim: false` (ver #fill_revisions_table!, a única chamadora que passa isso ou um
+    # `header_rows` diferente). auto_number preenche a 1ª coluna com 1..N e desloca rows_data uma
     # coluna pra direita, então quem chama só passa as colunas de conteúdo de verdade.
-    def fill_table!(tbl, rows_data, auto_number:)
+    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1)
       return unless tbl
 
       all_rows = tbl.xpath(".//w:tr", NS)
-      template_row = all_rows[1]
-      existing_data_rows = all_rows[1..]
+      template_row = all_rows[header_rows]
+      existing_data_rows = all_rows[header_rows..]
       offset = auto_number ? 1 : 0
 
       rows_data.each_with_index do |row_values, i|
@@ -541,7 +590,7 @@ class ProposalDocxFiller
         end
       end
 
-      existing_data_rows[rows_data.size..].to_a.each(&:remove) if rows_data.size < existing_data_rows.size
+      existing_data_rows[rows_data.size..].to_a.each(&:remove) if trim && rows_data.size < existing_data_rows.size
     end
 
     # Célula com texto existente: reaproveita o run que tem o texto (mantém a formatação) e limpa

@@ -10,11 +10,14 @@
 # bloquear o resto se faltar" já usado pro helper Java do MSPDI e pro pdftoppm/tesseract do OCR
 # do RAG.
 #
-# `items` tem que vir na ORDEM de exibição (por `position`, ver ScheduleItem.for_type) — cada
-# item vira UM círculo (a fase não vira círculo próprio, só as atividades — igual a referência
-# trazida pelo consultor). Datas calculadas com a MESMA conta de ScheduleMspdiExporter#item_start/
-# #item_finish (duplicada aqui de propósito, mesmo princípio de não abstrair cedo demais — ver
-# CLAUDE.md seção 11.1, "Decisão de design").
+# `items` tem que vir na ORDEM de exibição (por `position`, ver ScheduleItem.for_type). Cada
+# círculo é uma FASE — não uma atividade (era por atividade até 2026-09; o cliente da Papyrus
+# achou a linha do tempo "gigante" com 34 círculos em 3 imagens e pediu um resumo executivo:
+# ~6-10 fases, sempre 1 imagem). As atividades continuam detalhadas na tabela Quadro 9 e no MS
+# Project (.xml). A fase abrange do início da 1ª atividade ao fim da última do grupo — mesma
+# detecção de fase consecutiva de ScheduleTableBuilder/ScheduleMspdiExporter. Datas com a MESMA
+# conta de ScheduleMspdiExporter#item_start/#item_finish (duplicada aqui de propósito, mesmo
+# princípio de não abstrair cedo demais — ver CLAUDE.md seção 11.1, "Decisão de design").
 require "open3"
 
 class ScheduleTimelineRenderer
@@ -84,8 +87,20 @@ class ScheduleTimelineRenderer
 
   # unit: :week (cronograma do serviço) ou :month (cronograma de implantação) — mesmo parâmetro
   # de ScheduleTableBuilder/ScheduleMspdiExporter.
-  def initialize(items:, start_date:, unit:)
-    @items = items
+  # Uma fase por círculo: nome da fase, período de início da 1ª atividade do grupo, e duração
+  # até o fim da última. `milestone` só quando TODAS as atividades da fase são marcos (aí a
+  # duração vira "-", igual etapa pontual).
+  Phase = Data.define(:activity_name, :start_period, :duration_periods, :milestone) do
+    def milestone? = milestone
+  end
+
+  # key_points (opcional): os ≤6 marcos que a IA elegeu do cronograma_servico
+  # (project_pricing.schedule_key_points — [{ "nome", "periodo" }]). Quando presentes, cada marco
+  # vira um círculo e a "duração" abaixo dele é o trecho do marco anterior até ele (2026-09,
+  # pedido do consultor: "no máximo 6 pontos, a IA define a importância"). Ausentes → cai no
+  # resumo por FASE (collapse_to_phases). O cronograma de implantação nunca recebe key_points.
+  def initialize(items:, start_date:, unit:, key_points: [])
+    @items = key_points.present? ? key_points_to_segments(key_points, items) : collapse_to_phases(items)
     @start_date = start_date
     @unit = unit
   end
@@ -111,6 +126,41 @@ class ScheduleTimelineRenderer
   end
 
   private
+    # Um círculo por MARCO eleito pela IA. Cada marco N cobre o trecho do marco N-1 até ele (o 1º
+    # conta desde a semana 1) — é essa a "duração em dias" que sai abaixo do círculo. O `periodo`
+    # de cada marco é clampado contra o fim real do cronograma (o consultor pode ter editado os
+    # schedule_items depois da sugestão da IA), pra nunca sair duração negativa nem além do total.
+    def key_points_to_segments(key_points, items)
+      total_periods = collapse_to_phases(items).map { |phase| phase.start_period + phase.duration_periods }.max || 1
+      ordered = key_points.sort_by { |marco| marco["periodo"].to_i }.first(ITEMS_PER_ROW)
+
+      previous_period = 1
+      ordered.map do |marco|
+        period = marco["periodo"].to_i.clamp(1, total_periods)
+        start_period = [ previous_period, period ].min
+        # duração 0 quando o marco cai no mesmo período do anterior (ou no início) — duration_lines
+        # já traduz isso pra "-", igual a um ponto pontual, em vez de forçar um trecho falso.
+        segment = Phase.new(activity_name: marco["nome"].to_s, start_period: start_period,
+          duration_periods: period - start_period, milestone: false)
+        previous_period = period
+        segment
+      end
+    end
+
+    # Agrupa atividades por phase_name (consolidando fases mesmo que as atividades não sejam
+    # estritamente contíguas) e reduz cada grupo a uma Phase.
+    def collapse_to_phases(items)
+      groups = Array(items).group_by(&:phase_name)
+
+      phases = groups.map do |phase_name, group|
+        start_period = group.map(&:start_period).min
+        end_period = group.map { |i| i.start_period + i.duration_periods }.max
+        Phase.new(activity_name: phase_name, start_period: start_period,
+          duration_periods: [ end_period - start_period, 1 ].max, milestone: group.all?(&:milestone?))
+      end
+      phases.sort_by(&:start_period)
+    end
+
     def item_chunks
       @items.each_slice(items_per_image).to_a
     end
@@ -298,13 +348,13 @@ class ScheduleTimelineRenderer
       truncated
     end
 
-    # Só a duração em dias corridos, sem nenhuma data — pedido do consultor. Marco (ponto no
-    # tempo, sem duração) mostra "-", igual à referência, onde etapa pontual não traz número de
-    # dias nenhum. Devolve um array (o chamador desenha linha a linha) — hoje sempre 1 linha.
+    # Só a duração em dias corridos, sem nenhuma data — pedido do consultor. Fase de ponto único
+    # (duração <= 0, ou marco) mostra "-". Devolve um array (o chamador desenha linha a linha) —
+    # hoje sempre 1 linha.
     def duration_lines(item)
-      return [ "-" ] if item.milestone?
-
       duration_days = (item_finish(item) - item_start(item)).to_i
+      return [ "-" ] if item.milestone? || duration_days <= 0
+
       # String#pluralize é baseado nas regras de inflexão do INGLÊS (config.i18n.default_locale
       # sendo pt-BR não muda isso — é ActiveSupport::Inflector, não I18n) e não pluraliza "dia"
       # corretamente ("dia".pluralize(7) => "dia", errado) — regra do português é só o "s" mesmo,

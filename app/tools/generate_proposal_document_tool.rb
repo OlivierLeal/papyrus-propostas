@@ -18,7 +18,7 @@
 # DENTRO de uma tool call (reentraria Conversation#complete se pedisse sugestão de equipe/
 # cronograma à IA agora — ver o comentário de ensure_proposal! em conversation.rb). A equipe sai
 # do template padrão (determinístico, mesmo fallback de sempre) e o cronograma fica pro
-# #ensure_schedule_suggested! logo abaixo, que enfileira em background.
+# #ensure_schedule_background_work! logo abaixo, que enfileira em background.
 class GenerateProposalDocumentTool < RubyLLM::Tool
   description <<~DESC
     Gera o(s) arquivo(s) .docx da proposta preenchidos, usando o texto que você escrever pra
@@ -169,7 +169,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     @proposal = @conversation.proposal || @conversation.ensure_proposal!(ai_suggestions: false)
     return { error: blocked_reason }.to_json if @proposal.nil?
 
-    schedule_suggestion_enqueued = ensure_schedule_suggested!
+    schedule_background_task = ensure_schedule_background_work!
     apply_schedule_start_date_overrides!(args)
     defaulted_schedule_types = default_missing_schedule_dates!
 
@@ -201,7 +201,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
+          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica")
       commercial_filename = @proposal.docx_filename("comercial")
@@ -216,7 +216,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
+          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined")
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
@@ -224,7 +224,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       failed_schedule_types = []
       schedule_filenames = attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types)
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -301,7 +301,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       items = pricing.schedule_items.select { |item| item.schedule_type == type }
       return nil if items.empty? || start_date.blank?
 
-      { start_date: start_date, items: items }
+      payload = { start_date: start_date, items: items }
+      # Só o cronograma do serviço tem os ≤6 marcos que a IA elegeu pro infográfico — o de
+      # implantação segue com um círculo por fase. Se a IA ainda não elegeu (ou job pendente),
+      # usa seleção determinística de até 6 marcos padrão para nunca exceder 6 círculos.
+      if type == "servico"
+        payload[:key_points] = pricing.schedule_key_points.presence || @proposal.default_schedule_key_points
+      end
+      payload
     end
 
     def build_placeholders(args, images)
@@ -420,8 +427,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     # Os índices são a POSIÇÃO da tabela no modelo, não um id: 0 = sumário de revisões,
     # 1 = produtos, 2 = equipe técnica (linhas de proposal_professionals, ver Proposal#team_rows_
-    # for_docx — virou dinâmica em 2026-09), 3 = desembolso.
-    # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de existir.
+    # for_docx — virou dinâmica em 2026-09), 3 = preço (Quadro N-1, N° | SERVIÇO | PREÇO R$,
+    # reintroduzido em 2026-09 — ver Proposal#docx_price_rows), 4 = desembolso (Quadro N-2,
+    # N° | MARCO | % DO ITEM).
+    # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de
+    # existir, e de novo em 2026-09, quando voltou (agora com 1 linha só, o total).
 
     # A seção "ESCOPO E METODOLOGIA DE EXECUÇÃO DO SERVIÇO" é sempre a 5ª de nível 1 no modelo —
     # a estrutura de seções é fixa, só o conteúdo varia por proposta — por isso o número dos
@@ -476,7 +486,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         0 => { rows: @proposal.docx_revision_rows(current_description: description) },
         1 => { rows: produtos },
         2 => { rows: @proposal.team_rows_for_docx },
-        3 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
+        3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: true },
+        4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
     end
 
@@ -529,7 +540,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       end
     end
 
-    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_suggestion_enqueued, failed_schedule_types = [])
+    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types = [])
       parts = []
       if schedule_filenames.present?
         parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}). " \
@@ -550,35 +561,51 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "(início do mês que vem) — se não for essa a data certa, é só falar a data no chat ou " \
           "corrigir na Tela de Precificação e gerar de novo."
       end
-      if schedule_suggestion_enqueued
+      case schedule_background_task
+      when :schedule
         parts << " Estou sugerindo o cronograma desta proposta em segundo plano — peça pra gerar " \
           "de novo em alguns instantes pra ele já sair incluído."
+      when :key_points
+        parts << " Estou selecionando os principais marcos do cronograma pro infográfico em " \
+          "segundo plano — peça pra gerar de novo em alguns instantes pra ele já sair resumido."
       end
       parts.join
     end
 
-    # Garante uma primeira tentativa de sugestão de cronograma mesmo quando Conversation#ensure_
-    # proposal! não é quem cria a proposta agora — ex.: a proposta já existia (segunda geração da
-    # conversa), ou a primeira tentativa (na criação) falhou ou veio vazia porque faltava
-    # informação que só chegou depois (TR, um complementar, o acervo histórico). Idempotente: só
-    # tenta quando ainda não há NENHUM item — não reescreve um cronograma que o consultor já
-    # ajustou na Tela de Precificação.
+    # Duas coisas que a IA prepara em background pro cronograma sair completo, nesta ordem:
     #
-    # SEMPRE em background (SuggestScheduleJob), NUNCA `@proposal.build_with_ai_suggested_
-    # schedule!` direto aqui — esta ferramenta só é chamada como tool call DENTRO de
-    # Conversation#complete (RespondToMessageJob), e isso reentraria complete/ask_internally
-    # enquanto o de fora ainda está no meio da própria tool call. Achado ao vivo (conversa 32/
-    # proposta 18): a chamada de verdade pro Bedrock falhava sozinha ("RubyLLM: API call failed,
-    # destroying message"), sem soltar exceção nenhuma pro rescue de build_with_ai_suggested_
-    # schedule! pegar — o cronograma ficava vazio pra sempre, mesmo tentando de novo a cada
-    # geração. Devolve true quando enfileirou (pra avisar o consultor, ver #schedule_message).
-    def ensure_schedule_suggested!
+    # 1. `:schedule` — NENHUM item ainda: enfileira SuggestScheduleJob, que MONTA o cronograma
+    #    (fases/atividades/durações) e já elege os ≤6 marcos do infográfico no mesmo passo. Cobre
+    #    a proposta cuja primeira tentativa (em Conversation#ensure_proposal!) falhou/veio vazia
+    #    por faltar informação que só chegou depois (TR, complementar, acervo).
+    # 2. `:key_points` — TEM cronograma do serviço, mas os ≤6 marcos do infográfico ainda não
+    #    foram eleitos (proposta criada antes desta funcionalidade, ou cronograma montado à mão
+    #    na Tela de Precificação): enfileira ElectScheduleKeyPointsJob, que só elege os marcos a
+    #    partir do que já existe — nunca mexe nos schedule_items.
+    #
+    # Idempotente dos dois lados: (1) só quando não há item nenhum, (2) só quando não há
+    # schedule_key_points ainda — nunca reescreve o que o consultor ajustou. SEMPRE em background,
+    # NUNCA `build_with_ai_suggested_schedule!`/`elect_schedule_key_points!` direto aqui — esta
+    # ferramenta roda como tool call DENTRO de Conversation#complete (RespondToMessageJob), e
+    # chamar a IA síncrona ali reentraria complete/ask_internally (achado ao vivo conversa 32/
+    # proposta 18: a chamada ao Bedrock falhava sozinha, sem exceção pro rescue pegar, e o
+    # cronograma ficava vazio pra sempre). Devolve o símbolo do que enfileirou (ou nil), pra
+    # #schedule_message avisar o consultor.
+    def ensure_schedule_background_work!
       pricing = @proposal.project_pricing
-      return false unless pricing
-      return false if pricing.schedule_items.exists?
+      return nil unless pricing
 
-      SuggestScheduleJob.perform_later(@proposal.id)
-      true
+      unless pricing.schedule_items.exists?
+        SuggestScheduleJob.perform_later(@proposal.id)
+        return :schedule
+      end
+
+      if pricing.schedule_key_points.blank? && pricing.schedule_items.for_type("servico").exists?
+        ElectScheduleKeyPointsJob.perform_later(@proposal.id)
+        return :key_points
+      end
+
+      nil
     end
 
     # O consultor pode ditar a data de início no CHAT (mesmo padrão de nome_arquivo/

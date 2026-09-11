@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_012450) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_142103) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -329,6 +329,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_012450) do
     t.bigint "proposal_id", null: false
     t.decimal "rental_per_day", precision: 10, scale: 2, default: "0.0", null: false
     t.date "schedule_empreendimento_start_date"
+    t.jsonb "schedule_key_points", default: [], null: false
     t.date "schedule_papyrus_start_date"
     t.decimal "tax_multiplier", precision: 6, scale: 4, default: "1.25", null: false
     t.decimal "total_value", precision: 12, scale: 2, default: "0.0", null: false

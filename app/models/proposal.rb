@@ -88,17 +88,44 @@ class Proposal < ApplicationRecord
 
   # Preço total por extenso na frase de abertura da seção 10 — o modelo da Papyrus (revisão de
   # 2026-08) deixou de trazer o quadro de preço aberto por profissional/entregável, então o valor
-  # que o cliente lê é este. Continua vindo do motor determinístico, nunca da IA.
+  # que o cliente lê é este. Continua vindo do motor determinístico, nunca da IA. Ficou sem uso
+  # no corpo do texto desde 2026-09 (o quadro de Preço voltou, ver #docx_price_rows), mas o
+  # placeholder {{PRECO_TOTAL}} continua mapeado em build_placeholders — inofensivo mesmo sem
+  # aparecer mais no modelo, mesmo padrão de outros placeholders que saíram do texto (ver seção 8
+  # do CLAUDE.md, "Ref.:" line).
   def docx_total_price
     "R$ #{format_currency(project_pricing.total_value)}"
   end
 
-  # Linhas do Quadro 10-1 (Desembolso) — marco, valor em R$ e data de cada parcela, direto do
-  # payment_schedule. A data é preenchida pelo consultor na Tela de Precificação; parcela sem
-  # data sai em branco no documento, para ele fechar no Word.
+  # Linha do Quadro de Preço (N° | SERVIÇO | PREÇO R$, reintroduzido em 2026-09 a pedido do
+  # consultor) — sempre 1 linha só, o sistema calcula um preço TOTAL por proposta, nunca por
+  # serviço/entregável separado (ver seção 5, motor de precificação). `descricao_fallback` é o
+  # texto livre que a IA já escreve pra outros fins (descricao_servico) — só entra quando não dá
+  # pra derivar um nome determinístico do ato de licenciamento (ver #docx_servico_label).
+  def docx_price_rows(descricao_fallback: nil)
+    [ [ docx_servico_label(fallback: descricao_fallback), format_currency(project_pricing.total_value) ] ]
+  end
+
+  # Nome do serviço pro Quadro de Preço — deriva do(s) ato(s) de licenciamento já identificados
+  # (mesma sigla usada no nome do arquivo, #ato_licenciamento/#license_act_acronyms), nunca da
+  # IA: é um fato do sistema, não texto livre (ex.: "RLP" → "Renovação da Licença Prévia - RLP").
+  # Sem ato identificado (tipo de estudo sem achado de licença, ou sigla fora do catálogo de
+  # LICENSE_ACT_NAMES), cai pro texto que a IA escreveu em descricao_servico — mesmo padrão de
+  # "achado > texto livre" de #nome_projeto.
+  def docx_servico_label(fallback: nil)
+    siglas = license_act_acronyms
+    nomes = siglas.filter_map { |sigla| LICENSE_ACT_NAMES.key(sigla) }.map { |nome| humanize_license_act_name(nome) }
+    return "#{nomes.join(' e ')} - #{siglas.join('+')}" if nomes.present?
+
+    fallback.to_s.strip.presence || "Serviço"
+  end
+
+  # Linhas do Quadro de Desembolso — marco e % do preço total, direto do payment_schedule. Só a
+  # porcentagem (2026-09, a pedido do consultor — o quadro deixou de trazer R$/DATA por parcela;
+  # essas datas continuam editáveis na Tela de Precificação, só não vão mais impressas aqui).
   def docx_payment_schedule_rows
-    project_pricing.payment_schedule_amounts.map do |item|
-      [ item["label"], format_currency(item["amount"]), formatted_date(item["date"]) ]
+    project_pricing.payment_schedule.map do |item|
+      [ item["label"], format_percentage(item["percentage"]) ]
     end
   end
 
@@ -110,16 +137,34 @@ class Proposal < ApplicationRecord
   def docx_revision_rows(current_description:)
     # Blobs sem version no metadata são de antes desse controle existir — sem número de revisão
     # nem descrição pra mostrar, não entram na tabela (evita linha "-1" em branco no documento).
+    # Filtra por v.to_i < version para nunca duplicar a revisão atual.
     past_rows = generated_documents.map(&:blob)
-      .select { |blob| blob.metadata["version"].present? }
+      .select { |blob| blob.metadata["version"].present? && blob.metadata["version"].to_i < version }
       .group_by { |blob| blob.metadata["version"] }
       .map do |v, blobs|
         blob = blobs.first
-        [ format("%02d", v.to_i - 1), blob.metadata["description"], blob.created_at.strftime("%d/%m/%Y") ]
+        rev_num = format("%02d", v.to_i - 1)
+        desc = blob.metadata["description"].to_s.strip
+        if v.to_i > 1 && (desc.blank? || desc.downcase.in?([ "emissão inicial", "emissao inicial" ]))
+          desc = "Revisão solicitada pelo consultor"
+        end
+        [ rev_num, desc, blob.created_at.strftime("%d/%m/%Y") ]
       end
       .sort_by { |row| row[0] }
 
-    past_rows << [ format("%02d", version - 1), current_description, Date.current.strftime("%d/%m/%Y") ]
+    curr_rev_num = format("%02d", version - 1)
+    curr_desc = if version <= 1
+      "Emissão Inicial"
+    else
+      desc = current_description.to_s.strip
+      if desc.blank? || desc.downcase.in?([ "emissão inicial", "emissao inicial" ])
+        "Revisão solicitada pelo consultor"
+      else
+        desc
+      end
+    end
+
+    past_rows << [ curr_rev_num, curr_desc, Date.current.strftime("%d/%m/%Y") ]
   end
 
   # Pede pra IA sugerir horas por profissional/entregável com base em tudo que já foi
@@ -189,8 +234,84 @@ class Proposal < ApplicationRecord
     suggestion = fetch_ai_schedule_suggestion
     apply_schedule_lines!(pricing, "servico", Array(suggestion["cronograma_servico"]))
     apply_schedule_lines!(pricing, "implantacao", Array(suggestion["cronograma_implantacao"]))
+    pricing.update!(schedule_key_points: parse_schedule_key_points(suggestion))
   rescue StandardError => e
     Rails.logger.error("build_with_ai_suggested_schedule! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
+  end
+
+  # Elege os ≤6 marcos do infográfico de linha do tempo (CLAUDE.md seção 8) a partir de um
+  # cronograma_servico que JÁ EXISTE — proposta antiga (criada antes desta funcionalidade), ou
+  # cronograma que o consultor montou/ajustou à mão na Tela de Precificação. `build_with_ai_
+  # suggested_schedule!` só roda quando não há item nenhum, então sem isto uma proposta com
+  # cronograma nunca ganharia os marcos e o infográfico ficaria pra sempre no fallback de fase.
+  # Só toca `schedule_key_points`; nunca mexe nos `schedule_items`. Roda SEMPRE em background
+  # (ElectScheduleKeyPointsJob) pelo mesmo motivo de build_with_ai_suggested_schedule! —
+  # reentrância de Conversation#complete.
+  def elect_schedule_key_points!
+    pricing = project_pricing
+    return unless pricing
+
+    items = pricing.schedule_items.for_type("servico").to_a
+    return if items.empty?
+
+    suggestion = fetch_ai_key_points_suggestion(items)
+    pricing.update!(schedule_key_points: parse_schedule_key_points(suggestion))
+  rescue StandardError => e
+    Rails.logger.error("elect_schedule_key_points! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
+  end
+
+  # Seleção determinística de até 6 marcos quando a IA ainda não elegeu os marcos em background
+  # (proposta antiga, ou primeira geração síncrona antes do job concluir). Garante que o
+  # infográfico NUNCA saia com dezenas de círculos, mesmo antes do job rodar.
+  def default_schedule_key_points
+    pricing = project_pricing
+    return [] unless pricing
+
+    items = pricing.schedule_items.for_type("servico").to_a
+    return [] if items.empty?
+
+    self.class.default_key_points_from(items)
+  end
+
+  def self.default_key_points_from(items)
+    items = Array(items).sort_by { |item| [ item.start_period.to_i, item.position.to_i ] }
+    return [] if items.empty?
+
+    # 1. Pega itens marcados como marco (milestone: true)
+    milestones = items.select(&:milestone?)
+
+    # 2. Sempre inclui o primeiro (início/kick-off) e o último (conclusão/emissão)
+    candidates = []
+    candidates << items.first if items.first
+    candidates.concat(milestones)
+    candidates << items.last if items.last
+    candidates.uniq!
+
+    # 3. Se ainda há menos de 6, inclui o início de fases distintas
+    if candidates.size < 6
+      items.group_by(&:phase_name).each_value do |phase_items|
+        break if candidates.size >= 6
+        first_in_phase = phase_items.first
+        candidates << first_in_phase unless candidates.include?(first_in_phase)
+      end
+    end
+
+    # 4. Ordena cronologicamente
+    ordered = candidates.sort_by { |item| [ item.start_period.to_i, item.position.to_i ] }
+
+    # 5. Se houver mais de 6 (muitos marcos explícitos), mantém primeiro, último e amostra os intermediários
+    if ordered.size > 6
+      first = ordered.first
+      last = ordered.last
+      middle = ordered[1...-1]
+      step = (middle.size.to_f / 4).ceil
+      sampled = middle.each_slice([ step, 1 ].max).map(&:first).first(4)
+      ordered = [ first, *sampled, last ].uniq.sort_by { |item| [ item.start_period.to_i, item.position.to_i ] }
+    end
+
+    ordered.first(6).map do |item|
+      { "nome" => item.activity_name.to_s.truncate(45), "periodo" => [ item.start_period.to_i, 1 ].max }
+    end
   end
 
   private
@@ -266,6 +387,26 @@ class Proposal < ApplicationRecord
 
     def format_currency(value)
       ActionController::Base.helpers.number_to_currency(value, unit: "", separator: ",", delimiter: ".").strip
+    end
+
+    # "40" quando o percentual for inteiro, "37,5" (vírgula, padrão PT-BR) quando não — nunca o
+    # "%" no texto da célula, a coluna já se chama "% DO ITEM".
+    def format_percentage(value)
+      numero = value.to_f
+      return numero.to_i.to_s if (numero % 1).zero?
+
+      numero.to_s.sub(".", ",")
+    end
+
+    # "renovação da licença prévia" (chave de LICENSE_ACT_NAMES) → "Renovação da Licença Prévia".
+    # Conectores curtos ("de"/"da") ficam minúsculos, exceto na 1ª palavra — regra simples de
+    # título em português, não é I18n/titleize genérico (que não conhece essas exceções).
+    LICENSE_ACT_NAME_CONNECTORS = %w[de da].freeze
+
+    def humanize_license_act_name(texto)
+      texto.split(" ").each_with_index.map do |palavra, i|
+        i.positive? && LICENSE_ACT_NAME_CONNECTORS.include?(palavra) ? palavra : palavra.capitalize
+      end.join(" ")
     end
 
     def finalize!(pricing)
@@ -429,6 +570,14 @@ class Proposal < ApplicationRecord
         Não invente números de dias de campo/vistorias fora do que já está definido nesta
         proposta — se não souber a duração exata, estime de forma razoável a partir do escopo.
 
+        Por fim, em "marcos_infografico", escolha os ATÉ 6 pontos MAIS IMPORTANTES do
+        "cronograma_servico" pra um resumo visual (infográfico de linha do tempo que o cliente vê
+        de cara): os marcos/entregas que o cliente mais quer acompanhar — assinatura do contrato,
+        protocolo no órgão ambiental, emissão de cada licença, e as 1-2 campanhas/entregas mais
+        críticas. Do começo ao fim do cronograma, em ordem. Cada um: "nome" (curto, ex.:
+        "Protocolo no órgão ambiental") e "periodo" (a semana 1-based do "cronograma_servico" em
+        que o marco acontece). No máximo 6 — se o cronograma for pequeno, pode ter menos.
+
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
 
@@ -436,8 +585,46 @@ class Proposal < ApplicationRecord
           "cronograma_servico": [
             { "fase": "Mobilização", "atividade": "Assinatura do Contrato e Kick-Off", "periodo_inicio": 1, "duracao": 1, "marco": false }
           ],
-          "cronograma_implantacao": []
+          "cronograma_implantacao": [],
+          "marcos_infografico": [
+            { "nome": "Assinatura do contrato", "periodo": 1 }
+          ]
         }
+      TEXT
+    end
+
+    def fetch_ai_key_points_suggestion(items)
+      conversation.ask_internally(key_points_suggestion_prompt(items), hide_response: true)
+      response = conversation.messages.where(role: "assistant").order(:created_at).last
+      AiJsonResponse.parse(response.content) || {}
+    end
+
+    # Igual à chave "marcos_infografico" de schedule_suggestion_prompt, mas sobre um cronograma
+    # que JÁ está montado (a IA não sugere fases/durações aqui, só elege os principais pontos do
+    # que existe).
+    def key_points_suggestion_prompt(items)
+      linhas = items.map do |item|
+        marca = item.milestone? ? " [MARCO]" : ""
+        "- semana #{item.start_period} (dura #{item.duration_periods}): #{item.phase_name} — #{item.activity_name}#{marca}"
+      end.join("\n")
+
+      <<~TEXT
+        Abaixo está o cronograma do serviço desta proposta, já montado — uma atividade por linha,
+        semanas 1-based:
+
+        #{linhas}
+
+        Escolha os ATÉ 6 pontos MAIS IMPORTANTES deste cronograma pra um resumo visual (infográfico
+        de linha do tempo que o cliente vê de cara): os marcos/entregas que o cliente mais quer
+        acompanhar — assinatura do contrato, protocolo no órgão ambiental, emissão de cada licença,
+        e as 1-2 campanhas/entregas mais críticas. Do começo ao fim, em ordem. Cada um: "nome"
+        (curto, ex.: "Protocolo no órgão ambiental") e "periodo" (a semana 1-based em que o ponto
+        acontece). No máximo 6 — se o cronograma for pequeno, pode ter menos.
+
+        Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
+        neste formato:
+
+        { "marcos_infografico": [ { "nome": "Assinatura do contrato", "periodo": 1 } ] }
       TEXT
     end
 
@@ -455,6 +642,20 @@ class Proposal < ApplicationRecord
           milestone: line["marco"] == true, position: index
         )
       end
+    end
+
+    # Os ≤6 marcos que a IA elegeu pra o infográfico de linha do tempo (só do cronograma_servico).
+    # Descarta entrada sem nome ou sem semana válida, ordena por período e corta em 6 — o
+    # ScheduleTimelineRenderer também clampa o período contra o fim real do cronograma, então aqui
+    # basta a higiene básica. Vazio/ausente → [] (o infográfico cai no resumo por fase).
+    def parse_schedule_key_points(suggestion)
+      Array(suggestion["marcos_infografico"]).filter_map do |marco|
+        nome = marco["nome"].to_s.strip
+        periodo = marco["periodo"].to_i
+        next if nome.blank? || periodo < 1
+
+        { "nome" => nome, "periodo" => periodo }
+      end.sort_by { |marco| marco["periodo"] }.first(6)
     end
 
     # Versão sem catálogo de entregável (tipo de estudo sem study_templates): valida só que o

@@ -288,6 +288,91 @@ class ProposalTest < ActiveSupport::TestCase
     assert_nil proposal.project_pricing.schedule_empreendimento_start_date
   end
 
+  test "build_with_ai_suggested_schedule! stores the elected infographic marcos, ordered and capped at 6" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = {
+      cronograma_servico: [ { fase: "Mobilização", atividade: "X", periodo_inicio: 1, duracao: 1, marco: false } ],
+      marcos_infografico: [
+        { nome: "Emissão da LP", periodo: 20 },
+        { nome: "Assinatura do contrato", periodo: 1 },
+        { nome: "Protocolo no órgão", periodo: 8 },
+        { nome: "", periodo: 5 },
+        { nome: "Sem período", periodo: 0 },
+        { nome: "Campanha de campo", periodo: 4 },
+        { nome: "Reunião de partida", periodo: 2 },
+        { nome: "Entrega final", periodo: 24 },
+        { nome: "Excedente", periodo: 26 }
+      ]
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
+
+    key_points = proposal.project_pricing.reload.schedule_key_points
+    assert_equal 6, key_points.size
+    assert_equal [ 1, 2, 4, 8, 20, 24 ], key_points.map { |m| m["periodo"] }
+    assert_equal "Assinatura do contrato", key_points.first["nome"]
+    assert_not_includes key_points.map { |m| m["nome"] }, ""
+    assert_not_includes key_points.map { |m| m["nome"] }, "Sem período"
+  end
+
+  test "build_with_ai_suggested_schedule! leaves schedule_key_points empty when the AI omits marcos_infografico" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = { cronograma_servico: [ { fase: "Mobilização", atividade: "X", periodo_inicio: 1, duracao: 1, marco: false } ] }.to_json
+
+    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
+
+    assert_empty proposal.project_pricing.reload.schedule_key_points
+  end
+
+  test "elect_schedule_key_points! picks the marcos from an already-built servico schedule, without touching the items" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    pricing = proposal.project_pricing
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Assinatura", start_period: 1, duration_periods: 1, position: 0)
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Protocolo", activity_name: "Protocolo no órgão", start_period: 8, duration_periods: 1, milestone: true, position: 1)
+    ai_response = { marcos_infografico: [
+      { nome: "Protocolo no órgão", periodo: 8 }, { nome: "Assinatura do contrato", periodo: 1 }
+    ] }.to_json
+
+    assert_no_difference -> { pricing.schedule_items.count } do
+      stub_ai_complete(ai_response) { proposal.elect_schedule_key_points! }
+    end
+
+    assert_equal [ 1, 8 ], pricing.reload.schedule_key_points.map { |m| m["periodo"] }
+  end
+
+  test "elect_schedule_key_points! is a no-op when there is no servico schedule" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+
+    stub_ai_complete({ marcos_infografico: [ { nome: "X", periodo: 1 } ] }.to_json) { proposal.elect_schedule_key_points! }
+
+    assert_empty proposal.project_pricing.reload.schedule_key_points
+  end
+
+  test "default_schedule_key_points: seleciona deterministicamente até 6 marcos cronológicos" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    pricing = proposal.project_pricing
+
+    # Cria 8 itens com fases e marcos misturados
+    (1..8).each do |n|
+      pricing.schedule_items.create!(
+        schedule_type: "servico", phase_name: "Fase #{n}", activity_name: "Atividade #{n}",
+        start_period: n * 2, duration_periods: 2, milestone: (n % 2 == 0), position: n
+      )
+    end
+
+    points = proposal.default_schedule_key_points
+    assert_operator points.size, :<=, 6
+    assert_operator points.size, :>=, 2
+    assert_equal points.sort_by { |p| p["periodo"] }, points
+    assert_equal 2, points.first["periodo"]
+    assert_equal 16, points.last["periodo"]
+  end
+
   test "team_rows_for_docx: uma linha por profissional, [SETOR, FUNÇÃO, PROFISSIONAL, HABILITAÇÃO], agrupada por setor" do
     proposal = proposals(:priced_proposal)
     proposal.project_pricing.proposal_professionals.create!(
@@ -315,23 +400,55 @@ class ProposalTest < ActiveSupport::TestCase
                  proposal.docx_total_price
   end
 
-  test "docx_payment_schedule_rows carries the milestone, the amount in R$ and the date" do
-    proposal = proposals(:priced_proposal)
-    pricing = proposal.project_pricing
-    pricing.payment_dates = [ "2026-03-25" ]
-    pricing.save!
-
-    rows = proposal.reload.docx_payment_schedule_rows
-
-    assert_equal 4, rows.size
-    assert_equal [ "Assinatura do contrato", "13.473,00", "25/03/2026" ], rows.first
-  end
-
-  # Parcela sem data combinada não pode virar data inventada nem quebrar a geração.
-  test "docx_payment_schedule_rows leaves the date blank when the consultant hasn't set one" do
+  # 2026-09: o quadro deixou de trazer R$/DATA por parcela (voltou o quadro de Preço com o
+  # total — ver #docx_price_rows) — a data continua editável na Tela de Precificação, só não é
+  # mais impressa aqui.
+  test "docx_payment_schedule_rows carries the milestone and the percentage of the total" do
     rows = proposals(:priced_proposal).docx_payment_schedule_rows
 
-    assert_equal "", rows.first.last
+    assert_equal 4, rows.size
+    assert_equal [ "Assinatura do contrato", "30" ], rows.first
+  end
+
+  test "docx_payment_schedule_rows formats a non-integer percentage with a comma" do
+    proposal = proposals(:priced_proposal)
+    proposal.project_pricing.update!(payment_schedule: [ { "label" => "Assinatura", "percentage" => 37.5 } ])
+
+    assert_equal [ [ "Assinatura", "37,5" ] ], proposal.docx_payment_schedule_rows
+  end
+
+  test "docx_price_rows: 1 linha só, com o nome do serviço e o preço total formatado" do
+    proposal = proposals(:priced_proposal)
+
+    assert_equal [ [ proposal.docx_servico_label, "44.910,00" ] ], proposal.docx_price_rows
+  end
+
+  test "docx_servico_label derives from the identified ato de licenciamento, never from the AI" do
+    proposal = proposals(:priced_proposal)
+    proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "(RLP)", nature: "fato", source_kind: "et")
+
+    assert_equal "Renovação da Licença Prévia - RLP", proposal.docx_servico_label(fallback: "texto que a IA escreveu")
+  end
+
+  test "docx_servico_label combines more than one ato with 'e', joining the siglas with '+'" do
+    proposal = proposals(:priced_proposal)
+    proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "(LP)", nature: "fato", source_kind: "et")
+    proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "(LI)", nature: "fato", source_kind: "et")
+
+    assert_equal "Licença Prévia e Licença de Instalação - LP+LI", proposal.docx_servico_label
+  end
+
+  test "docx_servico_label falls back to the AI's descricao_servico when no ato was identified" do
+    proposal = proposals(:priced_proposal)
+
+    assert_empty proposal.license_act_acronyms
+    assert_equal "elaboração de EIA/RIMA do Parque Eólico X", proposal.docx_servico_label(fallback: "elaboração de EIA/RIMA do Parque Eólico X")
+  end
+
+  test "docx_servico_label falls back to a generic label when there is no ato and no fallback text" do
+    proposal = proposals(:priced_proposal)
+
+    assert_equal "Serviço", proposal.docx_servico_label(fallback: "  ")
   end
 
   test "docx_revision_rows has only the current row when nothing was generated before" do
@@ -357,6 +474,44 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "00", rows[0][0]
     assert_equal "Emissão Inicial", rows[0][1]
     assert_equal [ "01", "Ajuste de escopo", Date.current.strftime("%d/%m/%Y") ], rows[1]
+  end
+
+  # Achado ao vivo: uma geração que reentra/repete (mesma corrida de fundo já vista com o
+  # cronograma) pode deixar um blob de generated_documents com metadata[:version] IGUAL à versão
+  # atual (já incrementada) — sem o filtro `v.to_i < version`, esse blob duplicava a linha da
+  # revisão atual no Sumário de Revisões.
+  test "docx_revision_rows never duplicates the current row, even if a stray blob shares its version" do
+    proposal = proposals(:priced_proposal)
+    proposal.generated_documents.attach(
+      io: StringIO.new("stray"), filename: "stray.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 2, description: "Tentativa anterior" }
+    )
+    proposal.update!(version: 2)
+
+    rows = proposal.docx_revision_rows(current_description: "Ajuste de escopo")
+
+    assert_equal 1, rows.size
+    assert_equal [ "01", "Ajuste de escopo", Date.current.strftime("%d/%m/%Y") ], rows.first
+  end
+
+  test "docx_revision_rows defaults a blank or repeated 'Emissão Inicial' description to a generic label, on any revision after the first" do
+    proposal = proposals(:priced_proposal)
+    # Rev 1 (v.to_i == 1) fica de fora da troca — "Emissão Inicial" (em branco ou não) é o rótulo
+    # implícito da 1ª linha por convenção, mesma exceção que curr_desc já faz com `version <= 1`.
+    proposal.generated_documents.attach(
+      io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 1, description: "" }
+    )
+    proposal.generated_documents.attach(
+      io: StringIO.new("v2"), filename: "v2.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 2, description: "Emissão Inicial" }
+    )
+    proposal.update!(version: 3)
+
+    rows = proposal.docx_revision_rows(current_description: "")
+
+    assert_equal [ "", "Revisão solicitada pelo consultor", "Revisão solicitada pelo consultor" ],
+      rows.map { |row| row[1] }
   end
 
   test "docx_numero_proposta combines prefix + 2-digit creation year + record id" do

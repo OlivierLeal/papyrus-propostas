@@ -14,12 +14,14 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
       "OBJETIVO_SERVICOS" => "Elaborar o EIA/RIMA do Parque Eólico Serra Verde."
     }
     # Índices são a posição da tabela no modelo: 0 = revisões, 1 = produtos, 2 = equipe,
-    # 3 = desembolso (o quadro de preço por linha saiu do modelo na revisão de 2026-08).
+    # 3 = preço (Quadro N-1, reintroduzido em 2026-09 — N° | SERVIÇO | PREÇO R$), 4 = desembolso
+    # (Quadro N-2 — N° | MARCO | % DO ITEM, não mais R$/DATA).
     @tables = {
       1 => { rows: [ [ "EIA", "Digital (PDF)" ], [ "RIMA", "Digital (PDF)" ] ] },
       2 => { rows: [ [ "Diretoria", "Diretora de Negócios", "Charlene Luz", "Engenheira. CREA 1." ],
                      [ "Execução", "Geoprocessamento e Cartografia", "Rodrigo Moate", "Geógrafo. CREA 2." ] ] },
-      3 => { rows: [ [ "Assinatura do contrato", "13.473,00", "25/03/2026" ] ], auto_number: true }
+      3 => { rows: [ [ "Renovação da Licença Prévia - RLP", "220.500,00" ] ], auto_number: true },
+      4 => { rows: [ [ "Assinatura do contrato", "40" ] ], auto_number: true }
     }
   end
 
@@ -141,11 +143,11 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
   end
 
   test "fill_table shrinks the table when there are fewer rows than the template molde" do
-    # Quadro 12-1 (Desembolso) tem 9 linhas moldadas; passamos só 1.
+    # Quadro 12-2 (Desembolso) tem 9 linhas moldadas; passamos só 1.
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
 
-    desembolso_table = doc.xpath("//w:tbl", NS)[3]
+    desembolso_table = doc.xpath("//w:tbl", NS)[4]
     data_rows = desembolso_table.xpath(".//w:tr", NS)[1..]
 
     assert_equal 1, data_rows.size
@@ -156,14 +158,13 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
 
-    desembolso_table = doc.xpath("//w:tbl", NS)[3]
+    desembolso_table = doc.xpath("//w:tbl", NS)[4]
     row = desembolso_table.xpath(".//w:tr", NS)[1]
     cells = cell_texts(row)
 
     assert_equal "1", cells[0]
     assert_equal "Assinatura do contrato", cells[1]
-    assert_equal "13.473,00", cells[2]
-    assert_equal "25/03/2026", cells[3]
+    assert_equal "40", cells[2]
   end
 
   test "fill turns multi-paragraph placeholder text into separate justified paragraphs" do
@@ -201,16 +202,53 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal "both", escopo_p&.at_xpath(".//w:pPr/w:jc", NS)&.[]("w:val")
   end
 
-  test "fill_table also fills the SUMÁRIO DE REVISÕES table (index 0), same as any other table" do
+  test "fill_table also fills the SUMÁRIO DE REVISÕES table (index 0), keeping the column header row intact" do
     tables = @tables.merge(0 => { rows: [ [ "01", "Ajuste de escopo", "18/08/2026" ] ] })
     bytes = @filler.fill(placeholders: @placeholders, tables: tables)
     doc = parsed_document(bytes)
 
     revisoes_table = doc.xpath("//w:tbl", NS)[0]
-    data_rows = revisoes_table.xpath(".//w:tr", NS)[1..]
+    rows = revisoes_table.xpath(".//w:tr", NS)
 
-    assert_equal 1, data_rows.size
-    assert_equal [ "01", "Ajuste de escopo", "18/08/2026" ], cell_texts(data_rows[0])
+    # [0] título mesclado "SUMÁRIO DE REVISÕES", [1] rótulos das colunas — os dois têm que
+    # sobreviver intactos (achado ao vivo: viravam a linha de dado "01", sumindo do documento).
+    assert_equal [ "SUMÁRIO DE REVISÕES" ], cell_texts(rows[0])
+    assert_equal [ "Revisão", "Descrição da Revisão", "Data" ], cell_texts(rows[1])
+    assert_equal [ "01", "Ajuste de escopo", "18/08/2026" ], cell_texts(rows[2])
+  end
+
+  # Pedido do consultor (2026-09): a tabela tem que sair sempre com pelo menos as 10 linhas do
+  # molde do modelo (numeradas "00" a "10"), mesmo numa proposta com pouquíssimas revisões — não
+  # só as linhas preenchidas. O molde já vem assim no .docx da Papyrus; fill_revisions_table! só
+  # não pode mais apagar as que sobram sem dado (comportamento de sempre pras OUTRAS tabelas).
+  test "fill_revisions_table! keeps the template's blank pre-numbered rows instead of trimming them away" do
+    # rows_data sempre começa em "00" na prática (Proposal#docx_revision_rows), alinhado com a
+    # numeração que o próprio molde já traz — daí as linhas não preenchidas manterem a numeração
+    # certa (01..10) mesmo sem o código escrever nada nelas.
+    tables = @tables.merge(0 => { rows: [ [ "00", "Emissão Inicial", "18/08/2026" ] ] })
+    bytes = @filler.fill(placeholders: @placeholders, tables: tables)
+    doc = parsed_document(bytes)
+
+    revisoes_table = doc.xpath("//w:tbl", NS)[0]
+    data_rows = revisoes_table.xpath(".//w:tr", NS)[2..]
+
+    assert_equal 11, data_rows.size # "00" a "10"
+    assert_equal [ "00", "Emissão Inicial", "18/08/2026" ], cell_texts(data_rows[0])
+    assert_equal [ "01", "", "" ], cell_texts(data_rows[1])
+    assert_equal [ "10", "", "" ], cell_texts(data_rows.last)
+  end
+
+  test "fill_revisions_table! still grows past the template's 11 rows when there are more than 10 revisions" do
+    rows = (1..12).map { |n| [ format("%02d", n), "Revisão #{n}", "01/01/2026" ] }
+    tables = @tables.merge(0 => { rows: rows })
+    bytes = @filler.fill(placeholders: @placeholders, tables: tables)
+    doc = parsed_document(bytes)
+
+    revisoes_table = doc.xpath("//w:tbl", NS)[0]
+    data_rows = revisoes_table.xpath(".//w:tr", NS)[2..]
+
+    assert_equal 12, data_rows.size
+    assert_equal [ "12", "Revisão 12", "01/01/2026" ], cell_texts(data_rows.last)
   end
 
   test "preenche o quadro EQUIPE TÉCNICA (índice 2) com uma linha por membro, incluindo a coluna SETOR" do
@@ -413,6 +451,12 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal "landscape", sect_prs[1].at_xpath("w:pgSz", NS)["w:orient"]
     assert_nil sect_prs[2].at_xpath("w:pgSz", NS)["w:orient"] # volta pro retrato sozinha, herdando o sectPr final
 
+    # A quebra paisagem usa o rodapé PAISAGEM (footer2.xml, offsets recentralizados) — o retrato
+    # segue no footer1 de sempre, senão o "www…"/"Sistema de Gestão…" sai deslocado pra esquerda.
+    assert_equal "rId16", sect_prs[0].at_xpath("w:footerReference", NS)["r:id"]
+    assert_equal "rId20", sect_prs[1].at_xpath("w:footerReference", NS)["r:id"]
+    assert zip_entry_names(bytes).include?("word/footer2.xml"), "o modelo tem que trazer o footer2.xml"
+
     xml = document_xml(bytes)
     assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
@@ -421,19 +465,19 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes xml, "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
   end
 
-  # REGRESSÃO: a tabela nova nasce ENTRE a de equipe (índice 2) e a de desembolso (índice 3) no
-  # corpo do documento — inserida ANTES de tables.each rodar, "//w:tbl"[3] passava a apontar pra
-  # ela em vez do Desembolso, e fill_table! reescrevia o cronograma por cima com as linhas de
-  # pagamento. As duas tabelas (desembolso E cronograma) têm que sair certas ao mesmo tempo.
+  # REGRESSÃO: a tabela nova nasce ENTRE a de equipe (índice 2) e a de preço/desembolso (índices
+  # 3/4) no corpo do documento — inserida ANTES de tables.each rodar, os índices passavam a
+  # apontar errado, e fill_table! reescrevia o cronograma por cima com as linhas de pagamento. As
+  # tabelas de preço, desembolso E cronograma têm que sair certas ao mesmo tempo.
   test "the schedule table never steals the position-indexed Desembolso table's content" do
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
     doc = parsed_document(bytes)
-    # No documento final a tabela de cronograma (nova) fica ENTRE a de equipe (2) e a de
-    # desembolso — que por isso passa a ser a 5ª (índice 4), não mais a 4ª (índice 3).
-    data_rows = doc.xpath("//w:tbl", NS)[4].xpath(".//w:tr", NS)[1..]
+    # No documento final a tabela de cronograma (nova) fica ENTRE a de equipe (2) e a de preço —
+    # que por isso passa a ser a 5ª (índice 4), e o desembolso a 6ª (índice 5), não mais 3/4.
+    data_rows = doc.xpath("//w:tbl", NS)[5].xpath(".//w:tr", NS)[1..]
 
     assert_equal 1, data_rows.size
-    assert_equal [ "1", "Assinatura do contrato", "13.473,00", "25/03/2026" ], cell_texts(data_rows[0])
+    assert_equal [ "1", "Assinatura do contrato", "40" ], cell_texts(data_rows[0])
     assert_includes document_xml(bytes), "Mobilização"
   end
 
@@ -472,6 +516,22 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
     assert_includes zip_entry_content(bytes, "word/_rels/document.xml.rels"), 'Id="rId_CRONOGRAMA_SERVICO_1"'
     assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 10-1: Cronograma do Serviço.")
+  end
+
+  # Quando o payload traz os ≤6 marcos que a IA elegeu (project_pricing.schedule_key_points), o
+  # infográfico usa esses marcos em vez do resumo por fase — o SVG não chega no .docx, então aqui
+  # só se garante que o bloco (imagem + Quadro) continua saindo com o parâmetro threaded.
+  test "fill still builds the schedule block when the payload carries elected infographic marcos" do
+    payload = schedule_payload("servico").merge(
+      key_points: [ { "nome" => "Assinatura do contrato", "periodo" => 1 },
+        { "nome" => "Protocolo no órgão", "periodo" => 3 } ]
+    )
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => payload })
+    xml = document_xml(bytes)
+
+    assert_includes xml, 'r:embed="rId_CRONOGRAMA_SERVICO_1"'
+    assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
+    assert_includes xml, "Quadro 10-1: Cronograma do Serviço."
   end
 
   test "fill numbers a separate image/relationship per schedule type present" do
@@ -686,8 +746,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     doc = parsed_document(bytes)
 
-    desembolso_table = doc.xpath("//w:tbl", NS)[3]
-    assert_equal [ "1", "Assinatura do contrato", "13.473,00", "25/03/2026" ],
+    desembolso_table = doc.xpath("//w:tbl", NS)[4]
+    assert_equal [ "1", "Assinatura do contrato", "40" ],
                  cell_texts(desembolso_table.xpath(".//w:tr", NS)[1])
   end
 end

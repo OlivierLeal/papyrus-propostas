@@ -205,6 +205,43 @@ coluna QUANT., a seção 9 (prazo) ganhou um segundo parágrafo, e as obrigaçõ
 perderam os itens de rádio comunicador e espaço físico/CATFA. O cálculo continua auditável linha a
 linha na Tela de Precificação — o que mudou é o que vai impresso para o cliente.
 
+**O quadro de Preço voltou, e o de Desembolso passou de R$/DATA pra % (2026-09, pedido do
+consultor, a partir de uma proposta real trazida como referência).** A seção "PREÇO E CONDIÇÕES
+DE PAGAMENTO" ganhou de volta um quadro ANTES do Desembolso — não é o quadro por profissional/
+entregável que saiu em 2026-08 (aquele nunca voltou), é um quadro de **1 linha só** com o preço
+TOTAL: **N° | SERVIÇO | PREÇO R$**. O texto de abertura deixou de citar `{{PRECO_TOTAL}}` inline
+("O preço proposto... é de R$ X") e passou a apontar pro quadro ("...está no Quadro N-1"), igual
+já fazia pro Desembolso — `{{PRECO_TOTAL}}`/`Proposal#docx_total_price` continuam mapeados
+(inofensivo, mesmo padrão de placeholder que saiu do texto mas segue passado — ver "Ref.:" acima)
+mas não aparecem mais no modelo. O Desembolso (agora o 2º quadro da seção) perdeu as colunas
+**R$**/**DATA**, viraram uma só, **% DO ITEM** — o percentual já morava em `payment_schedule`
+(jsonb), então é exibição mais simples, não motor de cálculo novo; a data de cada parcela
+continua existindo e editável na Tela de Precificação, só não vai mais impressa no `.docx`.
+- **`Proposal#docx_price_rows`** — sempre 1 linha (`[[docx_servico_label, preço formatado]]`,
+  auto_number: true na 1ª coluna). **`Proposal#docx_servico_label`** deriva o nome do serviço
+  do(s) ato(s) de licenciamento já identificados (`license_act_acronyms`, mesma sigla do nome do
+  arquivo) — nunca da IA: "RLP" → "Renovação da Licença Prévia - RLP", vários atos combinam com
+  "e" no nome e "+" na sigla ("Licença Prévia e Licença de Instalação - LP+LI"). Sem ato
+  identificado (sigla fora do catálogo `LICENSE_ACT_NAMES`, ou nenhum achado `tipo_licenca`), cai
+  pro texto livre que a IA já escreve em `descricao_servico` (mesmo parâmetro usado na linha
+  "Ref.:") — nunca puro `nil`/vazio no documento, o último fallback é o genérico "Serviço".
+- **`Proposal#docx_payment_schedule_rows`** trocou de `[label, R$, data]` pra `[label, %]`, lendo
+  `payment_schedule` direto (não mais `payment_schedule_amounts`, que continua existindo e sendo
+  usado na VIEW da Tela de Precificação — só o `.docx` parou de mostrar R$/data por parcela).
+- **Índices das tabelas remapeados** (`GenerateProposalDocumentTool#build_tables`,
+  `ProposalDocxFiller`): 0=revisões, 1=produtos, 2=equipe, **3=preço (NOVO)**, 4=desembolso (era
+  3). Mesma disciplina de sempre ao adicionar tabela no modelo — todo índice depois do ponto de
+  inserção sobe 1.
+- **Edição do modelo**: como sempre, string crua no `word/document.xml`, nunca `Nokogiri#to_xml`.
+  A tabela de Preço nasceu de uma CÓPIA da tabela de Desembolso (mesmos `tblPr`/bordas/estilo,
+  só 3 colunas em vez de 4 — a largura das colunas `R$`+`DATA` removidas foi somada numa só
+  `% DO ITEM`/`PREÇO R$`, redistribuindo a largura total da tabela em vez de encolher), cortada
+  pra 1 linha de dado só (a de Desembolso manteve as 9). Verificado ao vivo (LibreOffice headless
+  → PDF → captura): os dois quadros saem exatamente como a referência trazida pelo consultor,
+  numerados "12-1"/"12-2" (a numeração real desta seção no modelo, calculada automaticamente —
+  não é fixa "11-1"/"11-2" como na referência, que veio de uma proposta sem o capítulo "ITENS NÃO
+  PREVISTOS" que empurra a numeração em 1 nesta versão do modelo).
+
 **Validade da proposta sempre 90 dias, inclusive na técnica-sozinha (2026-08):** a seção
 "VALIDADE DA PROPOSTA" (texto fixo "Esta proposta tem validade de 90 dias.", sem placeholder —
 nunca varia por proposta) foi movida pra ANTES de "PREÇO E CONDIÇÕES DE PAGAMENTO" — antes ficava
@@ -270,6 +307,22 @@ relacionamento de imagem próprio (não precisa, não tem imagem nenhuma) — re
 substituição de string crua, nunca `Nokogiri#to_xml`; `<w:sectPr>` continua único (1→1), só ganhou
 os dois atributos novos. Teste em `proposal_docx_filler_test.rb` trava que `header2.xml` (página 1)
 não tem `<w:drawing>` e `header1.xml` (demais páginas) continua tendo.
+
+**Rodapé próprio pra as páginas PAISAGEM do cronograma (2026-09, relato do consultor "rodapé torto
+na paisagem", chat 32).** `word/footer1.xml` monta o "www…"/"Sistema de Gestão…" com dois text
+boxes ancorados (`<wp:positionH relativeFrom="column">` + `posOffset` fixo) dimensionados pra
+coluna RETRATO (~8504 dxa). Numa página paisagem (coluna ~14002 dxa) esses boxes ficam deslocados
+pra esquerda. Criado `word/footer2.xml` = cópia de `footer1.xml` com todo `posOffset` de
+`relativeFrom="column"` (|N| > 100k — os dois text boxes + o selo NSI1; o selo redondo em
+`posOffset=1` fica) somado de `(14002-8504)/2 × 635` EMU, e os dois `margin-left` das VML
+`<v:rect>` fallback somados de 137,45pt. Registrado em `document.xml.rels` (`rId20`),
+`[Content_Types].xml`, e `word/_rels/footer2.xml.rels` (cópia — aponta pras mesmas imagens do
+selo). `ProposalDocxFiller`: só a variante PAISAGEM (`LANDSCAPE_SECT_XML` / `landscape_refs` no
+caminho `insert_schedule_section`) usa `rId20`; o retrato segue no `rId16`. Se um `.docx` gerado
+por um modelo ANTIGO passar pelo `insert_schedule_section`, `landscape_refs` não acha `footer2.xml`
+e mantém `rId16` (sai levemente torto, mas nunca dangling ref). Teste trava
+`footerReference r:id` = `rId16` na quebra retrato e `rId20` na paisagem, e que o modelo traz
+`word/footer2.xml`.
 
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
@@ -346,7 +399,10 @@ cronograma visual no `.docx`, baseado num exemplo real da Papyrus (`Quadro 9-1`,
 Word com colunas de período agrupadas e barras coloridas por atividade). Dois tipos, sempre
 independentes:
 1. **Cronograma do Serviço** (`schedule_type: "servico"`) — as atividades do próprio
-   estudo/licenciamento (reuniões, campo, protocolos, emissão da licença). Em **semanas**.
+   estudo/licenciamento (reuniões, campo, protocolos, emissão da licença). Montado em **semanas**
+   (Tela de Precificação, sugestão da IA), mas a tabela do `.docx` e o infográfico saem em
+   **meses** (2026-09, pedido do cliente — a versão semanal dava 11 páginas; ver "Resumir o
+   cronograma" abaixo). Só o `.xml` do MS Project continua semanal.
 2. **Cronograma de Implantação do Empreendimento** (`"implantacao"`) — o cronograma da OBRA/
    operação do CLIENTE, não da Papyrus. Em **meses** (pode durar anos — semana ficaria
    ilegível). Só existe quando o ET/TR pede explicitamente, não é padrão em toda proposta.
@@ -694,9 +750,9 @@ do Project recalcular.
 
 **Infográfico de linha do tempo (2026-09):** além do `Quadro 9-1` (tabela nativa do Word,
 auditável, todas as fases/atividades), toda proposta com cronograma ganha também um resumo
-VISUAL — círculo numerado + ícone + linha conectando + título e duração em dias por atividade
-(sem data — pedido do consultor, 2026-09; marco mostra "-" no lugar da duração), pedido pelo
-consultor com uma referência de uma proposta real da Papyrus. Os dois convivem no documento
+VISUAL — círculo numerado + ícone + linha conectando + título e duração em dias por ponto
+(sem data — pedido do consultor, 2026-09; ponto de span 0 mostra "-" no lugar da duração), pedido
+pelo consultor com uma referência de uma proposta real da Papyrus. Os dois convivem no documento
 (o infográfico entra ANTES da legenda+tabela do mesmo tipo) — o infográfico é o resumo que o
 cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
 
@@ -708,42 +764,77 @@ cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
   no `.docx` neste projeto — o `[Content_Types].xml` do modelo só declara PNG/JPG, mesma decisão
   já tomada pro croqui do KMZ (`GenerateProposalDocumentTool#build_images`) — e continua sendo,
   em vez de ensinar o filler a lidar com blip duplo de SVG nativo do Word sem necessidade.
-- **Um círculo por ATIVIDADE**, não por fase — a fase não vira círculo próprio, igual a
-  referência trazida. Numeração sequencial (01, 02...) por TODO o cronograma, não reinicia por
-  linha nem por página. Não mostra data nenhuma (só a duração em dias, `duration_lines`), mas a
-  contagem de dias vem da MESMA conta de `ScheduleMspdiExporter#item_start`/`#item_finish`
-  (duplicada de propósito — mesmo princípio de não abstrair cedo demais, seção 11.1 "Decisão de
-  design").
-- **Ícone por PALAVRA-CHAVE** no título da atividade (`ICON_KEYWORDS`, mapa fechado — mobiliza,
-  campo/campanha, desloca, consolida/análise, elabora/relatório, revisão/emissão, envio,
-  protocolo, reunião, aprovação) — nunca a IA decidindo; sem match nenhum, ícone genérico neutro
-  de reserva. Marco (`milestone: true`) usa a cor de destaque (`MILESTONE_FILL`, `C65911` — mesma
-  do `Quadro 9-1`) em vez da cor padrão do círculo (`CIRCLE_FILL`, `2E75B6` — mesma paleta da
-  tabela, consistência visual com o que já sai na mesma página em vez de inventar cor nova).
-- **Achado ao vivo, corrigido (proposta 21, 34 itens/6 linhas de círculos):** uma imagem SÓ com
-  todas as linhas ficava mais alta que uma página paisagem inteira, e o Word/LibreOffice
-  simplesmente CORTAVA as linhas de baixo — sem erro, sem aviso, as duas últimas fases do
-  cronograma real sumiam do documento por completo. Corrigido: `#call`/`#svgs` devolvem um
-  Result/SVG **por IMAGEM**, não um só — cronograma que não cabe numa imagem só
-  (`MAX_IMAGE_HEIGHT_EMU`, ~5,25pol, com folga pro cabeçalho da página) vira VÁRIAS imagens, cada
-  uma seu próprio parágrafo no `.docx` (`ProposalDocxFiller#schedule_timeline_xml`) — Word/
-  LibreOffice flui cada imagem que sozinha cabe numa página pra próxima página sozinho, sem
-  precisar de quebra de página manual nenhuma. Numeração continua contínua entre as imagens (a
-  segunda imagem começa em "19", não reinicia em "01").
+- **≤6 marcos que a IA elege, ou um círculo por FASE como fallback** (2026-09, pedido do cliente
+  — antes era um por ATIVIDADE, e um cronograma de 34 atividades virava 3 imagens paisagem
+  "gigantes"; a linha do tempo é resumo executivo, o detalhe fica na tabela e no MS Project).
+  - **Caminho preferido — `key_points`**: o cronograma do serviço mostra os **≤6 MARCOS mais
+    importantes** que a IA elegeu (`project_pricings.schedule_key_points`, jsonb
+    `[{ "nome", "periodo" }]` — semana 1-based). Cada marco N vira um círculo cujo "X dias" é a
+    **duração do trecho** que ele cobre (do marco N-1 até ele; o 1º conta desde a semana 1 —
+    `ScheduleTimelineRenderer#key_points_to_segments`). `periodo` é clampado contra o fim real do
+    cronograma, então editar os `schedule_items` depois degrada de boa. Só o `"servico"` recebe
+    `key_points` (threaded por `schedule_payload` nos dois tools → `payload[:key_points]` →
+    renderer); `"implantacao"` nunca. `#parse_schedule_key_points` valida/ordena/corta em 6.
+    Dois caminhos pra popular, os dois SEMPRE em background (mesma regra de reentrância de
+    `Conversation#complete` — nunca IA síncrona dentro da tool call), disparados por
+    `GenerateProposalDocumentTool#ensure_schedule_background_work!` e
+    `InsertScheduleSectionTool#ensure_schedule_background_work!` a cada geração:
+    - **Cronograma novo**: `SuggestScheduleJob` → `#build_with_ai_suggested_schedule!` já pede os
+      marcos na MESMA chamada que sugere o cronograma inteiro (`schedule_suggestion_prompt` ganhou
+      a chave `marcos_infografico`).
+    - **Cronograma que já existe** (proposta criada antes desta funcionalidade, ou montado à mão
+      na Tela de Precificação — `build_with_ai_suggested_schedule!` só roda quando não há item
+      nenhum, então sem isto o infográfico ficava pra sempre no fallback de fase):
+      `ElectScheduleKeyPointsJob` → `Proposal#elect_schedule_key_points!` manda o cronograma já
+      montado pra IA e pede só os ≤6 pontos principais (`key_points_suggestion_prompt`), nunca
+      mexe nos `schedule_items`. Idempotente: só quando `schedule_key_points` está vazio.
+    - **Fallback determinístico imediato (`Proposal#default_schedule_key_points`)**: enquanto o
+      job assíncrono ainda não concluiu (ou em ambiente local sem worker rodando), o payload usa
+      uma seleção determinística de até 6 marcos cronológicos (atividades com `milestone: true`,
+      início, fim e fases principais), garantindo que o infográfico **nunca** saia com mais de 6
+      círculos mesmo na primeira geração.
+    Nos dois casos a mensagem de retorno da ferramenta avisa o consultor pra gerar de novo em instantes.
+  - **Fallback — `collapse_to_phases`**: sem `key_points` e sem itens de serviço (ou cronograma
+    de implantação), o `initialize` agrupa atividades por `phase_name` único (`group_by(&:phase_name)`,
+    evitando fragmentar fases intercaladas); a fase abrange do início da 1ª atividade ao fim da última.
+  - Comum aos dois: numeração 01..N, sem data nenhuma (só a duração em dias, `duration_lines`);
+    ponto de span 0 (ou fase toda de marcos) mostra "-". A contagem de dias vem da MESMA conta de
+    `ScheduleMspdiExporter#item_start`/`#item_finish` (duplicada de propósito — seção 11.1
+    "Decisão de design"). Editar os 6 marcos na Tela de Precificação ainda não existe — só a IA
+    popula; regenerar a sugestão (apagar os `schedule_items`) atualiza.
+- **Anel/ícone/selo em degradê quente→frio** (`GRADIENT_STOPS`) pela posição da fase no
+  cronograma — não uma cor fixa por marco. **Ícone por PALAVRA-CHAVE** no nome da fase
+  (`ICON_KEYWORDS`, mapa fechado — mobiliza, campo/campanha, desloca, consolida/análise,
+  elabora/relatório, revisão/emissão, envio, protocolo, reunião, aprovação); sem match, ícone
+  genérico.
+- **Quebra em várias imagens** (`MAX_IMAGE_HEIGHT_EMU`, `#call`/`#svgs` devolvem um Result/SVG
+  por imagem) continua como rede de segurança — o Word/LibreOffice cortam sem aviso uma imagem
+  mais alta que a página — mas com fase-por-círculo praticamente nunca dispara (só com ~18+
+  fases). Numeração contínua entre imagens quando dispara.
 - **`ProposalDocxFiller`**: `drawing_run_xml` deixou de ter `IMAGE_WIDTH_EMU`/`IMAGE_HEIGHT_EMU`
   fixos (proporção 4:3, só serve pro mapa) — passa a aceitar cx/cy por chamada, já que o
   infográfico varia de altura conforme o número de linhas. `insert_schedule_tables!` ganhou o
   parâmetro `zip` (só pra poder gravar a mídia rasterizada e registrar o relationship, reusando
   `write_image!`/`add_image_relationship!` — extraído de `fill_images!` pra servir os dois
   casos).
-- Verificado ao vivo (mesma metodologia de sempre: gerar proposta real via
-  `GenerateProposalDocumentTool`, converter com LibreOffice headless → PDF → captura de tela) —
-  confirmado com um cronograma pequeno (8 itens, 2 linhas) E um grande de verdade (34 itens, 6
-  linhas, proposta 21): as duas imagens saem completas, legíveis, com a numeração contínua batendo
-  (01-18 na primeira imagem, 19-34 na segunda), fluindo pra página seguinte sozinhas, e a tabela
-  `Quadro 9-1` continua saindo certa logo depois.
 - **CI** (`.github/workflows/ci.yml`, jobs `test`/`system-test`) ganhou `librsvg2-bin` no
   `apt-get install`, ao lado do `default-jre-headless` já lá.
+
+**Resumir o cronograma — cliente achou "gigante" (2026-09).** Um cronograma de serviço real
+(34-36 atividades, ~11 meses) saía com ~11 páginas: infográfico em 3 imagens paisagem + tabela
+com dezenas de colunas de SEMANA. O cliente liberou deixar mensal ("não é obrigatório ficar
+semanal"). Duas mudanças, sem flag nova (vale pros dois fluxos — geração normal e
+`insert_schedule_section` —, `ScheduleMspdiExporter` não muda, segue semanal por atividade):
+- **Infográfico → ≤6 marcos eleitos pela IA** (fallback: um círculo por FASE — ver acima).
+- **`ScheduleTableBuilder` → colunas de MÊS CIVIL pro cronograma semanal.** `initialize`: quando
+  `unit == :week`, `to_monthly` converte cada item pra intervalo de meses civis a partir de
+  `start_date` (`months_between`) e segue com `@unit = :month` — reaproveita o caminho `:month`
+  inteiro que já existia (`month_grouping`, consolidação `bucket_size`, rotação). A Tela de
+  Precificação e o `ScheduleItem` no banco continuam semanais; a conversão é só de exibição no
+  `.docx`. `NAME_COL_WIDTH` subiu de 1632 pra 2800 dxa (com poucas colunas de mês sobra largura,
+  e nome de atividade largo o bastante pra não quebrar em 3 linhas encurta a tabela).
+- Verificado ao vivo (36 atividades / 8 fases / ~11 meses → LibreOffice → PDF): o bloco caiu de
+  ~11 pra 4 páginas paisagem (1 infográfico + 3 tabela), colunas de mês cabendo na largura.
 
 **Rodada de revisão da Papyrus sobre a proposta QAIR (PTC26018, 2026-09) — correções pontuais:**
 - **Quadro SUMÁRIO DE REVISÕES saía cortado** pela borda direita da página: tinha `tblW`/`tblGrid`
@@ -817,6 +908,62 @@ cliente vê de cara, a tabela continua sendo a fonte de detalhe auditável.
   passo de revisão gramatical hoje — só o reforço de prompt), extração do destinatário ("Prezado
   Sr. X") a partir do e-mail do cliente anexado como complementar, e o achado "capa" / "dados
   bancários" (o consultor pediu pra deixar de fora desta rodada).
+
+**Quadro SUMÁRIO DE REVISÕES: linha duplicada/descrição em branco (2026-09, correção do
+consultor).** Duas falhas na tabela de revisões (página 2 do modelo):
+1. **Linha duplicada** — `Proposal#docx_revision_rows` montava as linhas PASSADAS a partir de
+   `generated_documents.map(&:blob)` sem filtrar contra a versão ATUAL (já incrementada antes da
+   chamada, ver comentário do método) — um blob perdido com `metadata[:version]` igual à versão
+   corrente (uma tentativa anterior que falhou depois de anexar, ou uma corrida entre gerações)
+   produzia duas linhas com o mesmo número de revisão na tabela. Corrigido: `past_rows` agora
+   filtra `blob.metadata["version"].to_i < version`.
+2. **Descrição em branco ou repetindo "Emissão Inicial"** — quando `descricao_revisao` não vem
+   (a IA não recebeu o parâmetro) numa revisão que NÃO é a primeira, a linha saía sem descrição
+   nenhuma, ou repetindo "Emissão Inicial" (rótulo que só faz sentido pra revisão 00). A partir da
+   2ª revisão (`v.to_i > 1`/`version > 1`), descrição em branco ou igual a "emissão inicial"
+   agora vira "Revisão solicitada pelo consultor" — tanto nas linhas passadas quanto na atual. A
+   1ª revisão (rev "00") fica de fora dessa troca de propósito: "Emissão Inicial" (em branco ou
+   não) é o rótulo implícito dela por convenção, igual `curr_desc` já trata `version <= 1` à
+   parte.
+   **Achado ao vivo, corrigido nesta sessão:** a refatoração acima passou a chamar um método novo,
+   `fill_revisions_table!(table_node, rows)`, no lugar de `fill_table!` pro índice 0 — mas o
+   método nunca foi definido em `ProposalDocxFiller`. Toda chamada de `#fill`/`#fill_split` com
+   uma tabela de revisões (ou seja, TODA geração normal de proposta) levantava `NoMethodError`
+   dentro do `rescue StandardError` de `GenerateProposalDocumentTool#execute` — o erro nunca
+   chegava ao consultor como mensagem de erro específica, só "não funcionou" (nenhum `.docx`
+   anexado, sem pista do motivo). Corrigido definindo `fill_revisions_table!` como um wrapper fino
+   de `fill_table!(tbl, rows_data, auto_number: false)` — a tabela de revisões preenche do mesmo
+   jeito de sempre, só nunca com numeração automática (a coluna "N°" já vem pronta de
+   `docx_revision_rows`, calculada a partir de `version`, não de posição de linha). Verificado ao
+   vivo gerando a proposta 18 de novo (conversa 32, o caso que reportou "não funcionou"): saiu
+   `.docx` completo, com a tabela de revisões e o infográfico de ≤6 marcos os dois corretos.
+
+**Duas correções de seguida no mesmo quadro (2026-09, pedido do consultor: "tem que sair com
+várias linhas vazias também... deve ficar com 10 linhas por padrão"):**
+1. **`fill_revisions_table!` ganhou `trim: false`** — o `fill_table!` genérico sempre APAGA a
+   linha de molde que sobra sem dado (comportamento certo pras outras 3 tabelas: equipe/produtos/
+   desembolso não têm "linha vazia de reserva"). Mas o modelo da Papyrus já traz o Sumário de
+   Revisões pré-numerado "00" a "10" (11 linhas, Descrição/Data em branco) — era esse molde que a
+   1ª correção acima passou a apagar sempre que a proposta tinha menos de 11 revisões, sobrando só
+   as linhas preenchidas. `trim: false` é um parâmetro novo em `fill_table!` (default `true`,
+   inofensivo pras outras tabelas) que faz a linha de molde sobrando ficar como está, em vez de
+   remover — cresce normalmente se um dia passar de 10 revisões (`version > 11`), mesma lógica de
+   clonagem de sempre.
+2. **Achado ao vivo nesta correção, também corrigido: o CABEÇALHO da tabela ("Revisão | Descrição
+   da Revisão | Data") vinha sendo apagado silenciosamente em TODA proposta gerada, desde que essa
+   funcionalidade existe** — não só nesta sessão. Causa: `fill_table!` assume 1 linha de cabeçalho
+   antes da 1ª linha de dado (`all_rows[1]` = molde) — vale pras outras 3 tabelas (rótulos das
+   colunas na linha 0, dado na linha 1), mas o Sumário de Revisões tem DUAS linhas antes do dado:
+   o título mesclado "SUMÁRIO DE REVISÕES" (linha 0) E só depois os rótulos "Revisão/Descrição da
+   Revisão/Data" (linha 1) — a 1ª linha de dado real ("00") só começa na linha 2. `fill_table!`
+   pegava a linha de RÓTULOS como se fosse o molde de dado, e a 1ª chamada de preenchimento
+   sobrescrevia "Revisão"→"00", "Descrição da Revisão"→"Emissão Inicial" etc. — o cabeçalho da
+   coluna nunca aparecia no `.docx` final, só o título "SUMÁRIO DE REVISÕES" sozinho em cima dos
+   dados. `fill_table!` ganhou `header_rows:` (default `1`, igual sempre foi pras outras tabelas);
+   `fill_revisions_table!` passa `header_rows: 2`.
+   Verificado ao vivo (LibreOffice headless → PDF → captura, proposta 18 de novo): o cabeçalho
+   "Revisão | Descrição da Revisão | Data" aparece corretamente acima dos dados, e a tabela sai
+   com 11 linhas mesmo com só 8 revisões reais — as 3 últimas ("08", "09", "10") em branco.
 
 ---
 
