@@ -95,6 +95,28 @@ class ApplicationHelperTest < ActionView::TestCase
       assert_not_includes html, "[F#{@finding.id}]"
     end
 
+    # Achado ao vivo (conversa 37, 2026-09): a IA quase sempre agrupa mais de um código no MESMO
+    # colchete ("[F12, F34]") quando a frase se apoia em vários achados — vira UM chip por
+    # código, não um chip só pro grupo inteiro.
+    test "colchete com mais de um código vira um chip por código" do
+      outro = @conversation.project_findings.create!(
+        field: "municipios", value: "Icó/CE", nature: "fato", source_kind: "et", excerpt: "..."
+      )
+
+      html = render_markdown("Área em Icó [F#{@finding.id}, F#{outro.id}].", findings: [ @finding, outro ])
+
+      assert_includes html, "popovertarget=\"citation_project_finding_#{@finding.id}\""
+      assert_includes html, "popovertarget=\"citation_project_finding_#{outro.id}\""
+      assert_not_includes html, "[F#{@finding.id}"
+    end
+
+    test "colchete agrupado com um código inválido e outro válido remove só o inválido" do
+      html = render_markdown("Área [F#{@finding.id}, F999999].", findings: [ @finding ])
+
+      assert_includes html, "popovertarget=\"citation_project_finding_#{@finding.id}\""
+      assert_not_includes html, "F999999"
+    end
+
     # Marca inventada renderizada como se fosse fonte é pior que nenhuma fonte: some do texto.
     test "código sem achado correspondente é removido do texto" do
       html = render_markdown("O órgão é o INEMA [F999999].", findings: [ @finding ])

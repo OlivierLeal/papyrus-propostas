@@ -49,4 +49,22 @@ class MessageTest < ActiveSupport::TestCase
 
     assert_nil message.user
   end
+
+  # Achado ao vivo (conversa 37, 2026-09): a IA quase sempre agrupa mais de um código no MESMO
+  # colchete ("[F12, F34]") — cited_findings tem que enxergar cada um, não só o formato de
+  # colchete com um código sozinho.
+  test "cited_findings resolves every code inside a grouped citation bracket" do
+    a = @conversation.project_findings.create!(field: "area_ha", value: "100", nature: "fato", source_kind: "et")
+    b = @conversation.project_findings.create!(field: "municipios", value: "Icó/CE", nature: "fato", source_kind: "et")
+    message = @conversation.messages.create!(role: "assistant", content: "Área em Icó [F#{a.id}, F#{b.id}].")
+
+    assert_equal [ a, b ].sort_by(&:id), message.cited_findings.sort_by(&:id)
+  end
+
+  test "cited_findings ignores a code that doesn't match any active finding, even inside a group" do
+    a = @conversation.project_findings.create!(field: "area_ha", value: "100", nature: "fato", source_kind: "et")
+    message = @conversation.messages.create!(role: "assistant", content: "Área [F#{a.id}, F999999].")
+
+    assert_equal [ a ], message.cited_findings.to_a
+  end
 end

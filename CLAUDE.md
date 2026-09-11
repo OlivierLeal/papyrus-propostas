@@ -1650,6 +1650,22 @@ arrays, ex.: `topicos_escopo`/`produtos`) por `strip_citation_codes` antes de us
 segurança que roda mesmo se a IA ignorar a instrução, reaproveitando `Message::CITATION_PATTERN`
 só pra apagar, nunca pra virar link.
 
+**A rede de segurança acima não pegava citação AGRUPADA (2026-09, achado ao vivo, conversa 37:
+"[F1237]" sobrou no texto mesmo com o `strip_citation_codes` já existente).** Na prática a IA
+quase sempre agrupa mais de um achado no MESMO colchete quando uma frase se apoia em vários —
+"[F1154, F1155]" é o formato mais comum, não uma exceção. `Message::CITATION_PATTERN` era
+`/\[F(\d+)\]/`: só casa um código SOZINHO dentro do colchete — a vírgula em "[F1154, F1155]"
+quebra o match antes do "]", então o regex simplesmente não reconhecia o colchete agrupado
+nenhum pouco. Isso vazava nos DOIS lados que reusam essa constante: `strip_citation_codes`
+(o grupo inteiro sobrevivia no `.docx`) e o chip do chat (`ApplicationHelper#render_markdown` —
+um colchete agrupado aparecia cru na conversa, sem virar chip nenhum, achado ao revisar o bug).
+Corrigido com duas constantes em `Message`: `CITATION_PATTERN` passou a casar o colchete INTEIRO
+(`/\[F\d+(?:,\s*F\d+)*\]/`, um código ou vários separados por vírgula) e `CITATION_ID_PATTERN`
+(`/F(\d+)/`) extrai cada código de dentro de um colchete já casado — `Message#cited_findings`
+resolve todos os ids do grupo, `render_markdown` vira UM chip por código (não um chip só pro
+grupo), e `strip_citation_codes` continua funcionando sem nenhuma mudança própria (só reusa
+`CITATION_PATTERN` por referência, herda a correção de graça).
+
 ### `project_conflicts` — divergência entre documentos
 
 `ProjectFindings::ConflictDetector` roda no `GenerateSummaryJob` (único ponto depois de ET, TR, KMZ e

@@ -629,6 +629,28 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       "Nível 3 com Anuência Final do IPHAN."
   end
 
+  # Achado ao vivo em produção (conversa 37, 2026-09): a IA quase sempre agrupa mais de um código
+  # no MESMO colchete ("[F1154, F1155]") — formato mais comum na prática, não um caso raro. O
+  # teste acima só cobria colchete com um código sozinho; o regex antigo não casava NENHUM POUCO
+  # o formato agrupado (a vírgula quebra o match), então esses vazavam pro .docx do cliente.
+  test "strips grouped citation codes like [F1154, F1155], not just single-code brackets" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(
+      objetivo_dos_servicos: "Área de 464,79 hectares [F1154, F1155], com licença emitida pela SEMACE " \
+        "[F1150, F1152, F1237]."
+    ))
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_not_includes xml, "F1154"
+    assert_not_includes xml, "F1155"
+    assert_not_includes xml, "F1150"
+    assert_not_includes xml, "F1152"
+    assert_not_includes xml, "F1237"
+    assert_includes document_texts(@proposal.generated_documents.first).join(" "),
+      "Área de 464,79 hectares , com licença emitida pela SEMACE ."
+  end
+
   test "strips citation codes from array params too (topicos_escopo, produtos, itens_nao_previstos)" do
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 

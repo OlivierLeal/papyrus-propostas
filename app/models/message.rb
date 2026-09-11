@@ -34,10 +34,21 @@ class Message < ApplicationRecord
   # desta conversa. Código que não corresponde a nenhum achado ativo daqui não vira citação: uma
   # marca inventada renderizada como se fosse fonte é pior que nenhuma fonte (ver
   # ApplicationHelper#render_markdown).
-  CITATION_PATTERN = /\[F(\d+)\]/
+  #
+  # Achado ao vivo (conversa 37, 2026-09): a IA quase sempre agrupa mais de um achado no MESMO
+  # colchete quando uma frase se apoia em vários ("[F1154, F1155]") — na prática virou o formato
+  # mais comum, não uma exceção. O regex antigo (`/\[F(\d+)\]/`) só casava um código sozinho por
+  # colchete; um grupo como "[F1154, F1155]" não batia com ele NENHUM POUCO (a vírgula quebra o
+  # match antes do "]"), então passava batido tanto por aqui quanto pela rede de segurança que
+  # apaga citação residual do .docx (GenerateProposalDocumentTool#strip_citation_codes) — os
+  # "[F1237]" que sobraram no texto da proposta vieram exatamente desse formato agrupado.
+  # CITATION_PATTERN casa o colchete INTEIRO (um código ou vários separados por vírgula);
+  # CITATION_ID_PATTERN extrai cada código de dentro de um colchete já casado.
+  CITATION_PATTERN = /\[F\d+(?:,\s*F\d+)*\]/
+  CITATION_ID_PATTERN = /F(\d+)/
 
   def cited_findings
-    ids = content.to_s.scan(CITATION_PATTERN).flatten.map(&:to_i).uniq
+    ids = content.to_s.scan(CITATION_PATTERN).flat_map { |group| group.scan(CITATION_ID_PATTERN) }.flatten.map(&:to_i).uniq
     return ProjectFinding.none if ids.empty?
 
     conversation.project_findings.active.where(id: ids).includes(:source_blob)

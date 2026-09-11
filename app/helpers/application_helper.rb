@@ -24,7 +24,11 @@ module ApplicationHelper
       tags: MARKDOWN_ALLOWED_TAGS, attributes: MARKDOWN_ALLOWED_ATTRIBUTES)
 
     by_id = Array(findings).index_by(&:id)
-    html.gsub(Message::CITATION_PATTERN) { citation_chip(by_id[Regexp.last_match(1).to_i]) }.html_safe
+    # Um colchete pode agrupar mais de um código ("[F1154, F1155]", ver Message::CITATION_PATTERN)
+    # — cada um vira o próprio chip, concatenados no lugar do colchete inteiro.
+    html.gsub(Message::CITATION_PATTERN) do |group|
+      group.scan(Message::CITATION_ID_PATTERN).flatten.map { |id| citation_chip(by_id[id.to_i]) }.join
+    end.html_safe
   end
 
   # Os popovers dos achados citados numa mensagem. Ficam fora do elemento animado pelo typewriter
