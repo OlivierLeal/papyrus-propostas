@@ -17,6 +17,7 @@ class ProcessLegalNormsJob < ApplicationJob
     # precisa registrar explicitamente. Daí em diante, Conversation#ask_internally já registra
     # sozinho em qualquer chamada seguinte, sempre que detectar histórico de uso de tool.
     conversation.with_tool(SearchLegalNormsTool.new)
+    conversation.with_tool(SearchLegalNormsArchiveTool.new) if LegalNormChunk.embedded.exists?
     conversation.ask_internally(prompt(conversation, municipios), hide_response: true)
     record_findings!(conversation)
 
@@ -57,9 +58,11 @@ class ProcessLegalNormsJob < ApplicationJob
         - Se for um ÚNICO município, considere qualquer âmbito que se aplique de verdade àquele
           local — municipal, estadual ou federal — e escolha a norma que realmente rege o caso.
 
-        Use a ferramenta search_legal_norms quantas vezes precisar: por palavra-chave pra
-        descobrir normas candidatas, e por codigo_norma pra ler o texto completo antes de afirmar
-        o que uma norma exige — não conclua só pelo resumo da busca.
+        Se a ferramenta search_legal_norms_archive estiver disponível, use-a primeiro (é rápida,
+        não depende de rede — busca só no que já foi lido e guardado antes, de qualquer proposta
+        anterior). Use search_legal_norms quantas vezes precisar depois: por palavra-chave pra
+        descobrir normas candidatas novas no CAL, e por codigo_norma pra ler o texto completo
+        antes de afirmar o que uma norma exige — não conclua só pelo resumo da busca.
 
         Devolva o que encontrou como uma LISTA DE ACHADOS, no mesmo formato já usado nesta
         conversa. Campos disponíveis (use exatamente estas chaves; uma exigência legal encontrada

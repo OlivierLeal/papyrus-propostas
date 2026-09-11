@@ -47,9 +47,13 @@ class RespondToGeneralChatMessageJobTest < ActiveSupport::TestCase
       historical_proposal: historical_proposal, position: 1,
       content: "trecho", embedding: Array.new(1024, 0.01), embedded_at: Time.current
     )
+    legal_norm = LegalNorm.create!(codigo: "NL9924", referencia: "NL9924 — teste (CAL/Ius Natura)")
+    legal_norm.chunks.create!(position: 0, content: "trecho de norma", embedded_at: Time.current)
+
     with_tool_calls = with_cal_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } }
     assert_includes with_tool_calls, SearchHistoricalArchiveTool
     assert_includes with_tool_calls, SearchLegalNormsTool
+    assert_includes with_tool_calls, SearchLegalNormsArchiveTool
   end
 
   # Achado ao vivo nesta sessão: RememberForFutureProposalsTool grava uma mensagem assistant

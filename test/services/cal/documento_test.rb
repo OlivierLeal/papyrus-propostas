@@ -62,5 +62,48 @@ module Cal
       Cal::Documento.send(:remove_const, :MAX_TEXT_CHARS)
       Cal::Documento.const_set(:MAX_TEXT_CHARS, original)
     end
+
+    test "fetch returns the PDF bytes, content_type and extracted text together" do
+      bytes = Rails.root.join("test/fixtures/files/norma_sample.pdf").binread
+      client = FakeClient.new(bytes: bytes)
+
+      result = Cal::Documento.new(client: client).fetch("guid-123")
+
+      assert_equal bytes, result.pdf_bytes
+      assert_equal "application/pdf", result.content_type
+      assert result.text.present?
+      assert_equal false, result.ocr_used
+    end
+
+    test "fetch returns nil when the client can't download anything" do
+      assert_nil Cal::Documento.new(client: FakeClient.new(bytes: nil)).fetch("guid-123")
+    end
+
+    # 2026-09: ocr foi ligado (CLAUDE.md seção 11.2) porque a maioria do que o CAL guarda saía
+    # "não consegui ler" — quase toda norma tentada por texto completo na conversa 38 era PDF
+    # escaneado. scanned_sample.pdf é o mesmo fixture usado por Rag::OcrTest (imagem pura, sem
+    # camada de texto — "Print To PDF").
+    test "fetch reads a scanned PDF via OCR, where it used to come back nil" do
+      skip "tesseract/pdftoppm não instalados" unless Rag::Ocr.available?
+
+      bytes = Rails.root.join("test/fixtures/files/scanned_sample.pdf").binread
+      client = FakeClient.new(bytes: bytes)
+
+      result = Cal::Documento.new(client: client).fetch("guid-123")
+
+      assert result.text.present?
+      assert_match(/PAPYRUS/i, result.text)
+      assert_equal true, result.ocr_used
+    end
+
+    test "texto still returns a plain string via fetch (backward compatible contract)" do
+      bytes = Rails.root.join("test/fixtures/files/norma_sample.pdf").binread
+      client = FakeClient.new(bytes: bytes)
+
+      texto = Cal::Documento.new(client: client).texto("guid-123")
+
+      assert_kind_of String, texto
+      assert texto.present?
+    end
   end
 end

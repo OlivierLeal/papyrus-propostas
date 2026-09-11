@@ -31,6 +31,7 @@ class SearchLegalNormsTool < RubyLLM::Tool
   param :codigo_norma, desc: "Código de uma norma já encontrada numa busca anterior desta conversa (ex.: \"NL7484\") — quando informado, ignora palavra_chave/ano e devolve o TEXTO COMPLETO do documento em vez de uma lista de resultados.", required: false
 
   LIMIT = 8
+  FULL_TEXT_INSTRUCTION = "Cite a 'referencia' no corpo da resposta ao consultor ao usar este texto."
 
   # Lazy de propósito: Cal::Client.new (o default de Normas/Documento) levanta
   # AuthenticationError já na CONSTRUÇÃO se faltar credencial — instanciar aqui e não só na hora
@@ -73,27 +74,52 @@ class SearchLegalNormsTool < RubyLLM::Tool
     @documento_override || (@documento_override = Cal::Documento.new)
   end
 
+  # Cache-first (2026-09, CLAUDE.md seção 11.2): a mesma norma é citada em propostas diferentes
+  # com frequência (legislação de licenciamento na Bahia se repete bastante) — sem isso, cada
+  # conversa nova rebaixava e reprocessava do zero uma norma que outra proposta qualquer já leu.
+  # `LegalNorm.find_by(codigo:)` responde sem NENHUMA chamada ao CAL quando já existe; só busca +
+  # baixa de verdade na primeira vez que aquele código é pedido em qualquer conversa.
   def full_text(codigo)
-    norma = normas.find_by_codigo(codigo.to_s.strip)
+    codigo = codigo.to_s.strip
+    cached = LegalNorm.find_by(codigo: codigo)
+    return cached_response(cached) if cached
+
+    norma = normas.find_by_codigo(codigo)
     return { error: "Não encontrei a norma #{codigo} no CAL." }.to_json unless norma
 
-    texto = documento.texto(norma.anexo_id)
+    result = documento.fetch(norma.anexo_id)
     return {
       referencia: norma.referencia,
       aviso: "Encontrei a norma mas não consegui ler o texto do documento (pode ser um PDF escaneado, ou sem anexo)."
-    }.to_json unless texto
+    }.to_json if result.nil? || result.text.blank?
 
-    {
-      referencia: norma.referencia,
-      texto: texto,
-      instrucao: "Cite a 'referencia' no corpo da resposta ao consultor ao usar este texto."
-    }.to_json
+    legal_norm = persist!(norma, result)
+    { referencia: legal_norm.referencia, texto: legal_norm.full_text, instrucao: FULL_TEXT_INSTRUCTION }.to_json
   rescue Cal::Client::AuthenticationError => e
     Rails.logger.error("SearchLegalNormsTool: falha de autenticação no CAL: #{e.message}")
     { error: "Não consegui entrar no CAL agora (credenciais ou sessão)." }.to_json
   rescue StandardError => e
     Rails.logger.error("SearchLegalNormsTool falhou ao buscar o texto completo: #{e.class} #{e.message}")
     { error: "Não consegui ler o documento da norma agora." }.to_json
+  end
+
+  def cached_response(legal_norm)
+    { referencia: legal_norm.referencia, texto: legal_norm.full_text, instrucao: FULL_TEXT_INSTRUCTION }.to_json
+  end
+
+  # Não persiste nada quando result.text vier em branco (PDF sem anexo, ou ilegível mesmo com
+  # OCR) — o cache de OCR por SHA256 (Rag::Ocr) já evita repetir o custo caro nessa norma; só
+  # falta se um dia o custo de rebuscar no CAL também incomodar (ver plano, "fora de escopo").
+  def persist!(norma, result)
+    legal_norm = LegalNorm.new(
+      codigo: norma.codigo, anexo_id: norma.anexo_id, tipo_e_numero: norma.tipo_e_numero,
+      orgao: norma.orgao, ambito: norma.ambito, tema: norma.tema, escopo: norma.escopo,
+      assunto: norma.assunto, data_promulgacao: norma.data_promulgacao, status: norma.status,
+      referencia: norma.referencia, full_text: result.text, ocr_used: result.ocr_used
+    )
+    legal_norm.pdf.attach(io: StringIO.new(result.pdf_bytes), filename: "#{norma.codigo}.pdf", content_type: result.content_type)
+
+    Rag::LegalNormIndexer.new(legal_norm, result.text).call!
   end
 
   def present(norma)

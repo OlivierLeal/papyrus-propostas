@@ -64,6 +64,19 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     assert_includes with_tool_calls, SearchLegalNormsTool
   end
 
+  # 2026-09, CLAUDE.md seção 11.2 — mesmo gate condicional de SearchHistoricalArchiveTool
+  # (HistoricalProposalChunk.embedded.exists?), pra legislação já lida e guardada.
+  test "registers the legal norms archive tool only when there is legislation already indexed locally" do
+    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    assert_not_includes with_tool_calls, SearchLegalNormsArchiveTool
+
+    legal_norm = LegalNorm.create!(codigo: "NL9924", referencia: "NL9924 — teste (CAL/Ius Natura)")
+    legal_norm.chunks.create!(position: 0, content: "Trecho de teste", embedded_at: Time.current)
+
+    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    assert_includes with_tool_calls, SearchLegalNormsArchiveTool
+  end
+
   # Achado ao vivo nesta sessão: RememberForFutureProposalsTool grava uma mensagem assistant
   # PRÓPRIA pro card de aprovação, separada da resposta em texto da IA — sem broadcastar as duas,
   # o card só aparecia depois de um F5 na página.

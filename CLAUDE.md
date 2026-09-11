@@ -1509,17 +1509,61 @@ aninhados (`achados` é um array de hashes) e um regex não-guloso pararia no pr
 
 **Ainda não implementado:** paginação automática (`cal.normas.search_all`, hoje só a 1ª página).
 
-**Ainda não implementado (2026-09, ideia do consultor): persistir o anexo baixado de cada norma.**
-`Cal::Documento#texto` já baixa o PDF do anexo (`Cal::Client#download`) e extrai o texto
-(`Rag::TextExtractor`, `ocr: false`) pra responder a `SearchLegalNormsTool`, mas descarta tudo
-depois — nem o PDF nem o texto extraído ficam salvos, então a mesma norma é rebaixada e
-reprocessada do zero a cada consulta, em qualquer proposta. Ideia: guardar o PDF e o texto numa
-tabela própria (ex.: `cal_documentos`, chave o `codigo`/`anexo_id` da norma), mesmo princípio de
-cache-por-conteúdo já usado no OCR do RAG do acervo (seção 11.1). Além de parar de rebaixar/
-reprocessar a mesma norma toda hora, abre a porta pra rodar OCR (hoje `ocr: false`, nunca tenta)
-UMA vez nos PDFs escaneados e guardar o resultado — sem pagar esse custo de novo a cada consulta
-(achado ao vivo na conversa 38, ver revisão de proposta acima: quase toda norma que a IA tentou
-ler de verdade veio "não consegui ler o texto do documento", provavelmente PDF escaneado).
+**Legislação do CAL persistida e vetorizada (2026-09, pedido do consultor a partir da conversa
+38 — "guardar a legislação pra não precisar processar de novo, e usar o vector pra estudar e
+aplicar").** Antes, `Cal::Documento#texto` baixava o PDF do anexo e extraía o texto
+(`Rag::TextExtractor`, `ocr: false`) só pra responder a `SearchLegalNormsTool` na hora — nem o
+PDF nem o texto ficavam salvos, então a mesma norma era rebaixada e reprocessada do zero a cada
+consulta, em qualquer proposta, e PDF escaneado nunca era lido (achado ao vivo na conversa 38:
+quase toda norma que a IA tentou ler de verdade veio "não consegui ler o texto do documento").
+Agora reaproveita a MESMA infraestrutura de RAG já usada pro acervo histórico de propostas
+(`HistoricalProposal`/`Rag::Embedder`/`Rag::SectionChunker`) — legislação vira mais um corpus
+vetorizado, não um mecanismo novo.
+
+- **`LegalNorm`/`LegalNormChunk`** (novos) — `LegalNorm` guarda os metadados da norma (mesmos
+  campos de `Cal::Norma`), o PDF baixado (`has_one_attached :pdf`) e o texto extraído inteiro
+  (`full_text`); `codigo` é a MESMA chave que `SearchLegalNormsTool` já expõe à IA como
+  `codigo_norma`, não um id novo. `LegalNormChunk` é o trecho recuperável com vetor
+  (`has_neighbors :embedding`, mesmo mecanismo de `HistoricalProposalChunk`) — sem os flags de
+  sensibilidade/preço/boilerplate de lá, porque legislação é pública, sem dado de cliente pra
+  proteger. **Sem curadoria antes de virar consultável** (diferente de `KnowledgeNote`, que nasce
+  `pending`): o texto aqui é legislação oficial baixada direto da fonte, não a IA "achando" algo
+  numa conversa — mesmo raciocínio que já vale pra `HistoricalProposal`/`Rag::ProposalIndexer`.
+- **`Rag::LegalNormIndexer`** (novo) — mesma receita de `Rag::ProposalIndexer` (salva, chunka via
+  `Rag::SectionChunker`, embeda via `Rag::Embedder`), mas paralela: `ProposalIndexer` é hardcoded
+  pra `HistoricalProposalChunk`/`historical_proposal_id` e roda no pipeline sensível de aprovação
+  do acervo — generalizar essa classe pra servir os dois models trocaria simplicidade por
+  indireção nos dois lados. O que É genérico (`SectionChunker`, `Embedder`) continua
+  compartilhado; só a cola de persistência (~20 linhas) é duplicada.
+- **`Cal::Documento` ganhou `#fetch(anexo_id)`** — baixa + extrai UMA vez, devolve um `Result`
+  com `pdf_bytes`/`content_type`/`text`/`ocr_used`. `#texto(anexo_id)` virou `fetch(anexo_id)&.text`
+  — mesmo contrato de sempre (String ou nil), nenhum teste existente mudou. **OCR ligado**
+  (`ocr: true`, era `false`) — `Rag::Ocr` já cacheia por SHA256 do arquivo em disco
+  (`tmp/rag_ocr_cache`), então ligar não tem custo extra pra quem já paga o OCR de outro lugar.
+- **`SearchLegalNormsTool#full_text` — cache-first, transparente pra IA.** O contrato da
+  ferramenta pra IA não muda (mesmo JSON `{referencia:, texto:, instrucao:}` ou aviso de "não
+  consegui ler"). Por dentro: `LegalNorm.find_by(codigo:)` primeiro — se achou, responde sem
+  NENHUMA chamada ao CAL (nem busca, nem download); só busca+baixa de verdade na 1ª vez que
+  aquele código é pedido em QUALQUER conversa (legislação de licenciamento na Bahia se repete
+  bastante entre propostas diferentes). Quando o texto vem vazio (sem anexo, ou ilegível mesmo com
+  OCR), não persiste nada — o cache de OCR por SHA256 já evita repetir o custo caro de qualquer
+  forma. Verificado ao vivo: 1ª chamada pra uma norma nova levou 6,25s (busca + download + OCR +
+  embedding); 2ª chamada pro MESMO código, 0,0s (zero tráfego de rede).
+- **`SearchLegalNormsArchiveTool`** (nova ferramenta) — espelha `SearchHistoricalArchiveTool`:
+  busca semântica só no que JÁ foi guardado (`LegalNormChunk.embedded`), sem tocar o CAL, mais
+  rápido, sem rede. Registrada nos mesmos 3 pontos de `SearchLegalNormsTool`
+  (`RespondToMessageJob`, `RespondToGeneralChatMessageJob`, `ProcessLegalNormsJob`), com o mesmo
+  gate condicional de `SearchHistoricalArchiveTool` (`LegalNormChunk.embedded.exists?` — só
+  oferece a ferramenta quando há algo pra achar). `ProcessLegalNormsJob` (pesquisa proativa entre
+  ET e TR) passou a instruir a IA a checar esta ferramenta primeiro, antes de ir ao CAL com
+  `search_legal_norms`. Não substitui a busca no CAL — cobre só um subconjunto (o que já foi lido
+  antes, de qualquer proposta), então achar nada aqui não significa que a norma não existe.
+  Verificado ao vivo com 5 normas reais já guardadas: busca por "documentos exigidos para
+  supressão de vegetação nativa" devolveu as normas certas (`NL7484`/`NL17238`/`NL12588`, mesmas
+  citadas na conversa 38), com similaridade e referência corretas.
+- **Fora de escopo, deliberadamente:** backfill dos códigos já buscados em conversas antigas (só
+  passa a cachear daqui pra frente); persistir uma linha "tentei e não consegui ler" pra normas
+  sem texto extraível (o cache de OCR por SHA256 já cobre a parte cara).
 
 ---
 

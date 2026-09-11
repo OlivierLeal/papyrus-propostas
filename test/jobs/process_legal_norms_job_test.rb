@@ -52,6 +52,36 @@ class ProcessLegalNormsJobTest < ActiveSupport::TestCase
     assert_includes registered_tools, SearchLegalNormsTool
   end
 
+  # 2026-09, CLAUDE.md seção 11.2 — mesmo gate condicional das outras ferramentas de acervo, só
+  # que pra legislação já lida e guardada localmente (LegalNormChunk.embedded).
+  test "registers SearchLegalNormsArchiveTool only when there is legislation already indexed locally" do
+    achado!
+    registered_tools = []
+    original_method = Conversation.instance_method(:with_tool)
+    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+
+    begin
+      stub_ai_complete(cal_reply) { ProcessLegalNormsJob.perform_now(@conversation.id) }
+    ensure
+      Conversation.define_method(:with_tool, original_method)
+    end
+
+    assert_not_includes registered_tools, SearchLegalNormsArchiveTool
+
+    legal_norm = LegalNorm.create!(codigo: "NL9924", referencia: "NL9924 — teste (CAL/Ius Natura)")
+    legal_norm.chunks.create!(position: 0, content: "trecho de norma", embedded_at: Time.current)
+    registered_tools = []
+    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+
+    begin
+      stub_ai_complete(cal_reply) { ProcessLegalNormsJob.perform_now(@conversation.id) }
+    ensure
+      Conversation.define_method(:with_tool, original_method)
+    end
+
+    assert_includes registered_tools, SearchLegalNormsArchiveTool
+  end
+
   test "triggers ProcessTrJob after finishing successfully, when tr is pending" do
     achado!
 

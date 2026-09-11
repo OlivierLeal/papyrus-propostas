@@ -30,9 +30,12 @@ class SearchLegalNormsToolTest < ActiveSupport::TestCase
       @calls = []
     end
 
-    def texto(anexo_id)
+    def fetch(anexo_id)
       @calls << anexo_id
-      @texts[anexo_id]
+      text = @texts[anexo_id]
+      return nil if text.nil?
+
+      Cal::Documento::Result.new(pdf_bytes: "bytes-fake-#{anexo_id}", content_type: "application/pdf", text: text, ocr_used: false)
     end
   end
 
@@ -123,7 +126,7 @@ class SearchLegalNormsToolTest < ActiveSupport::TestCase
     documento = FakeDocumento.new(texts: { "guid-1" => "texto completo da portaria..." })
     tool = SearchLegalNormsTool.new(normas: normas, documento: documento)
 
-    result = JSON.parse(tool.execute(palavra_chave: "isso deve ser ignorado", codigo_norma: "NL7484"))
+    result = stub_embedder { JSON.parse(tool.execute(palavra_chave: "isso deve ser ignorado", codigo_norma: "NL7484")) }
 
     assert_equal "texto completo da portaria...", result["texto"]
     assert_includes result["referencia"], "NL7484"
@@ -160,5 +163,52 @@ class SearchLegalNormsToolTest < ActiveSupport::TestCase
     result = JSON.parse(tool.execute(codigo_norma: "NL1"))
 
     assert result["error"].present?
+  end
+
+  # Cache-first (2026-09, CLAUDE.md seção 11.2) — ver Rag::LegalNormIndexerTest/DocumentoTest pro
+  # detalhe da persistência em si; aqui só o comportamento da ferramenta.
+  test "codigo_norma persists a LegalNorm (with the PDF and embedded chunks) on the first fetch" do
+    achada = norma(codigo: "NL7484", anexo_id: "guid-1")
+    normas = FakeNormas.new(by_codigo: { "NL7484" => achada })
+    documento = FakeDocumento.new(texts: { "guid-1" => "texto completo da portaria... #{'artigo de teste. ' * 20}" })
+    tool = SearchLegalNormsTool.new(normas: normas, documento: documento)
+
+    assert_difference "LegalNorm.count", 1 do
+      stub_embedder { tool.execute(codigo_norma: "NL7484") }
+    end
+
+    legal_norm = LegalNorm.find_by(codigo: "NL7484")
+    assert legal_norm.pdf.attached?
+    assert legal_norm.chunks.any?
+    assert legal_norm.chunks.all? { |chunk| chunk.embedding.present? }
+  end
+
+  test "codigo_norma does not persist anything when the document text can't be read" do
+    achada = norma(codigo: "NL7484", anexo_id: "guid-1")
+    normas = FakeNormas.new(by_codigo: { "NL7484" => achada })
+    documento = FakeDocumento.new(texts: {})
+    tool = SearchLegalNormsTool.new(normas: normas, documento: documento)
+
+    assert_no_difference "LegalNorm.count" do
+      tool.execute(codigo_norma: "NL7484")
+    end
+  end
+
+  # Segunda chamada com o MESMO código: nunca mais bate no CAL — nem busca (#search/#find_by_codigo),
+  # nem download (#fetch) — só lê o que já está guardado.
+  test "codigo_norma answers from the local cache on a second call, without touching normas or documento at all" do
+    achada = norma(codigo: "NL7484", anexo_id: "guid-1")
+    normas = FakeNormas.new(by_codigo: { "NL7484" => achada })
+    documento = FakeDocumento.new(texts: { "guid-1" => "texto completo da portaria... #{'artigo de teste. ' * 20}" })
+    tool = SearchLegalNormsTool.new(normas: normas, documento: documento)
+    stub_embedder { tool.execute(codigo_norma: "NL7484") }
+
+    # Ferramenta NOVA, sem nenhum normas/documento passado — se ela precisasse do CAL de novo,
+    # quebraria (Cal::Normas.new/Cal::Documento.new tentariam falar com o CAL de verdade).
+    cached_tool = SearchLegalNormsTool.new
+    result = JSON.parse(cached_tool.execute(codigo_norma: "NL7484"))
+
+    assert_includes result["texto"], "texto completo da portaria"
+    assert_includes result["referencia"], "NL7484"
   end
 end

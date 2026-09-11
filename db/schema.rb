@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_11_092245) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_11_150001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -216,6 +216,41 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_092245) do
     t.index ["embedding"], name: "index_knowledge_notes_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
     t.index ["general_chat_id"], name: "index_knowledge_notes_on_general_chat_id"
     t.index ["status", "client_name"], name: "index_knowledge_notes_on_status_and_client_name"
+  end
+
+  create_table "legal_norm_chunks", force: :cascade do |t|
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.datetime "embedded_at"
+    t.vector "embedding", limit: 1024
+    t.string "embedding_model"
+    t.bigint "legal_norm_id", null: false
+    t.integer "position", null: false
+    t.string "section_number"
+    t.string "section_title"
+    t.integer "token_count", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["embedding"], name: "index_legal_norm_chunks_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
+    t.index ["legal_norm_id", "position"], name: "index_legal_norm_chunks_on_norm_and_position", unique: true
+  end
+
+  create_table "legal_norms", force: :cascade do |t|
+    t.string "ambito"
+    t.string "anexo_id"
+    t.text "assunto"
+    t.string "codigo", null: false
+    t.datetime "created_at", null: false
+    t.date "data_promulgacao"
+    t.string "escopo"
+    t.text "full_text"
+    t.boolean "ocr_used", default: false, null: false
+    t.string "orgao"
+    t.string "referencia"
+    t.string "status"
+    t.string "tema"
+    t.string "tipo_e_numero"
+    t.datetime "updated_at", null: false
+    t.index ["codigo"], name: "index_legal_norms_on_codigo", unique: true
   end
 
   create_table "messages", force: :cascade do |t|
@@ -596,6 +631,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_092245) do
   add_foreign_key "knowledge_notes", "conversations"
   add_foreign_key "knowledge_notes", "general_chats"
   add_foreign_key "knowledge_notes", "users", column: "approved_by_id"
+  add_foreign_key "legal_norm_chunks", "legal_norms"
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"
