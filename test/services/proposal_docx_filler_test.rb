@@ -47,6 +47,17 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes document_text(bytes), "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
   end
 
+  # Concordância corrigida no texto fixo da seção PRAZO DE EXECUÇÃO (2026-09, pedido do
+  # consultor a partir de uma referência): faltava o artigo "a" antes de CONTRATANTE e antes de
+  # PAPYRUS ("entre CONTRATANTE e PAPYRUS" → "entre a CONTRATANTE e a PAPYRUS"). Texto fixo do
+  # modelo, sem placeholder — corrigido por substituição de string crua no word/document.xml.
+  test "fill keeps the corrected agreement (\"entre a CONTRATANTE e a PAPYRUS\") in the PRAZO DE EXECUÇÃO fixed text" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+
+    assert_includes document_text(bytes),
+      "O referido prazo poderá ter alterações mediante alinhamento formal entre a CONTRATANTE e a PAPYRUS."
+  end
+
   # "Papyrus" sempre maiúsculo e em negrito no corpo do documento (2026-09, pedido do consultor).
   test "fill uppercases and bolds every occurrence of Papyrus coming from AI-written placeholder text" do
     bytes = @filler.fill(
@@ -620,6 +631,33 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
     assert_includes zip_entry_content(bytes, "word/_rels/document.xml.rels"), 'Id="rId_CRONOGRAMA_SERVICO_1"'
     assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 11-1: Cronograma do Serviço.")
+  end
+
+  # Legenda da FIGURA (infográfico), pedida junto com a do Quadro (2026-09, pedido do
+  # consultor) — abaixo da imagem, antes da legenda/tabela do Quadro. Mesmo número "-N", só a
+  # palavra muda: os dois descrevem o mesmo cronograma, um em resumo visual, outro em detalhe.
+  test "fill also captions the infographic FIGURE, right after the image and before the Quadro caption" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+    xml = document_xml(bytes)
+
+    assert_includes xml, "Figura 11-1: Cronograma do Serviço."
+    image_at = xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"')
+    figura_at = xml.index("Figura 11-1: Cronograma do Serviço.")
+    quadro_at = xml.index("Quadro 11-1: Cronograma do Serviço.")
+
+    assert_operator image_at, :<, figura_at
+    assert_operator figura_at, :<, quadro_at
+  end
+
+  test "fill numbers the FIGURA caption per schedule type, same as the Quadro" do
+    bytes = @filler.fill(
+      placeholders: @placeholders, tables: @tables,
+      schedules: { "servico" => schedule_payload("servico"), "implantacao" => schedule_payload("implantacao") }
+    )
+    xml = document_xml(bytes)
+
+    assert_includes xml, "Figura 11-1: Cronograma do Serviço."
+    assert_includes xml, "Figura 11-2: Cronograma de Implantação do Empreendimento."
   end
 
   # Quando o payload traz os ≤6 marcos que a IA elegeu (project_pricing.schedule_key_points), o

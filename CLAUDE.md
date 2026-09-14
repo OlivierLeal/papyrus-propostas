@@ -1283,6 +1283,27 @@ várias linhas vazias também... deve ficar com 10 linhas por padrão"):**
    "Revisão | Descrição da Revisão | Data" aparece corretamente acima dos dados, e a tabela sai
    com 11 linhas mesmo com só 8 revisões reais — as 3 últimas ("08", "09", "10") em branco.
 
+**Concordância corrigida no texto fixo de PRAZO DE EXECUÇÃO + legenda da FIGURA do infográfico
+(2026-09, pedido do consultor a partir de uma referência trazida por print).** Duas correções
+pedidas juntas:
+1. O parágrafo fixo sobre alteração de prazo/isenção de responsabilidade da Papyrus pelo tempo de
+   análise do órgão ambiental estava sem os artigos: "...mediante alinhamento formal entre
+   CONTRATANTE e PAPYRUS" virou "...entre **a** CONTRATANTE e **a** PAPYRUS". Texto fixo do
+   modelo, sem placeholder — corrigido por substituição de string crua no `word/document.xml`
+   (nunca `Nokogiri#to_xml`), sem alterar a contagem de filhos de `<w:body>` (244→244, só texto
+   dentro de um `<w:t>` já existente).
+2. O infográfico de linha do tempo (`ScheduleTimelineRenderer`, ver acima) nunca teve legenda
+   própria — só o `Quadro N-1: Cronograma do Serviço.` da tabela existia. Ganhou uma legenda
+   "Figura N-1: Cronograma do Serviço." (mesmo texto/número do `SCHEDULE_CAPTIONS`/
+   `quadro_number` de sempre, só a palavra muda) logo ABAIXO da imagem — convenção comum pra
+   figura, ao contrário do Quadro, que continua com a legenda ACIMA da tabela (mesma convenção já
+   usada nos quadros fixos do modelo, ex. `Quadro 6-1`). Reaproveita `schedule_caption_xml`
+   (mesmo estilo em negrito de sempre) sem mudança na assinatura — só uma 2ª chamada em
+   `schedule_block_xml`, entre a imagem e a legenda do Quadro.
+   Verificado ao vivo (LibreOffice headless → PDF → captura): "Figura 11-1: Cronograma do
+   Serviço." aparece logo abaixo do infográfico, "Quadro 11-1: Cronograma do Serviço." continua
+   logo acima da tabela, e o parágrafo do PRAZO DE EXECUÇÃO sai com a concordância corrigida.
+
 ---
 
 ## 9. Prompts do sistema (2 prompts principais)

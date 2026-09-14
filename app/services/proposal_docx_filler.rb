@@ -327,6 +327,12 @@ class ProposalDocxFiller
 
         quadro_number += 1
         tables_xml << schedule_timeline_xml(type, payload, zip)
+        # Legenda da FIGURA (o infográfico) logo abaixo da imagem — convenção comum pra figura,
+        # ao contrário da legenda do QUADRO (tabela), que fica ACIMA dela (mesma convenção já
+        # usada nos outros quadros fixos do modelo, ex. "Quadro 6-1", ver CLAUDE.md seção 8).
+        # Mesmo número "-N" pros dois — descrevem o MESMO conteúdo (resumo visual × detalhe
+        # auditável), só a palavra muda.
+        tables_xml << schedule_caption_xml("Figura #{SECAO_PRAZO_NUMERO}-#{quadro_number}: #{SCHEDULE_CAPTIONS.fetch(type)}")
         tables_xml << schedule_caption_xml("Quadro #{SECAO_PRAZO_NUMERO}-#{quadro_number}: #{SCHEDULE_CAPTIONS.fetch(type)}")
         tables_xml << ScheduleTableBuilder.new(payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type)).build_xml
       end
