@@ -16,6 +16,7 @@ require "rails/test_help"
 require_relative "test_helpers/session_test_helper"
 require_relative "test_helpers/ai_stub_helper"
 require_relative "test_helpers/cal_stub_helper"
+require_relative "test_helpers/class_method_stub_helper"
 
 module ActiveSupport
   class TestCase
@@ -31,6 +32,7 @@ module ActiveSupport
     include RagAiStubHelper
     include EmbedderStubHelper
     include CalStubHelper
+    include ClassMethodStubHelper
 
     # Add more helper methods to be used by all tests here...
   end

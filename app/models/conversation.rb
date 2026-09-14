@@ -340,6 +340,11 @@ class Conversation < ApplicationRecord
     else
       new_proposal.build_from_template!
     end
+    # Só Ruby + HTTP (Logistics::DestinationResolver/MapboxDirections), nunca IA — sem o problema
+    # de reentrância de #complete que faz equipe/cronograma precisarem de rescue próprio/job em
+    # background (CLAUDE.md seção 5), mas ganha o mesmo rescue interno por segurança: uma falha
+    # de rede aqui nunca deve impedir a proposta de ser criada.
+    new_proposal.project_pricing&.suggest_logistics!
     update!(status: "pricing")
     new_proposal
   end

@@ -1,6 +1,6 @@
 class ProposalsController < ApplicationController
   before_action :set_conversation
-  before_action :set_proposal, only: %i[ show update approve add_external_cost remove_external_cost ]
+  before_action :set_proposal, only: %i[ show update approve suggest_logistics add_external_cost remove_external_cost ]
 
   def show
     @professionals = Professional.active.order(:name)
@@ -54,6 +54,22 @@ class ProposalsController < ApplicationController
     end
   end
 
+  def suggest_logistics
+    if editable?
+      @proposal.project_pricing.suggest_logistics!
+      pricing = @proposal.project_pricing.reload
+      notice = if pricing.distance_km.zero?
+        "Não foi possível calcular a distância automaticamente (ainda sem localização do projeto processada)."
+      else
+        aviso = pricing.long_distance? ? " Distância sugere deslocamento aéreo — lance passagem e locação no destino em Custos Externos." : ""
+        "Distância recalculada: #{pricing.distance_km} km (~#{pricing.travel_hours}h de viagem).#{aviso}"
+      end
+      redirect_to conversation_proposal_path(@conversation), notice: notice
+    else
+      redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."
+    end
+  end
+
   def add_external_cost
     description = params[:description].to_s.strip
     value = params[:value].to_f
@@ -97,7 +113,9 @@ class ProposalsController < ApplicationController
 
     def pricing_params
       params.require(:project_pricing).permit(
-        :bdi, :tax_multiplier, :distance_km, :logistics_days, :rental_per_day, :meal_per_day, :fuel_total,
+        :bdi, :tax_multiplier, :distance_km, :travel_hours, :logistics_days,
+        :rental_per_day, :vehicles_count, :meal_per_person_per_day, :lodging_per_person_per_night,
+        :fuel_total, :fuel_price_per_liter, :vehicle_consumption_km_per_liter,
         :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
         proposal_professionals_attributes: %i[ id hours_office hours_field ],

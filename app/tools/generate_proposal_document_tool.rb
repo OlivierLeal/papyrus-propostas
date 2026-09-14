@@ -178,6 +178,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     return { error: blocked_reason }.to_json if @proposal.nil?
 
     schedule_background_task = ensure_schedule_background_work!
+    ensure_logistics_suggested!
     apply_schedule_start_date_overrides!(args)
     defaulted_schedule_types = default_missing_schedule_dates!
 
@@ -615,6 +616,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # proposta 18: a chamada ao Bedrock falhava sozinha, sem exceção pro rescue pegar, e o
     # cronograma ficava vazio pra sempre). Devolve o símbolo do que enfileirou (ou nil), pra
     # #schedule_message avisar o consultor.
+    # Tenta de novo enquanto `distance_km` ainda estiver no default (zero) — cobre o caso do KMZ
+    # (ou o cruzamento com ibge_municipalities) ainda não ter terminado quando a proposta foi
+    # criada (Conversation#ensure_proposal!). Idempotente e síncrono: diferente do cronograma,
+    # ProjectPricing#suggest_logistics! é só Ruby + HTTP, nunca IA, então não tem o problema de
+    # reentrância que obriga o cronograma a rodar em job de background.
+    def ensure_logistics_suggested!
+      pricing = @proposal.project_pricing
+      pricing.suggest_logistics! if pricing && pricing.distance_km.zero?
+    end
+
     def ensure_schedule_background_work!
       pricing = @proposal.project_pricing
       return nil unless pricing

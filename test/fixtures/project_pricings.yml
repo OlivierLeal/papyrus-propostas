@@ -5,7 +5,7 @@ priced_pricing:
   distance_km: 100
   logistics_days: 5
   rental_per_day: 150.00
-  meal_per_day: 80.00
+  meal_per_person_per_day: 80.00
   fuel_total: 500.00
   external_costs: []
   payment_schedule:

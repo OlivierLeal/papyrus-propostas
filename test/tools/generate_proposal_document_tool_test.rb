@@ -846,6 +846,35 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args) }
   end
 
+  # ensure_logistics_suggested! — cobre o KMZ ter terminado DEPOIS da 1ª tentativa
+  # (Conversation#ensure_proposal!). Só Ruby + HTTP, síncrono (não é chamada de IA, sem o
+  # problema de reentrância do cronograma).
+  test "retries suggest_logistics! when distance_km is still the zero default" do
+    @proposal.project_pricing.update!(distance_km: 0)
+    destination = KmzGeometryExtractor::FACTORY.point(-39.5, -14.0)
+    fake_result = Logistics::MapboxDirections::Result.new(distance_km: 250.0, duration_hours: 4.0)
+    fake_directions = Object.new.tap { |o| o.define_singleton_method(:fetch) { fake_result } }
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { destination }) do
+      stub_class_method(Logistics::MapboxDirections, :new, ->(*) { fake_directions }) { tool.execute(**@args) }
+    end
+
+    assert_equal 250.0, @proposal.project_pricing.reload.distance_km
+  end
+
+  test "does not try to recalculate logistics again once distance_km is already set" do
+    @proposal.project_pricing.update!(distance_km: 100)
+    calls = 0
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { calls += 1; nil }) do
+      tool.execute(**@args)
+    end
+
+    assert_equal 0, calls
+  end
+
   test "defaults the start date to the 1st of next month when there are items but no date at all, and warns about it" do
     pricing = @proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",

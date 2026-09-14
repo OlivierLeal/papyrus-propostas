@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_11_150001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -361,9 +361,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_150001) do
     t.datetime "created_at", null: false
     t.decimal "distance_km", precision: 10, scale: 2, default: "0.0", null: false
     t.jsonb "external_costs", default: [], null: false
+    t.decimal "fuel_price_per_liter", precision: 10, scale: 2, default: "6.2", null: false
     t.decimal "fuel_total", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "lodging_per_person_per_night", precision: 10, scale: 2, default: "0.0", null: false
     t.integer "logistics_days", default: 0, null: false
-    t.decimal "meal_per_day", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "meal_per_person_per_day", precision: 10, scale: 2, default: "0.0", null: false
     t.jsonb "payment_schedule", default: [{"label"=>"Assinatura do contrato", "percentage"=>30}, {"label"=>"Protocolo no órgão ambiental", "percentage"=>60}, {"label"=>"Vistoria", "percentage"=>5}, {"label"=>"Emissão da licença", "percentage"=>5}], null: false
     t.bigint "proposal_id", null: false
     t.decimal "rental_per_day", precision: 10, scale: 2, default: "0.0", null: false
@@ -372,7 +374,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_150001) do
     t.date "schedule_papyrus_start_date"
     t.decimal "tax_multiplier", precision: 6, scale: 4, default: "1.25", null: false
     t.decimal "total_value", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "travel_hours", precision: 10, scale: 2
     t.datetime "updated_at", null: false
+    t.decimal "vehicle_consumption_km_per_liter", precision: 10, scale: 2, default: "10.0", null: false
+    t.integer "vehicles_count", default: 1, null: false
     t.index ["proposal_id"], name: "index_project_pricings_on_proposal_id", unique: true
   end
 

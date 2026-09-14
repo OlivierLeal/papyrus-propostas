@@ -33,6 +33,7 @@ Rails.application.routes.draw do
 
     resource :proposal, only: %i[show create update] do
       post :approve
+      post :suggest_logistics
       post :add_external_cost
       delete "external_costs/:index", action: :remove_external_cost, as: :remove_external_cost
       resources :proposal_professionals, only: %i[create destroy]

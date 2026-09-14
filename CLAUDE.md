@@ -194,12 +194,64 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
    - `C1` = horas escritório × taxa escritório
    - `C2` = horas campo × taxa campo
    - `C3` = subtotal profissional = (C1 + C2) × BDI × impostos
-   - `C4` = logística = (aluguel/dia + alimentação/dia) × dias de campo + combustível total
+   - `C4` = logística = (hospedagem/pessoa/noite + alimentação/pessoa/dia) × profissionais em campo × dias + aluguel/veículo/dia × nº de veículos × dias + combustível (ver "Logística automática" abaixo — 2026-09; hospedagem/alimentação passaram a ser POR PESSOA, aluguel continua por VEÍCULO)
    - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta em `external_costs` (jsonb)
    - `C6` = TOTAL = Σ profissionais + logística + externos
-4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo (`professionals`); BDI e impostos (`tax_multiplier`) editáveis por proposta em `project_pricings` (defaults 1.20/1.25). **Não existe mais uma tabela de configuração de logística** (`logistics_configs` foi removida) — aluguel/dia, alimentação/dia, combustível total e dias de campo são campos digitados direto na Tela de Precificação por proposta.
-5. **Hospedagem**: não entra no cálculo automático. O sistema consulta a API do Stay22 usando o município identificado no ET/TR e apresenta as opções de acomodação como mensagem no chat; o consultor escolhe a melhor opção manualmente. Por enquanto isso fica só registrado na conversa (informativo) — pendente da chave de API do Stay22.
+4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo (`professionals`); BDI e impostos (`tax_multiplier`) editáveis por proposta em `project_pricings` (defaults 1.20/1.25). **Não existe mais uma tabela de configuração de logística** (`logistics_configs` foi removida) — os parâmetros de logística (distância, dias de campo, nº de veículos, aluguel/veículo/dia, alimentação/pessoa/dia, hospedagem/pessoa/noite, preço do combustível, consumo do veículo) são campos digitados/editáveis direto na Tela de Precificação por proposta, com distância/veículos/combustível **sugeridos automaticamente** (ver abaixo).
+5. **Hospedagem**: desde 2026-09, entra no cálculo automático via uma diária média configurável por pessoa (`lodging_per_person_per_night`) — não depende do Stay22 (ver abaixo, ainda greenfield). O Stay22 continua fora de escopo (chave de API pendente); quando existir, é uma segunda fonte de referência pro consultor ajustar essa diária, não substitui o campo.
 6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas (`payment_schedule_amounts`, default 30/60/5/5), dados prontos para o PDF. Proposta só é editável enquanto `status != "approved"`; aprovar (`proposals#approve`) trava os campos e conclui a conversa.
+
+**Logística automática — distância, combustível, veículos e hospedagem (2026-09, pedido do
+consultor: "não vai ficar querendo calculando distância e quanto vai gastar de combustível").**
+Antes, `distance_km`/`logistics_days`/`rental_per_day`/`meal_per_day`/`fuel_total` eram 5 campos
+digitados de cabeça pelo consultor, sem nenhum apoio do sistema — inclusive `fuel_total` como um
+total já calculado na mão, sem decomposição em km×consumo×preço. A Papyrus é sediada em Lauro de
+Freitas/BA; projetos distantes precisam considerar deslocamento, combustível, aluguel de carro e
+hospedagem da equipe, e o cliente queria que o sistema já calculasse isso a partir do que a
+proposta já identificou (KMZ/município), não que a IA "adivinhasse" o valor — preço continua
+**sempre calculado em Ruby, nunca pela IA** (seção 1), a automação aqui é PostGIS + uma chamada
+HTTP à Mapbox Directions, nunca inferência de IA sobre dinheiro.
+
+- **`Logistics::DestinationResolver.call(proposal)`** — ponto de destino (RGeo, `.x`=lon/`.y`=lat),
+  só a partir de fontes ESTRUTURADAS de município (sempre com UF em sigla, sem ambiguidade), nunca
+  do texto livre de `ProjectFinding#value` pro campo `"municipios"` (quando vem do ET/TR via IA,
+  não garante UF — município do mesmo nome existe em vários estados, geocodificar errado
+  silenciosamente entraria no preço). Duas fontes, nessa ordem: `geospatial_result.centroid`
+  (calculado do KMZ, mais preciso) ou, sem KMZ, o centroide (`IbgeMunicipality#centroid`, nova
+  consulta `ST_Centroid` — só havia `ST_Intersects` até aqui) do primeiro município de
+  `geospatial_result.municipalities` (cruzado pelo `ProcessKmzJob`, sempre com UF). Sem nenhum dos
+  dois (KMZ ainda não processou), devolve `nil` — a automação simplesmente não roda, mesmo efeito
+  de hoje (campos ficam manuais).
+- **`Logistics::MapboxDirections`** — distância/duração RODOVIÁRIA real via Mapbox Directions API,
+  mesma env var (`MAPBOX_API_KEY`) e mesmo padrão de tolerância a falha do `MapboxStaticMap` já
+  existente (sem chave, erro de rede ou sem rota, devolve `nil` em vez de levantar). Fallback de
+  linha reta (`ProjectPricing::ROAD_FACTOR = 1.3` sobre a distância geodésica RGeo, mais
+  `AVERAGE_SPEED_KMH = 70.0` pra estimar a duração) quando a API não responde.
+- **`ProjectPricing#suggest_logistics!`** — só Ruby + HTTP, nunca IA: resolve o destino, calcula
+  distância/duração, sugere `vehicles_count` (`PASSENGERS_PER_VEHICLE = 4`, um veículo a cada 4
+  pessoas em campo) e `fuel_total` (`distância × 2 [ida e volta] × veículos / consumo × preço do
+  litro`). **Acima de `LONG_DISTANCE_KM_THRESHOLD` (800km) ou `LONG_DISTANCE_HOURS_THRESHOLD`
+  (10h)** (`#long_distance?`), não calcula combustível/aluguel — a viagem de carro deixa de fazer
+  sentido, e a Tela de Precificação avisa que sugere deslocamento aéreo (o consultor lança
+  passagem+locação no destino em Custos Externos, campo livre já existente). Nunca toca
+  hospedagem/alimentação/aluguel por dia (esses continuam digitados pelo consultor — só passaram a
+  ser multiplicados certo, ver `C4` acima). Roda uma vez na criação da proposta
+  (`Conversation#ensure_proposal!`, com `rescue` próprio — uma falha de rede nunca impede a
+  proposta de ser criada), de novo a cada geração de documento enquanto `distance_km` ainda for o
+  default zero (`GenerateProposalDocumentTool#ensure_logistics_suggested!` — cobre o KMZ ainda não
+  ter terminado na 1ª tentativa, síncrono, sem job/lock, porque não é chamada de IA), e a qualquer
+  momento pelo botão "Recalcular logística" na Tela de Precificação
+  (`ProposalsController#suggest_logistics`).
+- **Hospedagem/alimentação passaram a ser POR PESSOA** (`lodging_per_person_per_night`/
+  `meal_per_person_per_day`, o 2º renomeado de `meal_per_day` — mudança de sentido deliberada,
+  não escondida atrás do mesmo nome), multiplicadas por `ProjectPricing#field_professionals_count`
+  (profissionais com `hours_field > 0`, mínimo 1). Aluguel continua por VEÍCULO/dia
+  (`rental_per_day`), multiplicado por `vehicles_count` em vez de sempre 1.
+- Verificado ao vivo (3 caminhos, Mapbox real): centroide de KMZ → 498,7km/9,9h até um ponto no
+  interior da Bahia (fuel_total calculado); município sem KMZ (Salvador/BA) → 28,6km/0,7h; destino
+  muito distante (Manaus/AM) → 4.884,7km/78,5h, `long_distance?` true, `fuel_total` zerado; sem
+  `MAPBOX_API_KEY`, cai pro fallback de linha reta sem erro (394,8km pro mesmo ponto que deu
+  498,7km por estrada — a subestimativa esperada do fallback).
 
 ---
 

@@ -18,6 +18,17 @@ class IbgeMunicipalityTest < ActiveSupport::TestCase
     assert_includes dup.errors.attribute_names, :code_ibge
   end
 
+  # Primeira consulta ST_Centroid sobre esta tabela (só ST_Intersects até aqui) — usada por
+  # Logistics::DestinationResolver como fallback quando não há centroide de KMZ.
+  test "centroid returns the geometric center of the municipality as an RGeo point" do
+    municipio = create_municipio(code_ibge: "2800100", name: "Amparo do São Francisco", square_at: [ -37.0, -10.0 ])
+
+    point = municipio.centroid
+
+    assert_in_delta(-36.5, point.x, 0.01) # centroide do quadrado -37.0..-36.0
+    assert_in_delta(-9.5, point.y, 0.01)  # centroide do quadrado -10.0..-9.0
+  end
+
   test ".intersecting finds municipalities whose polygon contains the given point, via ST_Intersects" do
     dentro = create_municipio(code_ibge: "2800308", name: "Aracaju", square_at: [ -37.1, -11.0 ])
     fora = create_municipio(code_ibge: "3550308", name: "São Paulo", square_at: [ -46.6, -23.5 ])

@@ -6,10 +6,99 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal 15000.0 + 28260.0, pricing.professionals_total
   end
 
-  test "logistics_total combines daily rates over the days plus fuel" do
+  # priced_pricing tem 1 profissional em campo (biologa, hours_field > 0) e vehicles_count
+  # default (1) — por isso o total bate igual ao formato antigo (150+80)*5+500, mesmo a fórmula
+  # agora multiplicando por pessoas/veículos (ver os testes específicos abaixo pra >1 de cada).
+  test "logistics_total combines per-person lodging/meals, per-vehicle rental over the days, plus fuel" do
     pricing = project_pricings(:priced_pricing)
-    # (150 + 80) * 5 dias + 500 combustível = 1650
     assert_equal 1650.0, pricing.logistics_total
+  end
+
+  test "field_professionals_count counts only lines with hours_field > 0, minimum 1" do
+    pricing = project_pricings(:priced_pricing)
+    assert_equal 1, pricing.field_professionals_count # só a bióloga (hours_field: 48)
+
+    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(hours_field: 10)
+    assert_equal 2, pricing.field_professionals_count
+
+    pricing.proposal_professionals.update_all(hours_field: 0)
+    assert_equal 1, pricing.field_professionals_count # nunca zero
+  end
+
+  test "logistics_total multiplies meals/lodging by the number of field professionals" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.update!(lodging_per_person_per_night: 100, meal_per_person_per_day: 50, rental_per_day: 0, fuel_total: 0)
+    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(hours_field: 10)
+    # 2 pessoas em campo agora (coordenação + bióloga)
+
+    assert_equal (100 + 50) * 2 * 5, pricing.logistics_total
+  end
+
+  test "logistics_total multiplies vehicle rental by vehicles_count, not by people" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.update!(rental_per_day: 200, vehicles_count: 3, lodging_per_person_per_night: 0, meal_per_person_per_day: 0, fuel_total: 0)
+
+    assert_equal 200 * 3 * 5, pricing.logistics_total
+  end
+
+  test "long_distance? is true above the km or hour threshold" do
+    pricing = project_pricings(:priced_pricing)
+
+    pricing.distance_km = ProjectPricing::LONG_DISTANCE_KM_THRESHOLD + 1
+    assert pricing.long_distance?
+
+    pricing.distance_km = 10
+    pricing.travel_hours = ProjectPricing::LONG_DISTANCE_HOURS_THRESHOLD + 1
+    assert pricing.long_distance?
+
+    pricing.travel_hours = 1
+    assert_not pricing.long_distance?
+  end
+
+  test "suggest_logistics! fills distance/travel_hours/vehicles/fuel from the resolved destination" do
+    pricing = project_pricings(:priced_pricing)
+    destination = KmzGeometryExtractor::FACTORY.point(-39.5, -14.0)
+    fake_result = Logistics::MapboxDirections::Result.new(distance_km: 300.0, duration_hours: 5.0)
+    fake_directions = fake_mapbox_directions(fake_result)
+
+    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { destination }) do
+      stub_class_method(Logistics::MapboxDirections, :new, ->(*) { fake_directions }) { pricing.suggest_logistics! }
+    end
+
+    assert_equal 300.0, pricing.reload.distance_km
+    assert_equal 5.0, pricing.travel_hours
+    assert_equal 1, pricing.vehicles_count # 1 pessoa em campo, 4 por veículo
+    expected_fuel = ((300.0 * 2 * 1) / pricing.vehicle_consumption_km_per_liter) * pricing.fuel_price_per_liter
+    assert_equal expected_fuel.round(2), pricing.fuel_total.round(2)
+  end
+
+  test "suggest_logistics! does not compute fuel when the distance is long enough to suggest flying" do
+    pricing = project_pricings(:priced_pricing)
+    destination = KmzGeometryExtractor::FACTORY.point(-39.5, -14.0)
+    fake_result = Logistics::MapboxDirections::Result.new(distance_km: 2000.0, duration_hours: 20.0)
+    fake_directions = fake_mapbox_directions(fake_result)
+
+    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { destination }) do
+      stub_class_method(Logistics::MapboxDirections, :new, ->(*) { fake_directions }) { pricing.suggest_logistics! }
+    end
+
+    assert pricing.reload.long_distance?
+    assert_equal 0, pricing.fuel_total
+  end
+
+  test "suggest_logistics! does nothing when no destination can be resolved" do
+    pricing = project_pricings(:priced_pricing)
+    original_distance = pricing.distance_km
+    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { nil }) { pricing.suggest_logistics! }
+
+    assert_equal original_distance, pricing.reload.distance_km
+  end
+
+  test "suggest_logistics! never raises, even if the destination resolver blows up" do
+    pricing = project_pricings(:priced_pricing)
+    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { raise "boom" }) do
+      assert_nothing_raised { pricing.suggest_logistics! }
+    end
   end
 
   test "external_costs_total sums the jsonb list" do
@@ -60,6 +149,28 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_not pricing.valid?
   end
 
+  test "requires vehicles_count to be at least 1" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.vehicles_count = 0
+
+    assert_not pricing.valid?
+  end
+
+  test "requires non-negative fuel price, vehicle consumption and lodging rate" do
+    pricing = project_pricings(:priced_pricing)
+
+    pricing.fuel_price_per_liter = -1
+    assert_not pricing.valid?
+
+    pricing.fuel_price_per_liter = 6.2
+    pricing.vehicle_consumption_km_per_liter = -1
+    assert_not pricing.valid?
+
+    pricing.vehicle_consumption_km_per_liter = 10
+    pricing.lodging_per_person_per_night = -1
+    assert_not pricing.valid?
+  end
+
   # A data de cada parcela mora dentro do payment_schedule (jsonb), junto do marco e do
   # percentual — não é coluna nova.
   test "payment_dates= stores one date per instalment, in order, keeping the rest of the schedule" do
@@ -85,4 +196,9 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal "2026-03-25", first["date"]
     assert first["amount"].positive?
   end
+
+  private
+    def fake_mapbox_directions(result)
+      Object.new.tap { |fake| fake.define_singleton_method(:fetch) { result } }
+    end
 end

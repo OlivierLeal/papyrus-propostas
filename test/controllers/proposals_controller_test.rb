@@ -12,6 +12,32 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "show renders the new logistics fields and the recalculate button" do
+    get conversation_proposal_path(@conversation)
+
+    assert_select "input[name='project_pricing[vehicles_count]']"
+    assert_select "input[name='project_pricing[meal_per_person_per_day]']"
+    assert_select "input[name='project_pricing[lodging_per_person_per_night]']"
+    assert_select "input[name='project_pricing[fuel_price_per_liter]']"
+    assert_select "input[name='project_pricing[vehicle_consumption_km_per_liter]']"
+    assert_select "input[name='project_pricing[travel_hours]']"
+    assert_select "form[action='#{suggest_logistics_conversation_proposal_path(@conversation)}']"
+  end
+
+  test "show renders the long-distance warning banner when the pricing is flagged" do
+    @proposal.project_pricing.update!(distance_km: ProjectPricing::LONG_DISTANCE_KM_THRESHOLD + 1)
+
+    get conversation_proposal_path(@conversation)
+
+    assert_match "deslocamento", response.body
+  end
+
+  test "show does not render the long-distance warning when the pricing isn't flagged" do
+    get conversation_proposal_path(@conversation)
+
+    assert_no_match "deslocamento", response.body
+  end
+
   test "create builds an AI-suggested team and moves the conversation into pricing" do
     reviewing = conversations(:reviewing_conversation)
     sign_in_as reviewing.user
@@ -50,7 +76,7 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
   test "update recalculates pricing and marks the proposal as priced" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "1.30", tax_multiplier: "1.25", distance_km: "120", logistics_days: "4",
-                          rental_per_day: "160", meal_per_day: "90", fuel_total: "600" },
+                          rental_per_day: "160", meal_per_person_per_day: "90", fuel_total: "600" },
       proposal: { document_split: "combined" }
     }
 
@@ -66,7 +92,7 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
   test "update stores the instalment dates typed on the pricing screen" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "1.20", tax_multiplier: "1.25", distance_km: "0", logistics_days: "0",
-                          rental_per_day: "0", meal_per_day: "0", fuel_total: "0",
+                          rental_per_day: "0", meal_per_person_per_day: "0", fuel_total: "0",
                           payment_dates: [ "2026-03-25", "", "2026-05-25", "" ] },
       proposal: { document_split: "combined" }
     }
@@ -80,7 +106,7 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
   test "update rejects invalid pricing params and keeps the proposal editable" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "0", tax_multiplier: "1.25", distance_km: "1", logistics_days: "1",
-                          rental_per_day: "1", meal_per_day: "1", fuel_total: "1" },
+                          rental_per_day: "1", meal_per_person_per_day: "1", fuel_total: "1" },
       proposal: { document_split: "combined" }
     }
 
@@ -93,9 +119,33 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
 
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "2.0", tax_multiplier: "1.25", distance_km: "1", logistics_days: "1",
-                          rental_per_day: "1", meal_per_day: "1", fuel_total: "1" },
+                          rental_per_day: "1", meal_per_person_per_day: "1", fuel_total: "1" },
       proposal: { document_split: "combined" }
     }
+
+    follow_redirect!
+    assert_match "já foi aprovada", response.body
+  end
+
+  test "suggest_logistics recalculates distance/fuel and shows a notice" do
+    @proposal.conversation.create_geospatial_result!(geometry_type: "polygon", centroid: KmzGeometryExtractor::FACTORY.point(-39.5, -14.0))
+    fake_result = Logistics::MapboxDirections::Result.new(distance_km: 250.0, duration_hours: 4.0)
+    fake_directions = Object.new.tap { |o| o.define_singleton_method(:fetch) { fake_result } }
+
+    stub_class_method(Logistics::MapboxDirections, :new, ->(*) { fake_directions }) do
+      post suggest_logistics_conversation_proposal_path(@conversation)
+    end
+
+    assert_redirected_to conversation_proposal_path(@conversation)
+    follow_redirect!
+    assert_match "250.0 km", response.body
+    assert_equal 250.0, @proposal.project_pricing.reload.distance_km
+  end
+
+  test "suggest_logistics is blocked once the proposal is approved" do
+    @proposal.update!(status: "approved")
+
+    post suggest_logistics_conversation_proposal_path(@conversation)
 
     follow_redirect!
     assert_match "já foi aprovada", response.body

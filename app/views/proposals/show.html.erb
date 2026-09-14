@@ -108,7 +108,23 @@
     </div>
 
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-      <h2 class="font-semibold text-base-content mb-4">Parâmetros</h2>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-base-content">Parâmetros</h2>
+        <% if editable %>
+          <%= button_to "Recalcular logística", suggest_logistics_conversation_proposal_path(@conversation), method: :post,
+                class: "btn btn-outline btn-sm" %>
+        <% end %>
+      </div>
+
+      <% if pricing.long_distance? %>
+        <div class="alert alert-warning mb-4 text-sm">
+          <span>
+            Distância (<%= pricing.distance_km %> km, ~<%= pricing.travel_hours %>h) sugere deslocamento
+            aéreo — combustível/aluguel de carro não foram calculados automaticamente. Lance passagem e
+            locação no destino em Custos Externos.
+          </span>
+        </div>
+      <% end %>
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="form-control">
@@ -124,22 +140,45 @@
           <%= form.number_field :distance_km, step: 1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
         </div>
         <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Viagem (h, ida)</span></div>
+          <%= form.number_field :travel_hours, step: 0.1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
           <div class="label"><span class="label-text text-xs">Dias de campo</span></div>
           <%= form.number_field :logistics_days, step: 1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
         </div>
         <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Aluguel/dia (R$)</span></div>
+          <div class="label"><span class="label-text text-xs">Nº de veículos</span></div>
+          <%= form.number_field :vehicles_count, step: 1, min: 1, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Aluguel/veículo/dia (R$)</span></div>
           <%= form.number_field :rental_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
         </div>
         <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Alimentação/dia (R$)</span></div>
-          <%= form.number_field :meal_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+          <div class="label"><span class="label-text text-xs">Alimentação/pessoa/dia (R$)</span></div>
+          <%= form.number_field :meal_per_person_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Hospedagem/pessoa/noite (R$)</span></div>
+          <%= form.number_field :lodging_per_person_per_night, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Preço do combustível (R$/l)</span></div>
+          <%= form.number_field :fuel_price_per_liter, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
+        </div>
+        <div class="form-control">
+          <div class="label"><span class="label-text text-xs">Consumo do veículo (km/l)</span></div>
+          <%= form.number_field :vehicle_consumption_km_per_liter, step: 0.1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
         </div>
         <div class="form-control">
           <div class="label"><span class="label-text text-xs">Combustível total (R$)</span></div>
           <%= form.number_field :fuel_total, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
         </div>
       </div>
+      <p class="text-xs text-base-content/50 mt-2">
+        <%= pricing.field_professionals_count %> pessoa(s) em campo consideradas na hospedagem/alimentação.
+      </p>
 
       <div class="mt-6">
         <h3 class="font-semibold text-base-content text-sm mb-1">Cronograma de desembolso</h3>

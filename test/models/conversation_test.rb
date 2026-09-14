@@ -91,6 +91,33 @@ class ConversationTest < ActiveSupport::TestCase
     assert_equal [ "Assinatura do Contrato" ], proposal.project_pricing.schedule_items.for_type("servico").map(&:activity_name)
   end
 
+  # Só Ruby + HTTP (Logistics), nunca IA — mesmo assim ganha rescue próprio (dentro de
+  # ProjectPricing#suggest_logistics!) pra uma falha de rede nunca impedir a criação da proposta.
+  test "ensure_proposal! also suggests logistics (distance/vehicles/fuel) right after team and schedule" do
+    conversation = conversations(:reviewing_conversation)
+    conversation.create_geospatial_result!(geometry_type: "polygon", centroid: KmzGeometryExtractor::FACTORY.point(-39.5, -14.0))
+    fake_result = Logistics::MapboxDirections::Result.new(distance_km: 400.0, duration_hours: 6.0)
+    fake_directions = Object.new.tap { |o| o.define_singleton_method(:fetch) { fake_result } }
+    ai_response = { linhas: [], documentos_separados: false }.to_json
+
+    proposal = stub_class_method(Logistics::MapboxDirections, :new, ->(*) { fake_directions }) do
+      stub_ai_complete(ai_response) { conversation.ensure_proposal! }
+    end
+
+    assert_equal 400.0, proposal.project_pricing.reload.distance_km
+  end
+
+  test "a failure inside suggest_logistics! never blocks proposal creation" do
+    conversation = conversations(:reviewing_conversation)
+    ai_response = { linhas: [], documentos_separados: false }.to_json
+
+    proposal = stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { raise "boom" }) do
+      stub_ai_complete(ai_response) { conversation.ensure_proposal! }
+    end
+
+    assert proposal.present?
+  end
+
   test "ensure_proposal! returns nil (without reloading forever) when the study_type still isn't set anywhere" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Tipo Nenhum", status: "reviewing")
 
