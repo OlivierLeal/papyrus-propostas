@@ -1132,6 +1132,49 @@ ganhou negrito só na palavra "PAPYRUS", mantendo "CONSULTORIA AMBIENTAL LTDA" c
 Teste em `proposal_docx_filler_test.rb` trava a formatação preservada (fonte/cor do `<w:rPr>`
 original) e que o e-mail do modelo não vira maiúsculo.
 
+**Três ajustes visuais de layout, pedidos juntos pelo consultor (2026-09):**
+
+1. **Coluna FORMATO do Quadro 6-1 (produtos) alargada.** Era estreita demais (1179 dxa) —
+   "FORMATO" quebrava em "FORMAT"/"O" e valores como "Word e PDF" também iam pra 2 linhas.
+   Redistribuída pra 1900 dxa (era 7315/1179, virou 6594/1900 — soma continua 8494, igual às
+   outras tabelas do modelo). Edição de string crua no `tblGrid` + nos 4 `tcW` de cada linha
+   (`word/document.xml`, nunca `Nokogiri#to_xml`).
+
+2. **`ProposalDocxFiller#fill_table!` ganhou `merge_first_column:`** — junta verticalmente
+   (`<w:vMerge>`) a 1ª coluna quando linhas CONSECUTIVAS têm o mesmo valor. Motivo: a tabela
+   EQUIPE TÉCNICA (seção 8, "virou dinâmico") saía com "Diretoria" repetido numa linha pra
+   Charlene E outra pra Ricardo (os dois `always_included` de setor Diretoria) — o consultor viu
+   isso como "Diretoria" indevidamente "em 2 linhas" e pediu uma célula só cobrindo as duas.
+   `GenerateProposalDocumentTool#build_tables` passou `merge_first_column: true` só pro índice 2
+   (equipe); as outras 3 tabelas (produtos/preço/desembolso) continuam sem merge nenhum, comportamento
+   default preservado. Implementação: acha pares de linha consecutiva com o mesmo 1º valor
+   (comparado a partir de `rows_data` ORIGINAL, nunca relendo o XML já esvaziado — senão um grupo
+   de 3+ mesmo valor parava no 2º par, porque a 2ª linha já tinha sido zerada pela iteração
+   anterior), marca a 1ª como `w:val="restart"` e as seguintes como `vMerge` "continue" (sem
+   `w:val`, texto esvaziado — Word não desenha o conteúdo de uma célula "continue"). `<w:vMerge>`
+   tem posição fixa no schema `<w:tcPr>` (depois de `tcW`/`gridSpan`, antes de `tcBorders`/`shd`/
+   `vAlign`) — mesma pegadinha de ordem já vista com `w:textDirection` no cronograma; inserido
+   sempre logo depois do `tcW` existente, nunca com `prepend_child` cego.
+
+3. **`ScheduleTimelineRenderer` deixou de truncar título de fase com "…".** Um nome de fase que
+   precisasse de mais de `LABEL_MAX_LINES` (3) linhas saía cortado, mesmo quando a frase inteira
+   não era tão longa assim. `wrap_text` não trunca mais — devolve quantas linhas forem
+   necessárias. A altura de cada LINHA de círculos passou a ser CALCULADA a partir do maior
+   título dela (`#row_line_count`/`#row_height_for(line_count)`), em vez de uma constante fixa —
+   sem isso, um título de 6 linhas ao lado de um título de 1 linha desalinharia o sublinhado/
+   duração entre os dois (o mesmo orçamento vertical precisa valer pros DOIS círculos da mesma
+   linha). `TYPICAL_LABEL_LINES` (o antigo `LABEL_MAX_LINES`, renomeado) continua existindo só
+   pra estimar a paginação (`#items_per_image`/`#emu_per_row` — quantos itens cabem antes de
+   estourar `MAX_IMAGE_HEIGHT_EMU`); não é mais um teto de renderização, só uma estimativa de
+   quantas linhas "cabem" pra decidir onde cortar em várias imagens — a altura REAL de cada linha
+   sempre usa a contagem exata, nunca a estimativa.
+
+Verificado ao vivo os três: LibreOffice headless → PDF → captura (produtos/equipe, proposta
+real) e `rsvg-convert` direto no SVG (linha do tempo, 3 fases incluindo uma com nome de 6 linhas)
+— "FORMATO"/"Word e PDF" numa linha só, "Diretoria" uma célula só cobrindo Charlene+Ricardo, e a
+frase da fase longa saindo completa, com "7 dias"/"21 dias"/"7 dias" alinhados na mesma altura
+apesar do título do meio ser muito mais alto que os vizinhos.
+
 **Quadro SUMÁRIO DE REVISÕES: linha duplicada/descrição em branco (2026-09, correção do
 consultor).** Duas falhas na tabela de revisões (página 2 do modelo):
 1. **Linha duplicada** — `Proposal#docx_revision_rows` montava as linhas PASSADAS a partir de

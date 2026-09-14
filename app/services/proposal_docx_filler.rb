@@ -132,7 +132,8 @@ class ProposalDocxFiller
             if table_index == 0
               fill_revisions_table!(table_node, config.fetch(:rows))
             else
-              fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false))
+              fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false),
+                merge_first_column: config.fetch(:merge_first_column, false))
             end
           end
           insert_schedule_tables!(doc, schedules, zip)
@@ -612,7 +613,15 @@ class ProposalDocxFiller
     # `trim: false` (ver #fill_revisions_table!, a única chamadora que passa isso ou um
     # `header_rows` diferente). auto_number preenche a 1ª coluna com 1..N e desloca rows_data uma
     # coluna pra direita, então quem chama só passa as colunas de conteúdo de verdade.
-    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1)
+    #
+    # merge_first_column: junta verticalmente (vMerge) a 1ª coluna quando linhas CONSECUTIVAS têm
+    # o mesmo valor — usado pela equipe técnica (2026-09, pedido do consultor: Charlene e Ricardo
+    # são os dois da Diretoria, e "Diretoria" saía repetido numa linha pra cada um, em vez de uma
+    # célula só cobrindo as duas linhas). Só junta consecutivas, nunca valores iguais espalhados
+    # (mesmo princípio de "consecutivo, não valor único" já usado pra agrupar cronograma por
+    # fase). `auto_number`/`trim`/`header_rows` continuam funcionando normalmente antes disso —
+    # o merge é sempre o último passo, sobre as linhas já definitivas.
+    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1, merge_first_column: false)
       return unless tbl
 
       all_rows = tbl.xpath(".//w:tr", NS)
@@ -620,7 +629,7 @@ class ProposalDocxFiller
       existing_data_rows = all_rows[header_rows..]
       offset = auto_number ? 1 : 0
 
-      rows_data.each_with_index do |row_values, i|
+      row_nodes = rows_data.map.with_index do |row_values, i|
         row_node = existing_data_rows[i] || template_row.dup
         tbl.add_child(row_node) unless existing_data_rows[i]
 
@@ -633,9 +642,47 @@ class ProposalDocxFiller
 
           set_cell_text!(cell, value.to_s)
         end
+
+        row_node
       end
 
       existing_data_rows[rows_data.size..].to_a.each(&:remove) if trim && rows_data.size < existing_data_rows.size
+      merge_first_column!(row_nodes, rows_data.map(&:first)) if merge_first_column
+    end
+
+    # `first_column_values` vem de ANTES de qualquer <w:tc> ser esvaziado (rows_data original,
+    # não relido do XML) — senão a 2ª linha de um grupo de 3 (já esvaziada na iteração anterior)
+    # nunca bateria com a 3ª, e o merge parava no par errado.
+    def merge_first_column!(row_nodes, first_column_values)
+      row_nodes.each_index do |i|
+        next if i.zero?
+        next unless first_column_values[i] == first_column_values[i - 1]
+
+        previous_cell = row_nodes[i - 1].xpath(".//w:tc", NS).first
+        current_cell = row_nodes[i].xpath(".//w:tc", NS).first
+        next unless previous_cell && current_cell
+
+        vmerge!(previous_cell, "restart") unless previous_cell.at_xpath(".//w:vMerge", NS)
+        vmerge!(current_cell, nil)
+        set_cell_text!(current_cell, "")
+      end
+    end
+
+    # <w:vMerge> tem posição fixa no schema (depois de tcW/gridSpan, antes de tcBorders/shd/
+    # vAlign) — mesma pegadinha de sempre com ordem em <w:tcPr> (ver w:textDirection no
+    # cronograma): fora de ordem, o Word/LibreOffice ignora o elemento em silêncio, sem erro.
+    def vmerge!(cell, val)
+      tc_pr = cell.at_xpath("w:tcPr", NS)
+      unless tc_pr
+        tc_pr = Nokogiri::XML::Node.new("w:tcPr", cell.document)
+        cell.prepend_child(tc_pr)
+      end
+
+      merge_node = Nokogiri::XML::Node.new("w:vMerge", cell.document)
+      merge_node["w:val"] = val if val
+
+      anchor = tc_pr.at_xpath("w:tcW", NS) || tc_pr.at_xpath("w:gridSpan", NS)
+      anchor ? anchor.add_next_sibling(merge_node) : tc_pr.prepend_child(merge_node)
     end
 
     # Célula com texto existente: reaproveita o run que tem o texto (mantém a formatação) e limpa

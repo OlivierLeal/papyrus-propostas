@@ -106,6 +106,45 @@ class ScheduleTimelineRendererTest < ActiveSupport::TestCase
     assert_operator svg.scan("<text").size, :>=, 3
   end
 
+  # 2026-09, pedido do consultor: "consegue colocar a frase toda?" — um título que precisasse de
+  # mais de 3 linhas saía cortado com "…" antes desta correção.
+  test "a very long phase name never gets truncated with an ellipsis, however many lines it needs" do
+    long_name = "Elaboração dos Estudos Ambientais, Consolidação dos Diagnósticos, Revisão Técnica " \
+      "Completa dos Relatórios Finais e Apresentação dos Resultados ao Órgão Ambiental Licenciador"
+
+    svg = renderer(items: [ activity(long_name, "x", start: 1) ]).svgs.first
+
+    refute_includes svg, "…"
+    assert_includes svg, "Ambiental Licenciador" # a última palavra da frase aparece de verdade
+  end
+
+  # A linha de círculos inteira cresce pro tamanho do MAIOR título dela — sem isso, um título
+  # curto do lado de um título longo desalinharia o sublinhado/duração entre os dois.
+  test "a taller title makes the whole row taller without misaligning its shorter neighbor's underline" do
+    items = [
+      activity("Fase Curta", "a", start: 1, duration: 1),
+      activity("Fase com um Nome Bem Mais Longo do que a Vizinha Ao Lado Dela Mesma", "b", start: 2, duration: 1)
+    ]
+
+    svg = renderer(items: items).svgs.first
+    underline_ys = svg.scan(/<line x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="[\d.]+" stroke="#[0-9A-Fa-f]{6}" stroke-width="3"/).flatten
+
+    assert_equal 2, underline_ys.size
+    assert_equal underline_ys.first, underline_ys.last
+  end
+
+  # Cronograma sem nenhum título comprido continua com a mesma altura de sempre — a linha só
+  # cresce quando o CONTEÚDO precisa, não incondicionalmente.
+  test "a row with only short titles keeps the original, compact height" do
+    short_svg = renderer(items: [ activity("Fase A", "x", start: 1) ]).svgs.first
+    long_svg = renderer(items: [ activity("Fase com um Nome Consideravelmente Mais Longo do que Fase A", "x", start: 1) ]).svgs.first
+
+    short_height = short_svg[/viewBox="0 0 \d+ (\d+)"/, 1].to_i
+    long_height = long_svg[/viewBox="0 0 \d+ (\d+)"/, 1].to_i
+
+    assert_operator long_height, :>, short_height
+  end
+
   test "a schedule with many activities but few phases still fits in a single image" do
     # 6 fases contíguas × 5 atividades = 30 atividades, mas só 6 círculos.
     items = (1..6).flat_map do |phase|

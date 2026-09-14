@@ -310,6 +310,64 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     refute_includes document_xml(bytes), "{{EQUIPE_LIDER_PROJETO_NOME}}"
   end
 
+  # 2026-09, pedido do consultor: Charlene e Ricardo são os dois da Diretoria, e "Diretoria"
+  # saía repetido numa linha pra cada um em vez de uma célula só cobrindo as duas.
+  test "merge_first_column junta (vMerge) linhas consecutivas com o mesmo SETOR na equipe técnica" do
+    equipe_rows = [
+      [ "Diretoria", "Diretora de Negócios", "Charlene Luz", "Engenheira. CREA 1." ],
+      [ "Diretoria", "Diretor Técnico", "Ricardo Hortélio", "Biólogo. CRBio 2." ],
+      [ "Gestão", "Coordenador de Projetos", "Pedro Skinner", "Antropólogo. CRA 3." ]
+    ]
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables.merge(2 => { rows: equipe_rows, merge_first_column: true }))
+    doc = parsed_document(bytes)
+
+    equipe = doc.xpath("//w:tbl", NS)[2]
+    data_rows = equipe.xpath(".//w:tr", NS)[1..]
+    setor_cells = data_rows.map { |row| row.xpath(".//w:tc", NS).first }
+
+    assert_equal "restart", setor_cells[0].at_xpath(".//w:vMerge", NS)["w:val"]
+    assert setor_cells[1].at_xpath(".//w:vMerge", NS).present?
+    assert_nil setor_cells[1].at_xpath(".//w:vMerge", NS)["w:val"] # "continue" é o vMerge sem w:val
+    assert_empty cell_texts(data_rows[1])[0] # texto sozinho no run some — Word não desenha células "continue"
+
+    # Gestão não é consecutiva com nenhuma outra "Gestão" — não ganha vMerge nenhum.
+    assert_nil setor_cells[2].at_xpath(".//w:vMerge", NS)
+    assert_equal "Gestão", cell_texts(data_rows[2])[0]
+
+    # FUNÇÃO/PROFISSIONAL/HABILITAÇÃO nunca são afetados pelo merge — só a 1ª coluna.
+    assert_equal [ "Diretor Técnico", "Ricardo Hortélio", "Biólogo. CRBio 2." ], cell_texts(data_rows[1])[1..]
+  end
+
+  test "sem merge_first_column (padrão), SETOR repete normalmente em cada linha, sem vMerge nenhum" do
+    equipe_rows = [
+      [ "Diretoria", "Diretora de Negócios", "Charlene Luz", "Engenheira. CREA 1." ],
+      [ "Diretoria", "Diretor Técnico", "Ricardo Hortélio", "Biólogo. CRBio 2." ]
+    ]
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables.merge(2 => { rows: equipe_rows }))
+    doc = parsed_document(bytes)
+
+    data_rows = doc.xpath("//w:tbl", NS)[2].xpath(".//w:tr", NS)[1..]
+    assert_equal "Diretoria", cell_texts(data_rows[0])[0]
+    assert_equal "Diretoria", cell_texts(data_rows[1])[0]
+    assert_nil data_rows[0].xpath(".//w:tc", NS).first.at_xpath(".//w:vMerge", NS)
+    assert_nil data_rows[1].xpath(".//w:tc", NS).first.at_xpath(".//w:vMerge", NS)
+  end
+
+  # 2026-09, pedido do consultor: a coluna FORMATO (Quadro 6-1, produtos) era estreita demais
+  # (1179 dxa) — "FORMAT"/"O" quebrava em duas linhas e "Word e PDF" também. Alargada pra 1900,
+  # PRODUTOS encolheu de 7315 pra 6594 pra manter os 8494 dxa totais (mesma largura das outras 3
+  # tabelas do modelo).
+  test "a coluna FORMATO do quadro de produtos tem largura suficiente pra não quebrar em 2 linhas" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
+    doc = parsed_document(bytes)
+
+    produtos = doc.xpath("//w:tbl", NS)[1]
+    widths = produtos.xpath("./w:tblGrid/w:gridCol", NS).map { |col| col["w:w"].to_i }
+
+    assert_equal [ 6594, 1900 ], widths
+    assert_equal 8494, widths.sum # mesma largura total das outras tabelas do modelo
+  end
+
   # A tabela SUMÁRIO DE REVISÕES saía com 9912 dxa de largura num corpo de texto de 8504 dxa
   # (margens de 1701 dxa) — a coluna "Data" era cortada pela borda da página em produção. Trava
   # que nenhuma tabela do modelo passe da área útil de texto.

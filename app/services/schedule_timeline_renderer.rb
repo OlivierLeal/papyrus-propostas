@@ -38,7 +38,13 @@ class ScheduleTimelineRenderer
   UNDERLINE_BLOCK_HEIGHT = 14
   UNDERLINE_WIDTH = 28
   LABEL_LINE_HEIGHT = 20
-  LABEL_MAX_LINES = 3
+  # Só uma ESTIMATIVA pra decidir quantos itens cabem numa imagem antes de estourar
+  # MAX_IMAGE_HEIGHT_EMU (#items_per_image/#emu_per_row) — não é mais um teto de linhas pro
+  # título (2026-09, pedido do consultor: "consegue colocar a frase toda?" — títulos longos
+  # paravam em "…" depois de 3 linhas). A altura de cada linha de círculos agora é CALCULADA a
+  # partir do maior título daquela linha (#row_line_count/#row_height_for), nunca truncada; esta
+  # constante só evita recalcular a paginação com precisão milimétrica, que não vale o custo.
+  TYPICAL_LABEL_LINES = 3
   DATE_LINE_HEIGHT = 16
   DATE_BLOCK_HEIGHT = DATE_LINE_HEIGHT # só a duração em dias, uma linha (sem intervalo de datas)
   ROW_BOTTOM_PADDING = 16
@@ -174,7 +180,7 @@ class ScheduleTimelineRenderer
     end
 
     def emu_per_row
-      PRINT_WIDTH_EMU * (row_height.to_f / viewbox_width)
+      PRINT_WIDTH_EMU * (row_height_for(TYPICAL_LABEL_LINES).to_f / viewbox_width)
     end
 
     def render_chunk(chunk_items, number_offset)
@@ -200,17 +206,22 @@ class ScheduleTimelineRenderer
       ITEMS_PER_ROW * COLUMN_WIDTH
     end
 
-    def row_height
-      ROW_TOP_PADDING + (CIRCLE_R * 2) + LABEL_START_GAP + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) +
+    # Altura de UMA linha de círculos com `line_count` linhas de título — cresce com o maior
+    # título da linha em vez de sempre reservar o mesmo espaço fixo.
+    def row_height_for(line_count)
+      ROW_TOP_PADDING + (CIRCLE_R * 2) + LABEL_START_GAP + (line_count * LABEL_LINE_HEIGHT) +
         UNDERLINE_BLOCK_HEIGHT + DATE_BLOCK_HEIGHT + ROW_BOTTOM_PADDING
     end
 
-    def row_count_for(chunk_items)
-      (chunk_items.size / ITEMS_PER_ROW.to_f).ceil
+    # Quantas linhas o título mais longo DESTA linha de círculos precisa — todo círculo da mesma
+    # linha compartilha essa altura, pra sublinhado/duração ficarem alinhados entre colunas
+    # mesmo quando um título é bem mais curto que o vizinho.
+    def row_line_count(row_items)
+      row_items.map { |item| wrap_text(item.activity_name, MAX_CHARS_PER_LINE).size }.max
     end
 
     def viewbox_height_for(chunk_items)
-      row_count_for(chunk_items) * row_height
+      chunk_items.each_slice(ITEMS_PER_ROW).sum { |row| row_height_for(row_line_count(row)) }
     end
 
     def height_emu_for(chunk_items)
@@ -218,11 +229,16 @@ class ScheduleTimelineRenderer
     end
 
     def rows_xml(chunk_items, number_offset)
-      chunk_items.each_slice(ITEMS_PER_ROW).each_with_index.map { |row, index| row_xml(row, index, number_offset) }.join
+      row_top = 0
+      chunk_items.each_slice(ITEMS_PER_ROW).each_with_index.map do |row, index|
+        line_count = row_line_count(row)
+        xml = row_xml(row, index, number_offset, row_top, line_count)
+        row_top += row_height_for(line_count)
+        xml
+      end.join
     end
 
-    def row_xml(row_items, row_index, number_offset)
-      row_top = row_index * row_height
+    def row_xml(row_items, row_index, number_offset, row_top, line_count)
       cy = row_top + ROW_TOP_PADDING + CIRCLE_R
       centers = row_items.each_index.map { |i| column_center_x(i) }
       global_index = ->(i) { number_offset + (row_index * ITEMS_PER_ROW) + i }
@@ -230,7 +246,7 @@ class ScheduleTimelineRenderer
 
       line = row_items.size > 1 ? connector_xml(row_index, centers, cy, colors) : ""
       circles = row_items.each_with_index.map do |item, i|
-        step_xml(item, global_index.call(i) + 1, centers[i], cy, row_top, colors[i])
+        step_xml(item, global_index.call(i) + 1, centers[i], cy, row_top, colors[i], line_count)
       end.join
 
       "#{line}#{circles}"
@@ -280,12 +296,12 @@ class ScheduleTimelineRenderer
     # Círculo em ANEL (contorno colorido, miolo branco) com o ícone na MESMA cor do anel — não
     # preenchido sólido com ícone branco (versão anterior) — pra bater com a referência trazida
     # pelo consultor.
-    def step_xml(item, number, cx, cy, row_top, color)
+    def step_xml(item, number, cx, cy, row_top, color, line_count)
       <<~SVG
         <circle cx="#{cx}" cy="#{cy}" r="#{CIRCLE_R}" fill="#ffffff" stroke="##{color}" stroke-width="4"/>
         #{icon_xml(icon_for(item), cx, cy, color)}
         #{badge_xml(number, cx - (CIRCLE_R * 0.7), cy - (CIRCLE_R * 0.7), color)}
-        #{labels_xml(item, cx, row_top, cy, color)}
+        #{labels_xml(item, cx, row_top, cy, color, line_count)}
       SVG
     end
 
@@ -296,11 +312,12 @@ class ScheduleTimelineRenderer
       SVG
     end
 
-    # Sublinhado e data sempre na MESMA posição vertical dentro da linha — reserva o espaço de
-    # LABEL_MAX_LINES sempre, não só o que o título de fato ocupa, pra títulos de tamanhos
-    # diferentes não desalinharem o resto da etiqueta entre um círculo e outro da mesma linha
-    # (mesmo orçamento vertical que row_height já reserva por linha).
-    def labels_xml(item, cx, row_top, cy, color)
+    # Sublinhado e data sempre na MESMA posição vertical dentro da linha — reserva o espaço do
+    # MAIOR título da linha (line_count, calculado por #row_line_count), não só o que este título
+    # em particular ocupa, pra títulos de tamanhos diferentes não desalinharem o resto da etiqueta
+    # entre um círculo e outro da mesma linha (mesmo orçamento vertical que row_height_for já
+    # reserva por linha).
+    def labels_xml(item, cx, row_top, cy, color, line_count)
       top = cy + CIRCLE_R + LABEL_START_GAP
 
       title_lines = wrap_text(item.activity_name, MAX_CHARS_PER_LINE)
@@ -308,10 +325,10 @@ class ScheduleTimelineRenderer
         text_tag(cx, top + (i * LABEL_LINE_HEIGHT), line, size: 13, color: TEXT_COLOR, weight: "bold")
       end.join
 
-      underline_y = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) - (LABEL_LINE_HEIGHT / 2) + (UNDERLINE_BLOCK_HEIGHT / 2)
+      underline_y = top + (line_count * LABEL_LINE_HEIGHT) - (LABEL_LINE_HEIGHT / 2) + (UNDERLINE_BLOCK_HEIGHT / 2)
       underline = %(<line x1="#{cx - (UNDERLINE_WIDTH / 2)}" y1="#{underline_y}" x2="#{cx + (UNDERLINE_WIDTH / 2)}" y2="#{underline_y}" stroke="##{color}" stroke-width="3"/>)
 
-      duration_top = top + (LABEL_MAX_LINES * LABEL_LINE_HEIGHT) + UNDERLINE_BLOCK_HEIGHT
+      duration_top = top + (line_count * LABEL_LINE_HEIGHT) + UNDERLINE_BLOCK_HEIGHT
       duration_xml = duration_lines(item).each_with_index.map do |line, i|
         text_tag(cx, duration_top + (i * DATE_LINE_HEIGHT), line, size: 11, color: DATE_COLOR)
       end.join
@@ -324,8 +341,11 @@ class ScheduleTimelineRenderer
       %(<text x="#{x}" y="#{y}" text-anchor="middle" font-family="Arial, sans-serif" font-size="#{size}"#{weight_attr} fill="##{color}">#{escape(text)}</text>)
     end
 
-    # Quebra em até LABEL_MAX_LINES linhas por largura de caractere; se ainda sobrar palavra,
-    # trunca a última linha com reticência em vez de estourar a coluna.
+    # Quebra por largura de caractere, em quantas linhas forem necessárias (2026-09, pedido do
+    # consultor: "consegue colocar a frase toda?" — antes truncava com "…" depois de
+    # LABEL_MAX_LINES/3 linhas, mesmo em título curto o bastante pra caber em 4). Sem teto: a
+    # linha de círculos que contém o título mais longo cresce em altura pra caber (ver
+    # #row_line_count/#row_height_for), nunca corta texto.
     def wrap_text(text, max_chars)
       lines = []
       current = +""
@@ -340,12 +360,7 @@ class ScheduleTimelineRenderer
         end
       end
       lines << current if current.present?
-
-      return lines if lines.size <= LABEL_MAX_LINES
-
-      truncated = lines.first(LABEL_MAX_LINES)
-      truncated[-1] = "#{truncated.last.rstrip}…"
-      truncated
+      lines
     end
 
     # Só a duração em dias corridos, sem nenhuma data — pedido do consultor. Fase de ponto único

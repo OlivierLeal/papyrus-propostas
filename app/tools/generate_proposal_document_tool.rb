@@ -494,7 +494,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       {
         0 => { rows: @proposal.docx_revision_rows(current_description: description) },
         1 => { rows: produtos },
-        2 => { rows: @proposal.team_rows_for_docx },
+        # merge_first_column: junta "Diretoria"/"Gestão"/"Execução" numa célula só quando mais de
+        # um profissional cai no mesmo setor em linhas consecutivas (2026-09, pedido do consultor
+        # — ver ProposalDocxFiller#merge_first_column!).
+        2 => { rows: @proposal.team_rows_for_docx, merge_first_column: true },
         3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: true },
         4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
