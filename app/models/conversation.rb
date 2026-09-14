@@ -123,7 +123,11 @@ class Conversation < ApplicationRecord
     unidade (se o sistema diz horas, escreva horas). Número de esforço inventado no texto contradiz
     a planilha que gerou o preço, e é o consultor que descobre isso na frente do cliente. Se o
     sistema ainda não tem aquele número, descreva a atividade sem quantificar ou escreva
-    "a definir", em vez de estimar.
+    "a definir", em vez de estimar — e gere a proposta assim mesmo. Esta regra é só sobre o TEXTO
+    que você escreve nas seções (não estimar um número pra aparecer impresso); ela NUNCA significa
+    "não chame generate_proposal_document" ou "peça pro consultor preencher horas/dias de campo
+    antes" — equipe com horas zeradas e logística zerada não são motivo pra recusar gerar nada,
+    documento ou cronograma (ver item 12 do passo a passo interno).
 
     Responda sempre em português.
   TEXT
@@ -174,7 +178,13 @@ class Conversation < ApplicationRecord
         consultor disser a data de início no chat (ex.: "o cronograma começa em 15/10"), passe em
         data_inicio_cronograma_servico/data_inicio_cronograma_implantacao; se ele não disser nada
         e não houver data nenhuma cadastrada, o sistema mesmo presume o início do mês que vem e
-        avisa disso na resposta — nunca bloqueia a geração por causa do cronograma.
+        avisa disso na resposta — nunca bloqueia a geração por causa do cronograma. Isso vale
+        MESMO se a equipe ainda estiver com horas zeradas (0h) e a logística com 0 dias de campo/0
+        km: o sistema sugere equipe (template ou IA) e logística (distância/combustível) sozinho a
+        cada chamada — não é motivo pra você recusar gerar o documento nem pra escrever uma
+        explicação pro consultor preencher esses campos antes de tentar de novo. Sempre chame a
+        ferramenta; se algo específico ainda não puder ser calculado, é ELA quem avisa isso na
+        própria mensagem de retorno (nunca invente esse aviso por conta própria).
     13. Enviar para Sara ou Charlene revisar — acontece depois de gerado o rascunho, é lembrete pro
         consultor, nunca bloqueia a geração.
 
@@ -198,11 +208,18 @@ class Conversation < ApplicationRecord
       não pergunte "Opção A/B/C", só gere. Se 3, 5, 6 e 11 estiverem minimamente resolvidos, chame a
       ferramenta — com a proposta em "draft" ela gera só a proposta_tecnica.docx sozinha.
     - Se o pedido for a proposta COMERCIAL ou o documento completo (ou "a proposta" sem
-      qualificar, quando o status já não é mais "draft"): verifique também os itens 7, 8 e 10. Além
-      disso, a ferramenta só gera esse lado se o status já for "priced" ou "approved" — se o
-      [ESTADO ATUAL DA PROPOSTA] mostrar "draft" ou "pricing", NÃO chame a ferramenta: diga ao
-      consultor que a Tela de Precificação precisa ser revisada e confirmada antes (não peça os
-      valores um por um pelo chat — quem ajusta isso é o consultor naquela tela).
+      qualificar, quando o status já não é mais "draft"): verifique também os itens 7, 8 e 10 —
+      "verificar" aqui é só CONFERIR/LEMBRAR o consultor deles (ex.: "ainda não há custo externo
+      de fauna lançado, considere lançar antes de aprovar o preço"), exatamente como já vale pra
+      técnica: eles NUNCA bloqueiam a geração do documento nem fazem você recusar chamar a
+      ferramenta. Equipe com 0h ou logística zerada não impedem o "priced"/"approved" de gerar o
+      lado comercial — o preço sai calculado com o que já existe (mesmo que 0), e o consultor
+      ajusta na Tela de Precificação depois, revisando o que saiu. O ÚNICO bloqueio real deste
+      lado é o STATUS da proposta: a ferramenta só gera o lado comercial se o status já for
+      "priced" ou "approved" — se o [ESTADO ATUAL DA PROPOSTA] mostrar "draft" ou "pricing", NÃO
+      chame a ferramenta: diga ao consultor que a Tela de Precificação precisa ser revisada e
+      confirmada antes (não peça os valores um por um pelo chat — quem ajusta isso é o consultor
+      naquela tela).
 
     Os itens 1, 2, 4, 9 e 13 são administrativos e internos da Papyrus (pasta na rede, controle de
     propostas, e-mail ao cliente, NDA de prestador, revisão com Sara/Charlene) — apenas lembre o
@@ -598,6 +615,7 @@ class Conversation < ApplicationRecord
       end.join("\n")
 
       external_costs = pricing.external_costs.map { |c| "#{c['description']} (R$ #{c['value']})" }.join(", ")
+      team_all_zero = pricing.proposal_professionals.none? || pricing.proposal_professionals.all? { |pp| pp.hours_office.zero? && pp.hours_field.zero? }
       logistics_filled = pricing.logistics_total.positive? || pricing.distance_km.positive?
 
       <<~TEXT
@@ -611,6 +629,24 @@ class Conversation < ApplicationRecord
         - Logística: #{pricing.logistics_days} dias de campo, #{pricing.distance_km} km de distância#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
         - Custos externos: #{external_costs.presence || "nenhum lançado"}
         - Preço total calculado: R$ #{pricing.total_value}
+        #{team_all_zero || !logistics_filled ? proposal_state_zero_warning : ""}
       TEXT
+    end
+
+    # Nota anexada ao [ESTADO ATUAL DA PROPOSTA] só quando equipe/logística ainda estão zeradas —
+    # achado ao vivo em produção (2026-09): mesmo com a checklist interna já dizendo "nunca
+    # bloqueia por causa do cronograma", a IA reagia aos números 0h/0km deste MESMO bloco
+    # inventando uma recusa ("problema estrutural", "documento vazio de conteúdo executivo") e
+    # pedindo pro consultor preencher horas/dias de campo manualmente pelo chat antes de tentar de
+    # novo — nunca chamando generate_proposal_document. Repetir a regra aqui, ao lado do número
+    # que dispara a reação, é mais eficaz do que só a checklist (mais distante no histórico).
+    def proposal_state_zero_warning
+      "AVISO: equipe com 0h e/ou logística zerada acima são o estado NORMAL antes da 1ª geração — " \
+      "NÃO é um problema, e NÃO é motivo pra recusar chamar generate_proposal_document nem pra " \
+      "pedir esses números pelo chat antes de tentar. A ferramenta sugere/calcula equipe " \
+      "(template determinístico), cronograma (sugestão automática em background) e logística " \
+      "(distância/combustível via geolocalização) sozinha, a cada chamada. Chame a ferramenta " \
+      "normalmente agora; se algo específico não puder ser calculado, ela mesma avisa isso na " \
+      "própria resposta — nunca escreva você mesmo um aviso de bloqueio por causa destes números."
     end
 end

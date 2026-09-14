@@ -1854,6 +1854,47 @@ mandou o consultor procurar o time de desenvolvimento. Quatro correções, uma p
   "Não identificado", moldura de aviso, e o botão "Avançar para Precificação" desabilitado diz
   por quê.
 
+### Bloqueio inventado pela IA: equipe/logística zeradas (2026-09, achado em produção)
+
+Um consultor pediu pra gerar a proposta comercial com cronograma numa proposta real, e a IA
+recusou em TEXTO LIVRE — nunca chegou a chamar `generate_proposal_document` — alegando que
+"sem dados de equipe/campanha de campo o cronograma seria fictício", com Charlene/Ricardo/Pedro
+em 0h e logística em 0 dias/0km, e pediu pro consultor preencher tudo manualmente na Tela de
+Precificação (ou ditar os números no chat) antes de tentar de novo.
+
+**Causa raiz:** não existe, nem existia, nenhuma trava real no código nem instrução de sistema
+mandando exigir isso — pelo contrário, a checklist interna (item 12) já dizia explicitamente
+"nunca bloqueia a geração por causa do cronograma", e `GenerateProposalDocumentTool#execute` não
+tem nenhum `return`/gate condicionado a horas de equipe ou dias de campo (só sugere e segue,
+via `build_from_template!`/`ensure_schedule_background_work!`/`ensure_logistics_suggested!`). A
+IA generalizou indevidamente uma regra DIFERENTE, real (`SYSTEM_INSTRUCTIONS`: "não invente
+número de esforço no TEXTO da proposta, escreva 'a definir'") — que fala de como escrever um
+número dentro do corpo do texto — pra uma decisão de NÃO CHAMAR a ferramenta. Alucinação de
+política, não uma instrução real seguida.
+
+**Correção, em duas camadas** (a 1ª sozinha não foi suficiente — verificado ao vivo, ver
+abaixo):
+1. Reforço nas instruções (`SYSTEM_INSTRUCTIONS` e `PROPOSAL_CHECKLIST_INSTRUCTIONS`, item 12 e
+   o bloco da proposta COMERCIAL): deixa explícito que a regra de "a definir" é só sobre o
+   TEXTO, nunca sobre chamar a ferramenta, e que equipe 0h/logística zerada nunca bloqueiam nem
+   a técnica nem a comercial — só o STATUS da proposta bloqueia a comercial ("draft"/"pricing").
+2. **`Conversation#proposal_state_text` ganhou um aviso condicional** (`#proposal_state_zero_
+   warning`, só aparece quando a equipe está toda em 0h e/ou a logística não está preenchida) —
+   repetindo a mesma regra bem ao lado dos números "0h"/"0 km" que disparavam a reação, dentro do
+   próprio bloco `[ESTADO ATUAL DA PROPOSTA]`. Instrução repetida uma única vez, no início da
+   conversa (checklist), não bastou; ao lado do dado que a IA está reagindo, no MESMO turno, foi
+   o que resolveu de verdade — mesmo princípio já usado pro `[BLOQUEIO: TIPO DE ESTUDO]` acima.
+
+Verificado ao vivo, reproduzindo o cenário exato (`bin/rails runner`, chamada real ao Bedrock, não
+simulada): conversa sintética com `ensure_proposal!(ai_suggestions: false)` (equipe do template,
+Charlene/Ricardo/Pedro em 0h, logística em 0 — o MESMO estado do incidente) e proposta em
+"priced". Só com a correção 1 (reforço na checklist), a IA AINDA recusava citando "problema
+estrutural", "0h", "0 dias de campo", "documento vazio de conteúdo executivo". Com a correção 2
+(aviso no snapshot) também aplicada, a mesma pergunta parou de mencionar equipe/logística
+zeradas — passou a focar (corretamente) em conteúdo de texto realmente ausente no cenário de
+teste (a conversa sintética não tinha ET nenhum processado, só achados soltos), sem nenhuma
+menção a horas/dias de campo como bloqueio.
+
 ---
 
 ## 14. Chat geral de dúvidas (`GeneralChat`, implementado)
