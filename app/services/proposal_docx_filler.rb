@@ -311,6 +311,21 @@ class ProposalDocxFiller
       return unless paragraph
 
       paragraph.add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
+      strip_titlepg_from_final_section!(doc)
+    end
+
+    # O <w:titlePg/> do <w:sectPr> final do corpo diz "a 1ª página desta seção usa cabeçalho/
+    # rodapé DIFERENTE" — certo enquanto essa é a ÚNICA seção do documento (a 1ª página é mesmo a
+    # capa, com header2.xml/sem logo e, de propósito, sem rodapé algum). Depois que o cronograma
+    # é inserido, esse mesmo sectPr passa a valer só pra seção 3 (o que sobra depois do bloco
+    # paisagem) — a "1ª página" dela não é mais a capa, é só a página seguinte ao cronograma, mas
+    # sem isto ela herdava o mesmo tratamento por engano: sem NENHUM footerReference type="first"
+    # declarado, o Word/LibreOffice não caem pro "default", simplesmente não mostram rodapé
+    # nenhum ali. Achado ao vivo corrigindo a numeração de página (2026-09): a página logo depois
+    # do cronograma ficava sem "Sistema de Gestão..." nenhum. Remover é seguro — sem `titlePg`, a
+    # seção usa `type="default"` em toda página dela, igual as outras.
+    def strip_titlepg_from_final_section!(doc)
+      doc.at_xpath("//w:body/w:sectPr/w:titlePg", NS)&.remove
     end
 
     # portrait_sect/landscape_sect: propriedades de seção pra abrir/fechar o bloco paisagem. No
@@ -365,6 +380,7 @@ class ProposalDocxFiller
       else
         schedule_anchor_node(children).add_previous_sibling(fragment)
       end
+      strip_titlepg_from_final_section!(doc)
     end
 
     # Bloco de cronograma já presente: legenda "Quadro 11-N: …" cercada por dois parágrafos com

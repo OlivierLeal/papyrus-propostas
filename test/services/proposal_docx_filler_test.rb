@@ -47,6 +47,24 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes document_text(bytes), "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
   end
 
+  # Numeração de página (2026-09, relato do consultor: "falta a numeração de páginas"). O rodapé
+  # do modelo tinha a palavra "PAGE" digitada como texto puro, nunca um campo de verdade — nunca
+  # mostrava número nenhum, em nenhum leitor. Corrigido trocando por um campo OOXML real
+  # (fldChar begin/instrText " PAGE "/fldChar separate/fldChar end) nos dois rodapés (footer1.xml
+  # retrato, footer2.xml paisagem do cronograma) — e nas DUAS cópias de cada (a versão DrawingML
+  # moderna e o fallback VML de compatibilidade, que o Word sempre grava em espelho).
+  test "fill replaces the literal \"PAGE\" text with a real OOXML page-number field, in both footers" do
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
+
+    [ "word/footer1.xml", "word/footer2.xml" ].each do |entry|
+      xml = zip_entry_content(bytes, entry)
+      assert_not_includes xml, "PAGE   ", "não pode sobrar o texto \"PAGE\" cru em #{entry}"
+      assert_equal 2, xml.scan(%(w:fldCharType="begin")).size, "#{entry} precisa do campo nas 2 cópias (DrawingML + fallback VML)"
+      assert_equal 2, xml.scan(%(w:fldCharType="end")).size
+      assert_includes xml, "PAGE", "a instrução do campo (\" PAGE \") continua presente, só não é mais texto solto"
+    end
+  end
+
   # Concordância corrigida no texto fixo da seção PRAZO DE EXECUÇÃO (2026-09, pedido do
   # consultor a partir de uma referência): faltava o artigo "a" antes de CONTRATANTE e antes de
   # PAPYRUS ("entre CONTRATANTE e PAPYRUS" → "entre a CONTRATANTE e a PAPYRUS"). Texto fixo do
@@ -553,6 +571,10 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_equal 1, doc.xpath("//w:sectPr", NS).size
     assert_not_includes document_xml(bytes), "Cronograma"
+    # Sem cronograma pra inserir, essa continua sendo a ÚNICA seção — a 1ª página dela é mesmo a
+    # capa, então o <w:titlePg/> não deve ser removido (ao contrário do caso com cronograma, ver
+    # o teste de "restoring portrait afterwards").
+    assert doc.at_xpath("//w:sectPr/w:titlePg", NS), "titlePg tem que continuar existindo quando não há cronograma nenhum"
   end
 
   test "fill inserts a landscape schedule table right after PRAZO DE EXECUÇÃO, restoring portrait afterwards" do
@@ -571,6 +593,14 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal "rId16", sect_prs[0].at_xpath("w:footerReference", NS)["r:id"]
     assert_equal "rId20", sect_prs[1].at_xpath("w:footerReference", NS)["r:id"]
     assert zip_entry_names(bytes).include?("word/footer2.xml"), "o modelo tem que trazer o footer2.xml"
+
+    # REGRESSÃO (2026-09): a seção 3 (o que sobra depois do cronograma) é o MESMO <w:sectPr>
+    # final do corpo que, no modelo original sem cronograma nenhum, é a única seção — lá o
+    # <w:titlePg/> está certo (1ª página do documento = capa, com header sem logo e sem rodapé
+    # nenhum). Depois de inserir o cronograma, a "1ª página desta seção" passa a ser a página
+    # seguinte ao bloco paisagem, não mais a capa — sem remover o titlePg, essa página ficava
+    # sem NENHUM rodapé (não existe footerReference type="first" pra ela cair).
+    assert_nil sect_prs[2].at_xpath("w:titlePg", NS), "titlePg da seção final tem que sumir quando o cronograma é inserido"
 
     xml = document_xml(bytes)
     assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
@@ -738,6 +768,12 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes zip_entry_content(result, "word/_rels/document.xml.rels"), "media/cronograma_servico_1.png"
     assert_includes xml, "PRAZO DE EXECU", "a seção âncora continua no documento"
     assert_includes xml, @placeholders["OBJETIVO_SERVICOS"] || "", "o resto do texto do documento fica intacto" if @placeholders["OBJETIVO_SERVICOS"].present?
+
+    # Mesma regressão de #fill (ver "restoring portrait afterwards") — o .docx do consultor
+    # também tinha titlePg na sectPr final, e ela também deixa de valer como "1ª página =
+    # capa" depois que o cronograma é encaixado.
+    doc = parsed_document(result)
+    assert_nil doc.at_xpath("//w:sectPr[last()]/w:titlePg", NS)
   end
 
   test "insert_schedule_section replaces an existing schedule block instead of duplicating it" do
