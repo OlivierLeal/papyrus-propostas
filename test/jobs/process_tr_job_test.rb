@@ -77,21 +77,20 @@ class ProcessTrJobTest < ActiveSupport::TestCase
   end
 
   test "assigns the study type when the ET hasn't set one yet and the TR answers with a real code from the menu" do
-    @conversation.update_column(:study_type_id, nil)
+    @conversation.study_types.clear
     attach_tr!
 
     stub_ai_complete(tr_reply(campo: "tipo_estudo", valor: "eia_rima")) { ProcessTrJob.perform_now(@conversation.id) }
 
-    assert_equal study_types(:eia_rima), @conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima) ], @conversation.reload.study_types
   end
 
-  test "does not overwrite a study type that was already set (ex.: pelo ET)" do
-    original = @conversation.study_type
+  test "is additive — a study type found in the TR adds to what the ET already set, without removing it" do
     attach_tr!
 
     stub_ai_complete(tr_reply(campo: "tipo_estudo", valor: "rap")) { ProcessTrJob.perform_now(@conversation.id) }
 
-    assert_equal original, @conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima), study_types(:rap) ].to_set, @conversation.reload.study_types.to_set
   end
 
   test "marks tr as failed and does not raise when the AI call errors out" do

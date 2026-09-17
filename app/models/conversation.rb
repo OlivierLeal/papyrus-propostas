@@ -244,7 +244,12 @@ class Conversation < ApplicationRecord
   # Não é escolhido no setup — a IA identifica lendo o ET (ver #assign_study_type_from_findings!,
   # chamado por ProcessEtJob e, quando houver TR e o ET não tiver definido antes, por ProcessTrJob),
   # restrito ao menu real de StudyType. Fica nil até isso acontecer (ou se não houver ET nem TR).
-  belongs_to :study_type, optional: true
+  # Uma proposta pode exigir vários estudos ao mesmo tempo (ex.: EIA-RIMA + Relatório Técnico
+  # complementar), ou nenhum — só assessoria/monitoramento contínuo ("Acompanhamento", mais um
+  # StudyType cadastrado como qualquer outro, não um caso especial no código). Por isso 2026-09:
+  # deixou de ser `belongs_to :study_type` (FK única) — ver `conversation_study_types`.
+  has_many :conversation_study_types, dependent: :destroy
+  has_many :study_types, through: :conversation_study_types
   has_one :geospatial_result, dependent: :destroy
   has_one :proposal, dependent: :destroy
 
@@ -260,6 +265,17 @@ class Conversation < ApplicationRecord
     STATUS_LABELS.fetch(status, status)
   end
 
+  # "EIA-RIMA, Relatório Técnico" (vários), "Acompanhamento" (um só, cadastrado como qualquer
+  # outro tipo), ou o aviso de que nenhum foi identificado ainda — nunca mais um bloqueio (ver
+  # CLAUDE.md seção 13, "proposta pode ter N tipos de estudo"). Usado nas telas no lugar do antigo
+  # `study_type&.name`.
+  def study_types_label
+    # `.map(&:name).sort` (Ruby), nunca `.order(:name).pluck(:name)` (SQL) — isso dispararia uma
+    # consulta NOVA mesmo quando `study_types` já veio via `includes` (Conversation.search),
+    # jogando fora o eager load (Bullet acusa "unused eager loading" nesse caso).
+    study_types.map(&:name).sort.join(", ").presence || "Tipo de estudo: aguardando identificação da IA"
+  end
+
   # Busca na tela de Propostas por cliente, código (ex.: "PTC26098") ou ano — um campo só, porque
   # o código já embute o ano (ver Proposal#docx_numero_proposta) e a maioria digita só um dos três
   # de cada vez. Filtra em Ruby, não em SQL: código não é coluna nenhuma, é calculado a partir de
@@ -268,7 +284,7 @@ class Conversation < ApplicationRecord
   # código de cada conversa.
   def self.search(query)
     normalized = query.to_s.strip.downcase
-    return order(created_at: :desc).includes(:user, :study_type, :proposal) if normalized.blank?
+    return order(created_at: :desc).includes(:user, :study_types, :proposal) if normalized.blank?
 
     # Acha os ids em duas passadas: a 1ª só decide quem bate (com o mínimo de includes pra
     # calcular o código sem N+1), a 2ª carrega o que a tela realmente precisa — SÓ para os ids que
@@ -277,7 +293,7 @@ class Conversation < ApplicationRecord
     ids = includes(:proposal).select { |conversation| conversation.matches_search?(normalized) }.map(&:id)
     return none if ids.empty?
 
-    where(id: ids).order(created_at: :desc).includes(:user, :study_type, :proposal)
+    where(id: ids).order(created_at: :desc).includes(:user, :study_types, :proposal)
   end
 
   def matches_search?(normalized_query)
@@ -301,28 +317,37 @@ class Conversation < ApplicationRecord
   # cadastro" — usado pra não duplicar o aviso quando ET e TR passam por aqui na mesma conversa.
   STUDY_TYPE_OUT_OF_CATALOG = "tipo de estudo fora do cadastro".freeze
 
-  # Define o tipo de estudo a partir dos achados já extraídos (ET, e TR como reforço).
+  # Associa os tipos de estudo a partir dos achados já extraídos (ET, e TR como reforço) — uma
+  # proposta pode precisar de VÁRIOS estudos ao mesmo tempo, ou de nenhum (só acompanhamento,
+  # também um StudyType cadastrado como qualquer outro). ADITIVO, não sobrescreve: o TR pode
+  # trazer um achado de tipo_estudo que o ET não mencionou, e os dois devem ficar associados —
+  # por isso não tem mais o "return if já definido" que a versão singular tinha (2026-09).
   #
-  # Antes isto vivia duplicado em ProcessEtJob/ProcessTrJob e era um `find_by(code:)` seco: código
-  # que não batesse com nenhum cadastro não fazia NADA — nem gravava, nem avisava ninguém. A
-  # conversa 31 (produção, VSZ Energy) travou exatamente aí: a IA respondeu "eai" (Estudo
-  # Ambiental Intermediário), que a Papyrus nunca cadastrou, study_type ficou nil, e a partir daí
-  # generate_proposal_document recusou gerar a proposta pra sempre — sem que o consultor nem a IA
-  # tivessem como saber o motivo. A IA chamou a ferramenta quatro vezes e acabou mandando o
-  # consultor "falar com o Molina ou o Pedro".
+  # Antes (versão singular) isto vivia duplicado em ProcessEtJob/ProcessTrJob e era um
+  # `find_by(code:)` seco: código que não batesse com nenhum cadastro não fazia NADA — nem
+  # gravava, nem avisava ninguém. A conversa 31 (produção, VSZ Energy) travou exatamente aí: a IA
+  # respondeu "eai" (Estudo Ambiental Intermediário), que a Papyrus nunca cadastrou, study_type
+  # ficou nil, e a partir daí generate_proposal_document recusou gerar a proposta pra sempre — sem
+  # que o consultor nem a IA tivessem como saber o motivo.
   #
-  # Duas mudanças: o casamento tolera a IA devolver o nome no lugar do código (StudyType
-  # .match_ai_value), e o que não casa vira um achado visível — mesma regra da sugestão de equipe
-  # fora do cadastro (Proposal#flag_out_of_catalog): ou falta cadastro, ou a IA inventou, e as duas
-  # coisas são informação pro consultor.
-  def assign_study_type_from_findings!
-    return if study_type_id.present?
+  # O casamento tolera a IA devolver o nome no lugar do código (StudyType.match_ai_value), e o que
+  # não casa vira um achado visível — mesma regra da sugestão de equipe fora do cadastro
+  # (Proposal#flag_out_of_catalog): ou falta cadastro, ou a IA inventou, e as duas coisas são
+  # informação pro consultor (não bloqueia mais nada, ver flag_study_type_out_of_catalog).
+  def assign_study_types_from_findings!
+    values = project_findings.active.where(field: "tipo_estudo").pluck(:value).uniq
+    out_of_catalog = []
 
-    values = project_findings.active.where(field: "tipo_estudo").pluck(:value)
-    match = values.filter_map { |value| StudyType.match_ai_value(value) }.first
-    return update!(study_type: match) if match
+    values.each do |value|
+      match = StudyType.match_ai_value(value)
+      if match
+        study_types << match unless study_types.include?(match)
+      else
+        out_of_catalog << value
+      end
+    end
 
-    flag_study_type_out_of_catalog(values)
+    flag_study_type_out_of_catalog(out_of_catalog)
   end
 
   # ai_suggestions: false é usado por GenerateProposalDocumentTool (chamada pelo chat) — essa
@@ -341,14 +366,16 @@ class Conversation < ApplicationRecord
   # ver a equipe já sugerida pela IA ao abrir a Tela de Precificação.
   def ensure_proposal!(ai_suggestions: true)
     # Recarrega antes de checar: quem chama isso pelo chat (RespondToMessageJob) carregou este
-    # Conversation no início do job, e a resposta da IA pode levar dezenas de segundos — achado
-    # na prática: o consultor marcou o tipo de estudo pela tela ENQUANTO o job já estava rodando
-    # com o objeto antigo em memória (status_type_id gravado no banco às 14:22:03, mas o objeto em
-    # memória do job, carregado às 14:21:58, só via a chamada da ferramenta às 14:22:24 — sem
-    # reload, `study_type` continuava nil pro objeto, mesmo já presente no banco havia 21s).
+    # Conversation no início do job, e a resposta da IA pode levar dezenas de segundos — achado na
+    # prática (época em que `study_type` ainda era o gate, antes de 2026-09): o consultor mudou
+    # algo pela tela ENQUANTO o job já estava rodando com o objeto antigo em memória (gravado no
+    # banco às 14:22:03, mas o objeto em memória do job, carregado às 14:21:58, só via a chamada
+    # da ferramenta às 14:22:24 — sem reload, o valor continuava velho pro objeto, mesmo já
+    # atualizado no banco havia 21s). `status` é o único gate hoje, mas a mesma corrida vale pra
+    # ele.
     reload
     return proposal if proposal.present?
-    return nil unless status == "reviewing" && study_type.present?
+    return nil unless status == "reviewing"
 
     new_proposal = create_proposal!(status: "draft")
     if ai_suggestions
@@ -388,7 +415,7 @@ class Conversation < ApplicationRecord
   def refresh_proposal_state_snapshot!
     messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
     text = [ proposal.present? ? proposal_state_text : no_proposal_state_text,
-             study_type_blocker_text, findings_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
+             findings_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
     snapshot = create_user_message(text)
     snapshot.update!(internal: true)
   end
@@ -429,7 +456,8 @@ class Conversation < ApplicationRecord
   # em paralelo (config/queue.yml tem 3 threads de worker) — mas ProcessEtJob, ProcessTrJob e
   # ProcessCompDocsJob chamam ask_internally na MESMA conversa ao mesmo tempo. Sem essa trava, duas
   # chamadas concorrentes disputam "a última mensagem do assistente" (linha abaixo, e também em
-  # ProcessEtJob#assign_study_type!), e uma rouba a resposta da outra — visto na prática numa
+  # #assign_study_types_from_findings!, chamado por ProcessEtJob/ProcessTrJob), e uma rouba a
+  # resposta da outra — visto na prática numa
   # conversa real: a extração estruturada do ET sumiu (perdida pra uma resposta duplicada dos
   # complementares) e o tipo de estudo nunca foi identificado. pg_advisory_xact_lock serializa só
   # as chamadas da MESMA conversa (id como chave) — outras conversas continuam livres pra rodar em
@@ -502,21 +530,29 @@ class Conversation < ApplicationRecord
   private
     # O valor que a IA respondeu continua registrado como achado normal (source_kind "et"/"tr") —
     # este aqui é o aviso do SISTEMA de que ele não casa com nada cadastrado. Fica visível no
-    # resumo, no snapshot que a IA lê a cada turno e na tela de achados.
+    # resumo, no snapshot que a IA lê a cada turno e na tela de achados. NUNCA bloqueia nada
+    # (2026-09) — uma proposta pode ter outros tipos já associados, ou nenhum (acompanhamento); um
+    # achado fora do catálogo é só informação pro consultor decidir se cadastra o que falta.
+    # 1 achado por VALOR (não por lote) — assign_study_types_from_findings! roda de novo a cada
+    # achado novo de "tipo_estudo" (ET e TR podem repetir o mesmo valor não-cadastrado), e o check
+    # de valor EXATO (não `LIKE` de prefixo) evita duplicar por valor já sinalizado antes.
     def flag_study_type_out_of_catalog(values)
-      return if values.blank?
-      return if project_findings.where(field: "outro", source_kind: "sistema")
-                                .where("value LIKE ?", "#{STUDY_TYPE_OUT_OF_CATALOG}%").exists?
+      Array(values).uniq.each do |value|
+        next if value.blank?
+        next if project_findings.where(field: "outro", source_kind: "sistema",
+          value: "#{STUDY_TYPE_OUT_OF_CATALOG}: #{value}").exists?
 
-      project_findings.create!(
-        field: "outro", nature: "sugestao", source_kind: "sistema",
-        value: "#{STUDY_TYPE_OUT_OF_CATALOG}: #{values.uniq.join(', ')}",
-        excerpt: "A IA identificou este tipo de estudo nos documentos, mas ele não existe em " \
-                 "Configurações > Tipos de Estudo. Enquanto o consultor não escolher um tipo " \
-                 "equivalente (ou cadastrar este), nenhuma proposta pode ser criada."
-      )
-    rescue ActiveRecord::RecordInvalid => e
-      Rails.logger.warn("[Conversation] não consegui registrar tipo de estudo fora do cadastro: #{e.message}")
+        project_findings.create!(
+          field: "outro", nature: "sugestao", source_kind: "sistema",
+          value: "#{STUDY_TYPE_OUT_OF_CATALOG}: #{value}",
+          excerpt: "A IA identificou este tipo de estudo nos documentos, mas ele não existe em " \
+                   "Configurações > Tipos de Estudo. Se nenhum tipo já associado a esta proposta " \
+                   "for equivalente, o consultor pode marcar um tipo cadastrado ou cadastrar este " \
+                   "em Configurações > Tipos de Estudo."
+        )
+      rescue ActiveRecord::RecordInvalid => e
+        Rails.logger.warn("[Conversation] não consegui registrar tipo de estudo fora do cadastro: #{e.message}")
+      end
     end
 
     # pg_advisory_xact_lock bloqueia outras chamadas com a MESMA chave (id da conversa) até a
@@ -532,33 +568,6 @@ class Conversation < ApplicationRecord
 
     def merge_processing_steps!(patch)
       self.class.where(id: id).update_all([ "processing_steps = processing_steps || ?::jsonb", patch.to_json ])
-    end
-
-    # Sem tipo de estudo não existe menu de horas (study_templates) — logo não existe equipe, não
-    # existe proposta, nem a técnica. Isso PRECISA estar escrito no snapshot: a IA só enxerga o
-    # chat, e o erro que a ferramenta devolve sozinho não diz onde o consultor resolve. Na conversa
-    # 31 ela concluiu que era falha do backend e mandou o consultor procurar o time de
-    # desenvolvimento — quatro chamadas de ferramenta depois, a proposta continuava sem sair.
-    def study_type_blocker_text
-      return "" if study_type.present?
-      return "" if status.in?(%w[setup processing])
-
-      suggested = project_findings.active.where(field: "tipo_estudo").pluck(:value).uniq
-      cadastrados = StudyType.order(:name).pluck(:name).join(", ").presence || "nenhum"
-
-      <<~TEXT
-        [BLOQUEIO: TIPO DE ESTUDO] (gerado pelo sistema, reflete o estado real):
-        - O tipo de estudo desta proposta NÃO está definido no sistema. Sem ele não há como montar
-          a equipe nem criar a proposta — nem a técnica. O processamento dos documentos JÁ terminou:
-          isto não é questão de esperar, nem falha do backend.
-        #{suggested.any? ? "- Você identificou #{suggested.map(&:inspect).join(' / ')} nos documentos, mas isso não corresponde a nenhum tipo cadastrado. Cadastrados hoje: #{cadastrados}." : "- Nenhum tipo de estudo foi identificado nos documentos. Cadastrados hoje: #{cadastrados}."}
-        - O QUE FAZER: não chame generate_proposal_document (ela vai recusar de novo, com o mesmo
-          erro). Diga ao consultor que ele precisa escolher o tipo de estudo no painel "Tipo de
-          estudo", no alto da coluna à esquerda desta tela, e clicar em "Salvar" — ou, se nenhum
-          dos cadastrados servir, cadastrar o que falta em Configurações > Tipos de Estudo.
-          Sugira qual dos cadastrados mais se aproxima do que você leu nos documentos. Assim que
-          ele salvar, este bloco some e você gera a proposta normalmente.
-      TEXT
     end
 
     # O que foi extraído dos documentos desta proposta, com o código de citação de cada item.
@@ -600,11 +609,9 @@ class Conversation < ApplicationRecord
           ferramenta generate_proposal_document cria a proposta sozinha (com a equipe já sugerida
           pela IA) na hora que você a chama de verdade, sem precisar que o consultor clique em nada
           na tela antes. Se ele pedir a proposta técnica, siga o passo a passo normal (itens 1, 3,
-          4, 9) e chame a ferramenta — ela cuida do resto. O único caso em que isso NÃO funciona é
-          o tipo de estudo não estar definido no sistema — e quando for esse o caso, o bloco
-          [BLOQUEIO: TIPO DE ESTUDO] aparece logo abaixo dizendo exatamente o que fazer. Sem esse
-          bloco, não existe pendência: chame a ferramenta (não invente "clique em Avançar para
-          Precificação").
+          4, 9) e chame a ferramenta — ela cuida do resto. Tipo de estudo NÃO é pré-requisito —
+          uma proposta pode ter vários, ou nenhum (proposta de acompanhamento); não existe
+          pendência aqui: chame a ferramenta (não invente "clique em Avançar para Precificação").
       TEXT
     end
 

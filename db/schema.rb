@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_17_120001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -44,6 +44,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_120000) do
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
   end
 
+  create_table "conversation_study_types", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "study_type_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "study_type_id"], name: "index_conversation_study_types_on_conversation_and_study_type", unique: true
+    t.index ["conversation_id"], name: "index_conversation_study_types_on_conversation_id"
+    t.index ["study_type_id"], name: "index_conversation_study_types_on_study_type_id"
+  end
+
   create_table "conversations", force: :cascade do |t|
     t.string "client_name", null: false
     t.datetime "created_at", null: false
@@ -51,12 +61,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_120000) do
     t.jsonb "processing_steps", default: {}, null: false
     t.datetime "setup_completed_at"
     t.string "status", default: "setup", null: false
-    t.bigint "study_type_id"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.index ["model_id"], name: "index_conversations_on_model_id"
     t.index ["status"], name: "index_conversations_on_status"
-    t.index ["study_type_id"], name: "index_conversations_on_study_type_id"
     t.index ["user_id"], name: "index_conversations_on_user_id"
   end
 
@@ -619,8 +627,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_120000) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "conversation_study_types", "conversations"
+  add_foreign_key "conversation_study_types", "study_types"
   add_foreign_key "conversations", "models"
-  add_foreign_key "conversations", "study_types"
   add_foreign_key "conversations", "users"
   add_foreign_key "general_chats", "models"
   add_foreign_key "general_chats", "users"

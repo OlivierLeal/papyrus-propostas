@@ -1,0 +1,13 @@
+# Junção Conversation <-> StudyType (2026-09, ver CLAUDE.md seção 13 — uma proposta pode ter N
+# tipos de estudo, ou nenhum). Substitui o antigo `conversations.study_type: eia_rima` singular.
+reviewing_conversation_eia_rima:
+  conversation: reviewing_conversation
+  study_type: eia_rima
+
+processing_conversation_eia_rima:
+  conversation: processing_conversation
+  study_type: eia_rima
+
+priced_conversation_rap:
+  conversation: priced_conversation
+  study_type: rap

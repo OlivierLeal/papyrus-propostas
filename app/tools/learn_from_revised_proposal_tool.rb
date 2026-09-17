@@ -89,7 +89,7 @@ class LearnFromRevisedProposalTool < RubyLLM::Tool
         job_name: proposal&.docx_numero_proposta || @conversation.client_name,
         job_number: proposal&.docx_numero_proposta,
         client_name: @conversation.client_name,
-        subject: @conversation.study_type&.name,
+        subject: @conversation.study_types.pluck(:name).join(", ").presence,
         source_path: "active_storage:#{blob.key}",
         relative_path: blob.filename.to_s,
         filename: blob.filename.to_s,

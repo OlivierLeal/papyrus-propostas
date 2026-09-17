@@ -120,7 +120,7 @@ class ProposalTest < ActiveSupport::TestCase
   # build_with_ai_suggested_team! retornar cedo (templates.empty?), sem chamar
   # ensure_always_included_lines! nunca.
   test "build_with_ai_suggested_team! includes always_included professionals even when the study_type has no study_templates at all" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
 
     pricing = stub_ai_complete({ linhas: [], documentos_separados: false }.to_json) { proposal.build_with_ai_suggested_team! }
@@ -132,7 +132,7 @@ class ProposalTest < ActiveSupport::TestCase
   # de profissionais (cargo/especialidades) em vez de a proposta sair só com a Diretoria — pedido
   # da Papyrus ("cadastrar um template por tipo de estudo é difícil").
   test "build_with_ai_suggested_team! sem study_templates mapeia a equipe a partir do cadastro completo" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
 
     ai_response = {
@@ -155,7 +155,7 @@ class ProposalTest < ActiveSupport::TestCase
   end
 
   test "build_from_template! includes always_included professionals even when the study_type has no study_templates at all" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_type: study_types(:rap))
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
 
     pricing = proposal.build_from_template!

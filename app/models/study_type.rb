@@ -1,6 +1,10 @@
 class StudyType < ApplicationRecord
   has_many :study_templates, dependent: :destroy
-  has_many :conversations, dependent: :restrict_with_error
+  # Uma conversa pode ter N tipos de estudo (2026-09, ver conversation_study_types) —
+  # restrict_with_error continua na tabela de junção: não dá pra apagar um tipo em uso em
+  # NENHUMA proposta, mesma garantia de sempre.
+  has_many :conversation_study_types, dependent: :restrict_with_error
+  has_many :conversations, through: :conversation_study_types
 
   validates :name, presence: true
   validates :code, presence: true, uniqueness: true
@@ -10,7 +14,7 @@ class StudyType < ApplicationRecord
   # ("EIA-RIMA" no lugar de "eia_rima") ou inventa um código que não existe ("eai", achado ao vivo
   # na conversa 31 — Estudo Ambiental Intermediário, que a Papyrus simplesmente nunca cadastrou).
   # O primeiro caso é ruído de formato e o sistema resolve sozinho; o segundo é falta de cadastro
-  # e precisa de gente (ver Conversation#assign_study_type_from_findings!).
+  # e precisa de gente (ver Conversation#assign_study_types_from_findings!).
   def self.match_ai_value(value)
     key = normalize_key(value)
     return nil if key.blank?

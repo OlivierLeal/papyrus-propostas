@@ -37,6 +37,14 @@
     name: "EMI",
     # TODO: confirmar com a Papyrus o nome por extenso e a descrição oficial deste tipo de estudo.
     description: "Tipo de estudo utilizado pela Papyrus (nome por extenso a confirmar)."
+  },
+  {
+    code: "acompanhamento",
+    name: "Acompanhamento",
+    # 2026-09: uma proposta pode não pedir nenhum estudo novo — só assessoria/monitoramento
+    # ambiental contínuo. Não é caso especial no código, é só mais um StudyType cadastrado (ver
+    # CLAUDE.md seção 13, "proposta pode ter N tipos de estudo").
+    description: "Assessoria/monitoramento ambiental contínuo, sem um novo estudo de licenciamento a elaborar."
   }
 ].each do |attrs|
   StudyType.find_or_create_by!(code: attrs[:code]) do |study_type|

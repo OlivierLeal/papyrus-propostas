@@ -56,7 +56,7 @@
                 </span>
               </div>
 
-              <span class="badge badge-ghost w-fit"><%= conversation.study_type&.name || "Tipo de estudo pendente" %></span>
+              <span class="badge badge-ghost w-fit"><%= conversation.study_types_label %></span>
 
               <div class="text-xs text-base-content/40">
                 <%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %>

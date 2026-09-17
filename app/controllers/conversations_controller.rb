@@ -48,8 +48,9 @@ class ConversationsController < ApplicationController
   def show
   end
 
-  # Único jeito de definir/corrigir o tipo de estudo depois da criação — nunca no setup (ver
-  # ProcessEtJob#assign_study_type!, que já preenche isso sozinho lendo o ET).
+  # Único jeito de definir/corrigir os tipos de estudo depois da criação — nunca no setup (ver
+  # Conversation#assign_study_types_from_findings!, que já preenche isso sozinho lendo o ET/TR).
+  # Pode ser N tipos, ou nenhum (proposta de acompanhamento) — ver CLAUDE.md seção 13.
   def update
     @conversation.update!(study_type_params)
     redirect_to @conversation, notice: "Tipo de estudo atualizado."
@@ -104,7 +105,7 @@ class ConversationsController < ApplicationController
     end
 
     def study_type_params
-      params.require(:conversation).permit(:study_type_id)
+      params.require(:conversation).permit(study_type_ids: [])
     end
 
     def validate_setup_files(ets, trs, kmz)

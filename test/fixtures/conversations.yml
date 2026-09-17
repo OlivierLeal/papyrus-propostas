@@ -1,7 +1,6 @@
 reviewing_conversation:
   user: one
   model: default
-  study_type: eia_rima
   client_name: Serra Verde Energias Renováveis S.A.
   status: reviewing
   processing_steps:
@@ -15,7 +14,6 @@ reviewing_conversation:
 processing_conversation:
   user: one
   model: default
-  study_type: eia_rima
   client_name: Cliente Em Processamento
   status: processing
   processing_steps:
@@ -29,7 +27,6 @@ processing_conversation:
 priced_conversation:
   user: two
   model: default
-  study_type: rap
   client_name: Cliente Já Precificado
   status: pricing
   processing_steps:

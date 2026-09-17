@@ -2,15 +2,15 @@ require "test_helper"
 
 class ConversationTest < ActiveSupport::TestCase
   test "requires client_name" do
-    conversation = Conversation.new(user: users(:one), study_type: study_types(:eia_rima))
+    conversation = Conversation.new(user: users(:one))
     assert_not conversation.valid?
     assert_includes conversation.errors[:client_name], "não pode ficar em branco"
   end
 
-  test "study_type is optional — não é escolhido no setup, a IA identifica lendo a TR" do
+  test "study_types starts empty — não é escolhido no setup, a IA identifica lendo o ET/TR; proposta sem nenhum é acompanhamento" do
     conversation = Conversation.new(user: users(:one), client_name: "Cliente Teste")
     assert conversation.valid?
-    assert_nil conversation.study_type_id
+    assert_empty conversation.study_types
   end
 
   test "requires a valid status" do
@@ -61,25 +61,24 @@ class ConversationTest < ActiveSupport::TestCase
     assert_nothing_raised { Conversation.search("qualquer coisa") }
   end
 
-  # REGRESSÃO — achado em produção (chat 30, 2026-09-01): o consultor marcou o tipo de estudo pela
-  # tela ENQUANTO o RespondToMessageJob da mensagem "gere a proposta" já estava rodando com a
-  # Conversation carregada no início do job — a resposta da IA levou dezenas de segundos, tempo de
-  # sobra pro update concorrente gravar no banco. Sem reload, a ferramenta via o objeto antigo
-  # (study_type ainda nil em memória) mesmo já estando gravado no banco havia bom tempo, e recusava
-  # gerar a proposta com "ET ainda em processamento" — mensagem enganosa, já que o ET tinha
-  # terminado fazia tempo; o problema era só o objeto em memória estar desatualizado.
-  test "ensure_proposal! reloads before checking, catching a study_type set by a concurrent request while this job was running" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Corrida de Concorrência", status: "reviewing")
+  # REGRESSÃO — achado em produção (chat 30, 2026-09-01): o consultor mudou algo pela tela ENQUANTO
+  # o RespondToMessageJob da mensagem "gere a proposta" já estava rodando com a Conversation
+  # carregada no início do job — a resposta da IA levou dezenas de segundos, tempo de sobra pro
+  # update concorrente gravar no banco. Sem reload, a ferramenta via o objeto antigo (status ainda
+  # desatualizado em memória) mesmo já estando gravado no banco havia bom tempo. Até 2026-09 esse
+  # cenário era sobre `study_type` (então o único gate); hoje `status` é o gate que resta, mesma
+  # corrida.
+  test "ensure_proposal! reloads before checking, catching a concurrent status change while this job was running" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Corrida de Concorrência", status: "processing")
     stale_copy = Conversation.find(conversation.id) # simula o objeto já carregado pelo job, antes do update concorrente
 
-    conversation.update!(study_type: study_types(:eia_rima)) # "outra requisição" (a tela) atualiza o banco enquanto o job roda
+    conversation.update!(status: "reviewing") # "outra requisição" (a tela) atualiza o banco enquanto o job roda
 
-    assert_nil stale_copy.study_type_id # confirma que o objeto em memória está mesmo desatualizado, sem reload nenhum ainda
+    assert_equal "processing", stale_copy.status # confirma que o objeto em memória está mesmo desatualizado, sem reload nenhum ainda
 
     proposal = stub_ai_error { stale_copy.ensure_proposal! }
 
     assert proposal.present?
-    assert_equal study_types(:eia_rima), stale_copy.study_type
   end
 
   test "ensure_proposal! also builds the AI-suggested schedule, right after the team" do
@@ -118,10 +117,15 @@ class ConversationTest < ActiveSupport::TestCase
     assert proposal.present?
   end
 
-  test "ensure_proposal! returns nil (without reloading forever) when the study_type still isn't set anywhere" do
+  # 2026-09: zero tipos de estudo é um estado válido (proposta de acompanhamento) — deixou de
+  # bloquear a criação da proposta (CLAUDE.md seção 13).
+  test "ensure_proposal! succeeds even with no study_types at all (proposta de acompanhamento)" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Tipo Nenhum", status: "reviewing")
 
-    assert_nil conversation.ensure_proposal!
+    proposal = stub_ai_error { conversation.ensure_proposal! }
+
+    assert proposal.present?
+    assert_empty conversation.study_types
   end
 
   # GenerateProposalDocumentTool sempre chama com ai_suggestions: false — essa criação acontece
@@ -314,74 +318,78 @@ class ConversationTest < ActiveSupport::TestCase
     end
   end
 
-  test "assign_study_type_from_findings! accepts the study type name when the AI doesn't answer with the code" do
+  test "assign_study_types_from_findings! accepts the study type name when the AI doesn't answer with the code" do
     conversation = conversations(:reviewing_conversation)
-    conversation.update!(study_type: nil)
+    conversation.study_types.clear
     conversation.project_findings.create!(field: "tipo_estudo", value: "EIA-RIMA", nature: "fato", source_kind: "et")
 
-    conversation.assign_study_type_from_findings!
+    conversation.assign_study_types_from_findings!
 
-    assert_equal study_types(:eia_rima), conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima) ], conversation.reload.study_types
   end
 
-  test "assign_study_type_from_findings! flags a type that isn't registered instead of failing silently" do
+  test "assign_study_types_from_findings! flags a type that isn't registered instead of failing silently" do
     # Conversa 31, em produção: a IA respondeu "eai" (Estudo Ambiental Intermediário, nunca
     # cadastrado), o study_type ficou nil sem nenhum aviso e a geração da proposta travou pra
     # sempre — a IA acabou mandando o consultor procurar o time de desenvolvimento.
     conversation = conversations(:reviewing_conversation)
-    conversation.update!(study_type: nil)
+    conversation.study_types.clear
     conversation.project_findings.create!(field: "tipo_estudo", value: "eai", nature: "fato", source_kind: "et")
 
-    conversation.assign_study_type_from_findings!
+    conversation.assign_study_types_from_findings!
 
-    assert_nil conversation.reload.study_type
+    assert_empty conversation.reload.study_types
     flag = conversation.project_findings.find_by(source_kind: "sistema", field: "outro")
     assert flag.present?
     assert_includes flag.value, "eai"
     assert_equal "sugestao", flag.nature
   end
 
-  test "assign_study_type_from_findings! doesn't flag the same missing type twice (ET and TR both run)" do
+  test "assign_study_types_from_findings! doesn't flag the same missing type twice (ET and TR both run)" do
     conversation = conversations(:reviewing_conversation)
-    conversation.update!(study_type: nil)
+    conversation.study_types.clear
     conversation.project_findings.create!(field: "tipo_estudo", value: "eai", nature: "fato", source_kind: "et")
 
-    conversation.assign_study_type_from_findings!
-    conversation.assign_study_type_from_findings!
+    conversation.assign_study_types_from_findings!
+    conversation.assign_study_types_from_findings!
 
     assert_equal 1, conversation.project_findings.where(source_kind: "sistema", field: "outro").count
   end
 
-  test "assign_study_type_from_findings! never overwrites a type already decided" do
-    conversation = conversations(:reviewing_conversation)
+  # 2026-09: uma proposta pode exigir vários estudos ao mesmo tempo (CLAUDE.md seção 13) —
+  # deixou de ser "primeiro achado que casa vence, e trava reatribuição" (versão singular
+  # antiga); agora um achado novo de tipo_estudo (ex.: trazido pelo TR) ADICIONA um tipo, nunca
+  # substitui o(s) que já estavam associados.
+  test "assign_study_types_from_findings! is additive — a new achado adds another type without removing what's already there" do
+    conversation = conversations(:reviewing_conversation) # já tem eia_rima associado (fixture)
     conversation.project_findings.create!(field: "tipo_estudo", value: "rap", nature: "fato", source_kind: "tr")
 
-    conversation.assign_study_type_from_findings!
+    conversation.assign_study_types_from_findings!
 
-    assert_equal study_types(:eia_rima), conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima), study_types(:rap) ].map(&:id).sort,
+      conversation.reload.study_types.map(&:id).sort
   end
 
-  test "refresh_proposal_state_snapshot! spells out the study type blocker instead of leaving the AI to guess" do
-    # Sem esse bloco a IA leu o erro genérico da ferramenta ("ET ainda em processamento"), concluiu
-    # que era falha de backend e repetiu a chamada quatro vezes (conversa 31).
+  test "assign_study_types_from_findings! never associates the same type twice, even if the achado repeats" do
+    conversation = conversations(:reviewing_conversation) # já tem eia_rima associado (fixture)
+    conversation.project_findings.create!(field: "tipo_estudo", value: "EIA-RIMA", nature: "fato", source_kind: "tr")
+
+    conversation.assign_study_types_from_findings!
+
+    assert_equal [ study_types(:eia_rima) ], conversation.reload.study_types
+  end
+
+  # O bloco [BLOQUEIO: TIPO DE ESTUDO] foi REMOVIDO em 2026-09 — zero tipos de estudo é um
+  # estado válido (proposta de acompanhamento), não bloqueia mais a geração de nada (CLAUDE.md
+  # seção 13).
+  test "refresh_proposal_state_snapshot! never blocks on study type, even with none associated" do
     conversation = conversations(:reviewing_conversation)
-    conversation.update!(study_type: nil)
+    conversation.study_types.clear
 
     conversation.refresh_proposal_state_snapshot!
 
     marker = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%").last
-    assert_includes marker.content, "[BLOQUEIO: TIPO DE ESTUDO] (gerado pelo sistema"
-    assert_includes marker.content, "Configurações > Tipos de Estudo"
-    assert_includes marker.content, "não chame generate_proposal_document"
-  end
-
-  test "refresh_proposal_state_snapshot! has no blocker block once the study type is set" do
-    conversation = conversations(:reviewing_conversation)
-
-    conversation.refresh_proposal_state_snapshot!
-
-    marker = conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "[ESTADO ATUAL DA PROPOSTA]%").last
-    assert_not_includes marker.content, "[BLOQUEIO: TIPO DE ESTUDO] (gerado pelo sistema"
+    assert_not_includes marker.content, "BLOQUEIO: TIPO DE ESTUDO"
   end
 
   test "refresh_proposal_state_snapshot! without a proposal tells the AI the proposal doesn't exist yet, not to fake calling the tool" do

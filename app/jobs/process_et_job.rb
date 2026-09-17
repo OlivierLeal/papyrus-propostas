@@ -19,7 +19,7 @@ class ProcessEtJob < ApplicationJob
       hide_response: true
     )
     record_findings!(conversation, attachments)
-    conversation.assign_study_type_from_findings!
+    conversation.assign_study_types_from_findings!
     conversation.mark_step!("et", "done")
   rescue StandardError => e
     Rails.logger.error("ProcessEtJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
@@ -59,7 +59,11 @@ class ProcessEtJob < ApplicationJob
         #{fields}
 
         Para "tipo_estudo", o valor deve ser o CÓDIGO EXATO de um dos tipos cadastrados abaixo,
-        nunca um tipo inventado. Se o ET não deixar claro qual se aplica, não gere esse achado:
+        nunca um tipo inventado. Uma proposta pode exigir MAIS DE UM estudo — gere um achado
+        "tipo_estudo" PRA CADA um que o ET descrever (mesma regra dos campos de lista, um achado
+        por item). Se o ET não pedir nenhum estudo novo (só assessoria/monitoramento ambiental
+        contínuo), use o código "acompanhamento". Se não deixar claro qual(is) se aplica(m), não
+        gere esse achado:
         #{menu}
 
         Em "empreendimento", descreva O QUE está sendo licenciado em uma ou duas frases: tipo de

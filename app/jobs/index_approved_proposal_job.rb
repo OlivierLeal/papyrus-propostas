@@ -63,7 +63,7 @@ class IndexApprovedProposalJob < ApplicationJob
       job_name: proposal.docx_numero_proposta,
       job_number: proposal.docx_numero_proposta,
       client_name: conversation.client_name,
-      subject: conversation.study_type&.name,
+      subject: conversation.study_types.pluck(:name).join(", ").presence,
       source_path: "active_storage:#{document.key}",
       relative_path: document.filename.to_s,
       filename: document.filename.to_s,

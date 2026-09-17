@@ -114,7 +114,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
   # serviço — cliente, contato, prazo e nome de arquivo ficam de fora, porque era esse
   # vocabulário de carta que puxava a recuperação para a CAPA das propostas antigas.
   test "a busca no acervo usa só os campos que descrevem o serviço" do
-    @conversation.update!(client_name: "Rio Energy", study_type: study_types(:eia_rima))
+    @conversation.update!(client_name: "Rio Energy", study_types: [ study_types(:eia_rima) ])
     record_finding!(field: "tipo_licenca", value: "Licença Unificada (LU)")
     record_finding!(field: "orgao_ambiental", value: "INEMA")
     record_finding!(field: "empreendimento", value: "sistema de armazenamento de energia em baterias (BESS)")

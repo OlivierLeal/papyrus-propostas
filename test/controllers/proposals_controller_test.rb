@@ -59,18 +59,20 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match "só pode ser precificada", response.body
   end
 
-  test "create refuses when the study type was not identified yet, even in reviewing status" do
+  # 2026-09: zero tipos de estudo é um estado válido (proposta de acompanhamento) — deixou de
+  # bloquear "Avançar para Precificação" (CLAUDE.md seção 13). A equipe cai no roster livre
+  # (sem menu cadastrado), então precisa da IA pra sugerir — mesmo caminho de "sem study_templates".
+  test "create succeeds even when no study type was identified yet — proposta de acompanhamento" do
     reviewing = conversations(:reviewing_conversation)
-    reviewing.update_column(:study_type_id, nil)
+    reviewing.study_types.clear
     sign_in_as reviewing.user
+    ai_response = { linhas: [], documentos_separados: false }.to_json
 
-    assert_no_difference "Proposal.count" do
-      post conversation_proposal_path(reviewing)
+    assert_difference "Proposal.count", 1 do
+      stub_ai_complete(ai_response) { post conversation_proposal_path(reviewing) }
     end
 
-    assert_redirected_to reviewing
-    follow_redirect!
-    assert_match "Defina o tipo de estudo", response.body
+    assert_redirected_to conversation_proposal_path(reviewing)
   end
 
   test "update recalculates pricing and marks the proposal as priced" do

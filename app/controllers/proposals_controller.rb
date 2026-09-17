@@ -13,11 +13,6 @@ class ProposalsController < ApplicationController
       return
     end
 
-    if @conversation.study_type.blank?
-      redirect_to @conversation, alert: "Defina o tipo de estudo antes de avançar para a precificação."
-      return
-    end
-
     @conversation.ensure_proposal!
 
     redirect_to conversation_proposal_path(@conversation),

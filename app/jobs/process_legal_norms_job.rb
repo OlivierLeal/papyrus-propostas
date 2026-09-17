@@ -37,7 +37,7 @@ class ProcessLegalNormsJob < ApplicationJob
     # ferramenta search_legal_norms (ver #perform) — a IA decide sozinha quantas buscas fazer e
     # quando pedir o texto completo de uma norma, em vez de extrair achados de um texto já anexado.
     def prompt(conversation, municipios)
-      tipo_estudo = conversation.study_type&.name
+      tipo_estudo = conversation.study_types.pluck(:name).join(" e ").presence
       orgao = conversation.project_findings.active.where(field: "orgao_ambiental").pluck(:value).first
       fields = ProjectFinding::FIELDS.map { |key, config| "- #{key}: #{config[:label]}" }.join("\n")
 

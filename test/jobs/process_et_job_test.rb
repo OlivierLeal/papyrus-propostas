@@ -84,7 +84,7 @@ class ProcessEtJobTest < ActiveSupport::TestCase
   end
 
   test "assigns the study type when the AI answers with a real code from the menu" do
-    @conversation.update_column(:study_type_id, nil)
+    @conversation.study_types.clear
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(
       io: StringIO.new("%PDF-1.4"), filename: "et.pdf", content_type: "application/pdf", metadata: { kind: "et" }
@@ -92,7 +92,7 @@ class ProcessEtJobTest < ActiveSupport::TestCase
 
     stub_ai_complete(et_reply(campo: "tipo_estudo", valor: "eia_rima")) { ProcessEtJob.perform_now(@conversation.id) }
 
-    assert_equal study_types(:eia_rima), @conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima) ], @conversation.reload.study_types
   end
 
   test "the prompt lists the real study_type menu and asks for one of its codes" do
@@ -112,7 +112,7 @@ class ProcessEtJobTest < ActiveSupport::TestCase
     # Achado em teste manual com IA real: o Gemini/Bedrock às vezes ignora "sem markdown" e
     # embrulha em ```json ... ``` — sem tirar isso antes do parse, a atribuição falhava em
     # silêncio (ver AiJsonResponse).
-    @conversation.update_column(:study_type_id, nil)
+    @conversation.study_types.clear
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(
       io: StringIO.new("%PDF-1.4"), filename: "et.pdf", content_type: "application/pdf", metadata: { kind: "et" }
@@ -121,11 +121,11 @@ class ProcessEtJobTest < ActiveSupport::TestCase
     fenced_reply = "```json\n#{et_reply(campo: "tipo_estudo", valor: "eia_rima")}\n```"
     stub_ai_complete(fenced_reply) { ProcessEtJob.perform_now(@conversation.id) }
 
-    assert_equal study_types(:eia_rima), @conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima) ], @conversation.reload.study_types
   end
 
   test "does not assign a study type when the AI invents a code outside the menu" do
-    @conversation.update_column(:study_type_id, nil)
+    @conversation.study_types.clear
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(
       io: StringIO.new("%PDF-1.4"), filename: "et.pdf", content_type: "application/pdf", metadata: { kind: "et" }
@@ -133,11 +133,11 @@ class ProcessEtJobTest < ActiveSupport::TestCase
 
     stub_ai_complete(et_reply(campo: "tipo_estudo", valor: "tipo_que_nao_existe")) { ProcessEtJob.perform_now(@conversation.id) }
 
-    assert_nil @conversation.reload.study_type_id
+    assert_empty @conversation.reload.study_types
   end
 
   test "does not assign a study type and does not raise when the AI reply isn't valid JSON" do
-    @conversation.update_column(:study_type_id, nil)
+    @conversation.study_types.clear
     message = @conversation.messages.create!(role: "user", content: "setup", internal: false)
     message.attachments.attach(
       io: StringIO.new("%PDF-1.4"), filename: "et.pdf", content_type: "application/pdf", metadata: { kind: "et" }
@@ -147,15 +147,15 @@ class ProcessEtJobTest < ActiveSupport::TestCase
 
     @conversation.reload
     assert_equal "done", @conversation.processing_step_status("et")
-    assert_nil @conversation.study_type_id
+    assert_empty @conversation.study_types
   end
 
-  test "does not overwrite a study type that was already set" do
-    original = @conversation.study_type
+  test "assign_study_types_from_findings! is additive — a reply that doesn't match the catalog does not remove what's already there" do
+    original = @conversation.study_types.to_a
 
     stub_ai_complete('{"tipo_estudo_codigo": "rap"}') { ProcessEtJob.perform_now(@conversation.id) }
 
-    assert_equal original, @conversation.reload.study_type
+    assert_equal original, @conversation.reload.study_types.to_a
   end
 
   test "marks et as failed and does not raise when the AI call errors out" do

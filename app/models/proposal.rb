@@ -184,12 +184,13 @@ class Proposal < ApplicationRecord
   # a IA nunca pode inventar um profissional ou entregável que não exista no sistema.
   # Se a IA falhar ou não sugerir nada válido, cai no template padrão como segurança.
   def build_with_ai_suggested_team!
-    templates = conversation.study_type.study_templates.includes(:professional).to_a
+    templates = study_templates_menu
     pricing = create_project_pricing!
 
     if templates.empty?
-      # Sem menu de horas cadastrado pro tipo de estudo (só eia_rima tem hoje), a IA mapeia o
-      # time a partir do CADASTRO COMPLETO de profissionais (cargo + especialidades) contra o
+      # Sem menu de horas cadastrado pro(s) tipo(s) de estudo desta conversa (só eia_rima tem
+      # hoje) — ou sem NENHUM tipo de estudo selecionado (proposta de acompanhamento) — a IA
+      # mapeia o time a partir do CADASTRO COMPLETO de profissionais (cargo + especialidades) contra o
       # escopo desta conversa — pedido da Papyrus, "cadastrar um template por tipo de estudo é
       # difícil". Continua restrito a professional_id real e ativo (a IA nunca inventa gente);
       # como não há menu de entregável aqui, é a IA quem nomeia o entregável de cada linha.
@@ -217,7 +218,7 @@ class Proposal < ApplicationRecord
 
   # Copia o template padrão direto, sem envolver a IA — usado como fallback de segurança.
   def build_from_template!
-    templates = conversation.study_type.study_templates.includes(:professional).to_a
+    templates = study_templates_menu
     pricing = create_project_pricing!
     apply_lines!(pricing, template_fallback_lines(templates), templates)
     ensure_always_included_lines!(pricing, templates)
@@ -450,6 +451,37 @@ class Proposal < ApplicationRecord
       pricing
     end
 
+    # Menu de horas pra sugestão de equipe (CLAUDE.md seção 5/13) — união dos study_templates de
+    # TODOS os tipos de estudo desta conversa (2026-09; antes era só `conversation.study_type.
+    # study_templates`, 1 tipo só). Dedup por [professional_id, deliverable_name]: se dois
+    # estudos oferecerem a MESMA linha de menu (mesmo profissional entregando a mesma coisa), ela
+    # entra uma vez só, não duplicada — sem rastrear de qual estudo veio (mesmo princípio já
+    # usado pros always_included). Zero estudos, ou só estudos sem template cadastrado (ex.:
+    # "Acompanhamento"), devolve [] — cai no mesmo caminho "roster livre" de sempre.
+    def study_templates_menu
+      conversation.study_types.flat_map { |study_type| study_type.study_templates.includes(:professional).to_a }
+        .uniq { |template| [ template.professional_id, template.deliverable_name ] }
+    end
+
+    # "o tipo de estudo "EIA-RIMA"" / "os tipos de estudo "EIA-RIMA" e "Relatório Técnico"" — usado
+    # só quando `study_templates_menu` NÃO está vazio (suggestion_prompt), então há sempre ao
+    # menos 1 tipo selecionado aqui.
+    def study_types_menu_label
+      names = conversation.study_types.order(:name).pluck(:name)
+      names.size > 1 ? "os tipos de estudo #{names.map { |n| "\"#{n}\"" }.join(' e ')}" : "o tipo de estudo \"#{names.first}\""
+    end
+
+    # Frase de abertura do roster_suggestion_prompt (caminho "sem menu cadastrado") — cobre os 3
+    # jeitos de chegar aqui: zero tipos de estudo (acompanhamento), 1 tipo sem study_templates, ou
+    # vários tipos, nenhum deles com study_templates.
+    def study_types_without_menu_sentence
+      names = conversation.study_types.order(:name).pluck(:name)
+      return "Esta proposta não tem um tipo de estudo específico associado (é uma proposta de acompanhamento/assessoria) —" if names.empty?
+      return "O tipo de estudo \"#{names.first}\" não tem um modelo de equipe pré-cadastrado —" if names.size == 1
+
+      "Os tipos de estudo #{names.map { |n| "\"#{n}\"" }.join(' e ')} não têm um modelo de equipe pré-cadastrado —"
+    end
+
     # SETOR derivado (sem cadastro novo): Diretoria = always_included com "diretor" no cargo;
     # Gestão = os demais always_included (Coordenação/Gestão da Papyrus); Execução = o resto.
     def docx_team_sector(professional)
@@ -480,7 +512,7 @@ class Proposal < ApplicationRecord
         ambiental, com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, e
         documentos complementares, incluindo propostas anteriores semelhantes, se houver).
 
-        Profissionais e entregáveis DISPONÍVEIS para o tipo de estudo "#{conversation.study_type.name}"
+        Profissionais e entregáveis DISPONÍVEIS para #{study_types_menu_label}
         (não sugira nada fora desta lista — nunca invente professional_id ou entregável novo):
         #{menu}
 
@@ -527,8 +559,8 @@ class Proposal < ApplicationRecord
         ambiental, com base em tudo que já foi analisado nesta conversa (ET, TR quando houver,
         documentos complementares e propostas anteriores semelhantes, se houver).
 
-        Este tipo de estudo ("#{conversation.study_type.name}") não tem um modelo de equipe
-        pré-cadastrado, então o menu abaixo é o QUADRO COMPLETO de profissionais da Papyrus. Para
+        #{study_types_without_menu_sentence} então o menu abaixo é o QUADRO COMPLETO de
+        profissionais da Papyrus. Para
         cada necessidade real deste projeto (diagnósticos exigidos, geoprocessamento/cartografia,
         estudos temáticos, análise jurídica, arqueologia, etc.), escolha o profissional cujo
         cargo/especialidades melhor atendem e diga o que ele entrega nesta proposta.

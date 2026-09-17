@@ -148,8 +148,9 @@ class GenerateSummaryJob < ApplicationJob
         .group_by(&:field)
         .transform_values { |findings| findings.map(&:value).compact_blank.uniq }
       # O código do tipo de estudo ("EIA-RIMA") diz menos que o nome cadastrado na hora de casar
-      # com o texto de propostas antigas.
-      fields["tipo_estudo"] = [ conversation.study_type.name ] if conversation.study_type
+      # com o texto de propostas antigas. Uma proposta pode ter N tipos (ou nenhum — ver
+      # CLAUDE.md seção 13) — os nomes entram todos, junto com o resto dos campos de lista.
+      fields["tipo_estudo"] = conversation.study_types.pluck(:name) if conversation.study_types.any?
 
       SEARCH_FIELDS.filter_map do |field, budget|
         value = Array(fields[field]).map(&:to_s).compact_blank.join("; ")

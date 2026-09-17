@@ -1304,6 +1304,46 @@ pedidas juntas:
    Serviço." aparece logo abaixo do infográfico, "Quadro 11-1: Cronograma do Serviço." continua
    logo acima da tabela, e o parágrafo do PRAZO DE EXECUÇÃO sai com a concordância corrigida.
 
+**Numeração de página, ausente desde sempre (2026-09, relato do consultor: "falta a numeração de
+páginas nas propostas").** O rodapé do modelo (`word/footer1.xml`/`footer2.xml`, os text boxes
+"www…"/"Sistema de Gestão…" ancorados) tinha a palavra **"PAGE" digitada como texto puro**
+(`<w:t>...SGI | PAGE   </w:t>`) — nunca foi um campo de verdade, então nunca mostrou número
+nenhum, em nenhum leitor, desde que o modelo existe. Corrigido trocando por um campo OOXML real
+(`<w:fldChar w:fldCharType="begin"/>` → `<w:instrText> PAGE </w:instrText>` → `<w:fldChar
+w:fldCharType="separate"/>` → `<w:t>1</w:t>` de cache → `<w:fldChar w:fldCharType="end"/>`,
+runs com o mesmo `w:rPr` de sempre) nos dois rodapés — cada um com **2 cópias** (a versão
+DrawingML moderna dentro de `wps:txbx` e o fallback VML de compatibilidade que o Word sempre
+grava em espelho pro mesmo texto), 4 substituições no total. Edição de string crua, nunca
+`Nokogiri#to_xml`, sem alterar a contagem de filhos de `<w:body>`. `word/settings.xml` ganhou
+`<w:updateFields w:val="true"/>` (posição certa no schema, entre `characterSpacingControl` e
+`hdrShapeDefaults`) — força o Word a recalcular todo campo ao abrir, prática padrão pra documento
+com campo computado, redundante com o LibreOffice (que já recalcula sozinho na conversão) mas
+necessário pro Word não mostrar um valor desatualizado em cache.
+
+**Duas causas-raiz secundárias, achadas ao vivo enquanto verificava a numeração num documento
+COM cronograma (página paisagem no meio):**
+1. **A seção final do corpo tinha `<w:pgNumType w:start="1"/>`** — inofensivo enquanto essa é a
+   ÚNICA seção do documento (page 1 = 1, redundante com o padrão), mas explode assim que
+   `insert_schedule_tables!`/`insert_or_replace_schedule_block!` espeta o bloco de cronograma
+   ANTES dela: essa mesma sectPr passa a valer só pra seção 3 (o que sobra depois da página
+   paisagem), e o `w:start="1"` literalmente REINICIA a contagem ali — a numeração saía
+   1,2,3...10 (fim da seção 2), depois voltava pra 1,2 em vez de continuar 11,12. Removido do
+   modelo (a numeração padrão já começa em 1 sozinha, sem precisar declarar).
+2. **A mesma sectPr final também tem `<w:titlePg/>`** — certo enquanto ela é a única seção (a
+   "1ª página desta seção" É a capa, que por isso usa `header2.xml`/sem logo e, de propósito,
+   nenhum rodapé). Depois de espetado o cronograma, "1ª página desta seção" deixa de ser a capa
+   e passa a ser só a página seguinte ao bloco paisagem — sem remover o `titlePg`, essa página
+   ficava **sem rodapé nenhum** (nem número, nem "www…"), porque não existe nenhum
+   `footerReference type="first"` declarado pra ela cair em vez do `type="default"`.
+   `ProposalDocxFiller#strip_titlepg_from_final_section!` remove o `<w:titlePg/>` do `<w:sectPr>`
+   final sempre que um cronograma é encaixado (`insert_schedule_tables!` E `insert_or_replace_
+   schedule_block!` — os dois caminhos que espetam esse bloco), nunca quando não há cronograma
+   (a capa continua com o tratamento de sempre).
+   Verificado ao vivo num documento real de 12 páginas (KMZ + cronograma de 2 fases): antes das
+   duas correções, a página 11 (logo após a paisagem) saía sem rodapé nenhum e a 12 mostrava "2"
+   em vez de "12"; depois, 1 a 10 antes do cronograma, 11 e 12 depois — todas corretas e com
+   rodapé completo.
+
 ---
 
 ## 9. Prompts do sistema (2 prompts principais)
@@ -1894,6 +1934,71 @@ estrutural", "0h", "0 dias de campo", "documento vazio de conteúdo executivo". 
 zeradas — passou a focar (corretamente) em conteúdo de texto realmente ausente no cenário de
 teste (a conversa sintética não tinha ET nenhum processado, só achados soltos), sem nenhuma
 menção a horas/dias de campo como bloqueio.
+
+### Uma proposta pode ter N tipos de estudo, ou nenhum — "Acompanhamento" (2026-09, pedido do
+consultor a partir de conversa com o time)
+
+`conversations.study_type_id` era uma FK simples e opcional: 1 proposta = 0 ou 1 `StudyType`. Na
+prática, uma proposta real pode exigir vários estudos ao mesmo tempo (ex.: EIA-RIMA + um
+Relatório Técnico complementar), ou nenhum estudo novo — só assessoria/monitoramento contínuo.
+
+- **Schema**: nova tabela de junção `conversation_study_types` (índice único
+  `[conversation_id, study_type_id]`); `conversations.study_type_id` foi removida depois de um
+  backfill (migration única, `up`/`down`) que criou 1 linha na tabela nova para cada
+  `study_type_id` já presente — confirmado que a contagem bateu exatamente com o número de
+  conversas que tinham o campo preenchido antes da migração.
+- **`Conversation` ganhou `has_many :study_types, through: :conversation_study_types`** no lugar
+  do `belongs_to`. `#assign_study_type_from_findings!` virou `#assign_study_types_from_findings!`
+  (plural) e passou de "primeiro achado que casa vence, trava reatribuição" para **aditivo**: cada
+  achado `tipo_estudo` que casa com o catálogo entra na lista (sem duplicar), e um achado que não
+  casa não impede os outros de entrarem — só gera o achado `sugestao` de sempre (fora do
+  catálogo). `ProcessEtJob`/`ProcessTrJob` passaram a poder gerar mais de um achado `tipo_estudo`
+  por documento (mesma liberdade que `tipo_licenca` já tinha na prática — nenhuma mudança de
+  schema/`Recorder`, só de texto de prompt).
+- **"Acompanhamento" não é caso especial no código — é só mais um `StudyType` cadastrado**
+  (`db/seeds.rb`), decisão explícita do consultor ("pode ser acompanhamento ou qualquer outra
+  coisa, a IA deve entender a ET e mapear"): zero achados de `tipo_estudo`, ou um achado que casa
+  com "Acompanhamento", são os dois estados válidos de uma proposta sem estudo novo a elaborar —
+  nenhum dos dois bloqueia nada.
+- **Bloqueios binários removidos por completo**: `Conversation#ensure_proposal!` não exige mais
+  `study_type.present?`; `ProposalsController#create` perdeu o guard de `study_type.blank?`;
+  `GenerateProposalDocumentTool#blocked_reason` perdeu o ramo de tipo de estudo (só resta o de
+  "documentos ainda processando"); `Conversation#study_type_blocker_text` (o bloco
+  `[BLOQUEIO: TIPO DE ESTUDO]` do snapshot) foi removido inteiro, junto com a referência a ele em
+  `no_proposal_state_text` — o snapshot agora afirma explicitamente que tipo de estudo nunca é
+  pré-requisito.
+- **Equipe — união dos menus, sem duplicar, sem rastrear origem**:
+  `Proposal#study_templates_menu` (privado) monta a lista a partir de
+  `conversation.study_types.flat_map { |st| st.study_templates... }.uniq { |t| [t.professional_id,
+  t.deliverable_name] }` — mesmo princípio já usado pros `always_included`. Zero estudos, ou todo
+  estudo selecionado sem `study_templates` cadastrado (caso de "Acompanhamento" e de qualquer
+  tipo fora do `eia_rima`), cai no MESMO caminho de roster livre que já existia
+  (`apply_roster_lines!`) — nada novo ali, só a origem do "menu vazio" mudou.
+- **Tela**: painel "Tipo(s) de estudo" trocou de `collection_select` (seleção única, com aviso de
+  bloqueio) para `collection_check_boxes :study_type_ids` — sem cor de aviso, sem desabilitar o
+  botão "Avançar para Precificação"; lista vazia mostra um texto neutro explicando que vale como
+  proposta de acompanhamento. `ConversationsController#study_type_params` permite
+  `study_type_ids: []`.
+- `Conversation#study_types_label` (novo, público) — usa `.map(&:name).sort` (Ruby), nunca
+  `.order(:name).pluck(:name)` (SQL): a 2ª forma dispara uma consulta NOVA mesmo quando
+  `study_types` já veio via `includes` em `Conversation.search`, jogando fora o eager load
+  (Bullet acusa "unused eager loading" — achado rodando a suíte depois da 1ª versão da tela).
+  `GenerateSummaryJob#search_context`/`ProcessLegalNormsJob`/`LearnFromRevisedProposalTool`/
+  `IndexApprovedProposalJob` passaram a juntar os nomes de todos os tipos (`"; "`/`", "`, mesma
+  convenção dos outros campos de lista do descritor de busca), nunca só o primeiro.
+
+Verificado ao vivo (`bin/rails runner`, sem mock): achados `tipo_estudo` = "eia_rima" + "rap" na
+mesma conversa produzem os 2 `StudyType`s associados; o menu de equipe (`study_templates_menu`)
+sai com 23 linhas (as 23 do `eia_rima`, que é o único dos dois com `study_templates` cadastrados),
+sem nenhum par profissional+entregável duplicado. Zero achados produz `study_types` vazio,
+`study_types_label` cai no texto neutro, e a proposta é criada mesmo assim
+(`ensure_proposal!(ai_suggestions: false)` funciona igual). Um achado "acompanhamento" (valor do
+catálogo) associa o `StudyType` "Acompanhamento" normalmente. Nos dois casos sem estudo com
+template, `GenerateProposalDocumentTool#blocked_reason` só reage a documentos ainda em
+processamento — nunca mais a tipo de estudo. Tela: `collection_check_boxes` renderiza um
+`<input type="checkbox" name="conversation[study_type_ids][]">` por tipo cadastrado, PATCH com
+vários ids persiste os vários, PATCH com array vazio limpa tudo — coberto por teste de
+controller de verdade (resposta HTML real), não só o model.
 
 ---
 

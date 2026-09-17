@@ -287,20 +287,19 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_nil conversation.reload.proposal
   end
 
-  test "a missing study type says so, and where to fix it, instead of blaming document processing" do
-    # Conversa 31, em produção: o ET estava "done" havia 15 minutos e o que faltava era cadastro de
-    # tipo de estudo, mas o erro dizia "ET ainda em processamento" — a IA leu isso como falha de
-    # backend, repetiu a chamada quatro vezes e mandou o consultor procurar o time de desenvolvimento.
+  # 2026-09: zero tipos de estudo é um estado válido (proposta de acompanhamento) — deixou de
+  # bloquear a geração do documento (CLAUDE.md seção 13; antes disso, a conversa 31 em produção
+  # travou exatamente aqui: a IA leu "ET ainda em processamento", que era enganoso, repetiu a
+  # chamada quatro vezes e mandou o consultor procurar o time de desenvolvimento).
+  test "generates the document normally even with no study type at all — proposta de acompanhamento" do
     conversation = conversations(:reviewing_conversation)
-    conversation.update!(study_type: nil)
+    conversation.study_types.clear
     tool = GenerateProposalDocumentTool.new(conversation: conversation)
 
     result = JSON.parse(tool.execute(**@args))
 
-    assert_includes result["error"], "TIPO DE ESTUDO"
-    assert_includes result["error"], "NÃO repita esta chamada"
-    assert_not_includes result["error"], "processamento"
-    assert_nil conversation.reload.proposal
+    assert result["success"]
+    assert_equal 1, conversation.reload.proposal.generated_documents.count
   end
 
   # A tool call roda DENTRO da transação do with_ai_lock (Conversation#complete_with_lock) — um

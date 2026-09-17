@@ -128,13 +128,13 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "skipped", Conversation.order(:created_at).last.processing_step_status("cal")
   end
 
-  test "create never sets study_type — it's identified later by ProcessEtJob, not chosen at setup" do
+  test "create never sets study_types — it's identified later by ProcessEtJob/ProcessTrJob, not chosen at setup" do
     post conversations_path, params: {
       conversation: { client_name: "Cliente Novo" }
     }
 
     conversation = Conversation.order(:created_at).last
-    assert_nil conversation.study_type_id # study_type_id nos params é ignorado — não é mais permitido
+    assert_empty conversation.study_types # não é mais permitido nos params de criação
   end
 
   test "create works with no attachments at all (et, tr, comp_docs and kmz all skipped)" do
@@ -284,33 +284,44 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_match "proposta_revisada.docx", response.body
   end
 
-  test "show renders a message asking for a TR when the study type is not identified yet" do
+  # 2026-09: zero tipos de estudo é um estado válido (proposta de acompanhamento) — o botão
+  # "Avançar para Precificação" deixou de ficar desabilitado por causa disso (CLAUDE.md seção 13).
+  test "show renders the pending label when no study type is identified yet, without disabling advance" do
     conversation = conversations(:reviewing_conversation)
-    conversation.update_column(:study_type_id, nil)
+    conversation.study_types.clear
 
     get conversation_path(conversation)
 
     assert_response :success
     assert_match "aguardando identificação", response.body
-    assert_no_match "Avançar para Precificação\"", response.body # some, vira botão desabilitado
+    assert_match "Avançar para Precificação", response.body
   end
 
-  test "show renders a select to correct the study type once it's identified" do
+  test "show renders checkboxes to correct the study type(s)" do
     get conversation_path(conversations(:reviewing_conversation))
 
     assert_response :success
     assert_select "form[action=?]", conversation_path(conversations(:reviewing_conversation)) do
-      assert_select "select[name=?]", "conversation[study_type_id]"
+      assert_select "input[type=checkbox][name=?]", "conversation[study_type_ids][]"
     end
   end
 
-  test "update changes the study type" do
-    conversation = conversations(:reviewing_conversation)
+  test "update changes the study types — pode marcar mais de um" do
+    conversation = conversations(:reviewing_conversation) # já tem eia_rima associado (fixture)
 
-    patch conversation_path(conversation), params: { conversation: { study_type_id: study_types(:rap).id } }
+    patch conversation_path(conversation), params: { conversation: { study_type_ids: [ study_types(:eia_rima).id, study_types(:rap).id ] } }
 
     assert_redirected_to conversation
-    assert_equal study_types(:rap), conversation.reload.study_type
+    assert_equal [ study_types(:eia_rima), study_types(:rap) ].map(&:id).sort, conversation.reload.study_types.map(&:id).sort
+  end
+
+  test "update can clear all study types — proposta vira acompanhamento" do
+    conversation = conversations(:reviewing_conversation)
+
+    patch conversation_path(conversation), params: { conversation: { study_type_ids: [ "" ] } }
+
+    assert_redirected_to conversation
+    assert_empty conversation.reload.study_types
   end
 
   test "show does not render the 'Gerados pela IA' divider when the proposal has no generated documents yet" do
