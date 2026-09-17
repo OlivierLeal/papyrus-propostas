@@ -97,7 +97,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "negrito — não escreva o número nem \"5.\" você mesma, nem tente negritar com texto. Use o " \
           "search_historical_archive pra ver como a Papyrus estruturou o escopo de projetos parecidos antes de " \
           "escrever — a estrutura processual varia bastante por tipo de estudo e vale seguir o padrão já usado."
-  param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\")"
+  param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\"). Texto independente da " \
+    "tabela/infográfico do cronograma (Quadro/Figura N-1) — mudar só este texto não reconstrói o cronograma; " \
+    "pra isso, use atualizar_cronograma."
   param :produtos, type: "array",
     desc: "Lista dos produtos/entregáveis — tem que bater com o que topicos_escopo descreve: cada etapa que gera " \
           "um documento próprio (o estudo/diagnóstico principal, mas também fichas, relatórios e certidões " \
@@ -124,6 +126,19 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "comercial. Se ele não falou nada sobre nome de arquivo, NÃO envie este parâmetro: o sistema usa o " \
           "padrão da Papyrus. Envie \"padrão\" se ele pedir para voltar ao nome automático.",
     required: false
+
+  param :atualizar_cronograma, type: "boolean", required: false,
+    desc: "true SOMENTE quando o consultor pede uma MUDANÇA num cronograma que esta proposta JÁ " \
+          "TEM (ex.: \"mude para 6 meses\", \"o cliente pediu pra reduzir o prazo\", \"remonte o " \
+          "cronograma considerando X\"). IMPORTANTE: mudar só o texto de prazo_de_execucao NÃO " \
+          "altera a tabela/infográfico do cronograma — são coisas independentes. Sem este " \
+          "parâmetro, um cronograma que já existe NUNCA é reconstruído: as próximas gerações " \
+          "reaproveitam exatamente as mesmas fases/atividades/semanas já salvas, mesmo que o " \
+          "texto do prazo mude — a ferramenta só LÊ o cronograma do banco, nunca escreve nele. " \
+          "Ao marcar true, o cronograma é reconstruído do zero em segundo plano considerando o " \
+          "pedido (a partir do histórico desta conversa) — avise o consultor pra pedir a geração " \
+          "de novo em alguns instantes. Não marque true numa proposta que ainda não tem " \
+          "cronograma nenhum (isso já acontece sozinho, sem precisar deste parâmetro)."
 
   param :data_inicio_cronograma_servico,
     desc: "SÓ quando o consultor disser no chat a data de início do Cronograma do Serviço (ex.: \"o cronograma " \
@@ -177,7 +192,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     @proposal = @conversation.proposal || @conversation.ensure_proposal!(ai_suggestions: false)
     return { error: blocked_reason }.to_json if @proposal.nil?
 
-    schedule_background_task = ensure_schedule_background_work!
+    schedule_background_task = ensure_schedule_background_work!(args)
     ensure_logistics_suggested!
     apply_schedule_start_date_overrides!(args)
     defaulted_schedule_types = default_missing_schedule_dates!
@@ -586,12 +601,21 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       when :key_points
         parts << " Estou selecionando os principais marcos do cronograma pro infográfico em " \
           "segundo plano — peça pra gerar de novo em alguns instantes pra ele já sair resumido."
+      when :schedule_update
+        parts << " Estou reconstruindo o cronograma (tabela e infográfico) com a mudança pedida, " \
+          "em segundo plano — peça pra gerar de novo em alguns instantes pra ele já sair " \
+          "atualizado."
       end
       parts.join
     end
 
-    # Duas coisas que a IA prepara em background pro cronograma sair completo, nesta ordem:
+    # Três coisas que a IA prepara em background pro cronograma sair completo/correto, nesta
+    # ordem de prioridade:
     #
+    # 0. `:schedule_update` — o consultor pediu uma MUDANÇA (param `atualizar_cronograma`, ver
+    #    Proposal#regenerate_schedule!): enfileira RegenerateScheduleJob, que APAGA e RECONSTRÓI
+    #    o cronograma do zero. Único dos três que NÃO é idempotente por natureza — é uma ação
+    #    explícita, checada primeiro porque sobrepõe as checagens de "já existe?" abaixo.
     # 1. `:schedule` — NENHUM item ainda: enfileira SuggestScheduleJob, que MONTA o cronograma
     #    (fases/atividades/durações) e já elege os ≤6 marcos do infográfico no mesmo passo. Cobre
     #    a proposta cuja primeira tentativa (em Conversation#ensure_proposal!) falhou/veio vazia
@@ -601,10 +625,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     #    na Tela de Precificação): enfileira ElectScheduleKeyPointsJob, que só elege os marcos a
     #    partir do que já existe — nunca mexe nos schedule_items.
     #
-    # Idempotente dos dois lados: (1) só quando não há item nenhum, (2) só quando não há
-    # schedule_key_points ainda — nunca reescreve o que o consultor ajustou. SEMPRE em background,
-    # NUNCA `build_with_ai_suggested_schedule!`/`elect_schedule_key_points!` direto aqui — esta
-    # ferramenta roda como tool call DENTRO de Conversation#complete (RespondToMessageJob), e
+    # Idempotente em 1 e 2: (1) só quando não há item nenhum, (2) só quando não há
+    # schedule_key_points ainda — nunca reescreve o que o consultor ajustou sem pedido explícito.
+    # SEMPRE em background,
+    # NUNCA `build_with_ai_suggested_schedule!`/`elect_schedule_key_points!`/`regenerate_schedule!`
+    # direto aqui — esta ferramenta roda como tool call DENTRO de Conversation#complete
+    # (RespondToMessageJob), e
     # chamar a IA síncrona ali reentraria complete/ask_internally (achado ao vivo conversa 32/
     # proposta 18: a chamada ao Bedrock falhava sozinha, sem exceção pro rescue pegar, e o
     # cronograma ficava vazio pra sempre). Devolve o símbolo do que enfileirou (ou nil), pra
@@ -619,9 +645,18 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       pricing.suggest_logistics! if pricing && pricing.distance_km.zero?
     end
 
-    def ensure_schedule_background_work!
+    def ensure_schedule_background_work!(args)
       pricing = @proposal.project_pricing
       return nil unless pricing
+
+      # Pedido explícito de MUDANÇA num cronograma que já existe (ver param atualizar_cronograma)
+      # tem prioridade sobre as checagens de idempotência abaixo — é a única forma da IA conseguir
+      # reconstruir schedule_items depois da 1ª sugestão (achado em produção: conversa 44, ver
+      # Proposal#regenerate_schedule!).
+      if ActiveModel::Type::Boolean.new.cast(args[:atualizar_cronograma]) == true
+        RegenerateScheduleJob.perform_later(@proposal.id)
+        return :schedule_update
+      end
 
       unless pricing.schedule_items.exists?
         SuggestScheduleJob.perform_later(@proposal.id)

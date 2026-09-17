@@ -1344,6 +1344,50 @@ COM cronograma (página paisagem no meio):**
    em vez de "12"; depois, 1 a 10 antes do cronograma, 11 e 12 depois — todas corretas e com
    rodapé completo.
 
+**Pedido de MUDANÇA num cronograma que já existe não tinha nenhum efeito real (2026-09, relato
+do consultor, conversa 44 — "pedi um cronograma de 12 meses, depois pedi pra alterar pra 6
+meses, ele foi incapaz de alterar tanto o infográfico quanto o Gantt quanto o prazo").**
+`GenerateProposalDocumentTool` só LÊ `schedule_items` do banco pra montar o `.docx` — nunca
+escreve neles. O único caminho que escreve é `Proposal#build_with_ai_suggested_schedule!`
+(via `SuggestScheduleJob`), e ele só roda **uma vez**, quando não há item nenhum ainda
+(idempotência deliberada — nunca reescrever o que o consultor já ajustou na Tela de
+Precificação, ver correções anteriores desta mesma seção). Resultado: depois da 1ª sugestão,
+não existia NENHUMA forma de reconstruir o cronograma a partir do chat — a IA respondeu
+"cronograma atualizado para 6 meses" três vezes seguidas (a 3ª até depois do consultor apontar a
+inconsistência entre o texto do prazo e o gráfico), sem que uma única linha de `schedule_items`
+mudasse: os mesmos 24 itens de 12 meses/52 semanas continuavam intocados no banco, e cada nova
+geração renderizava exatamente o mesmo Gantt/infográfico de antes. Confirmado direto no banco
+(não só lendo o código): `created_at == updated_at` nos 24 itens, idênticos entre a 1ª e a 4ª
+geração da proposta.
+
+- **`Proposal#regenerate_schedule!`** (novo) — mesma chamada de IA de sempre
+  (`fetch_ai_schedule_suggestion`, que lê o histórico completo da conversa via `ask_internally`,
+  então o pedido de mudança mais recente do consultor já está no contexto que ela vê), mas
+  **apaga o cronograma inteiro (`schedule_items.destroy_all`) antes de recriar** — o oposto
+  deliberado da idempotência de `build_with_ai_suggested_schedule!`. Só roda quando pedido
+  explicitamente (nunca automático): protegido por `suggestion.blank?` — se a resposta da IA não
+  parsear como JSON, o cronograma ANTIGO (que funciona) fica intacto, em vez de virar vazio por
+  causa de uma falha de parse (diferente de `build_with_ai_suggested_schedule!`, onde falhar não
+  perde nada porque não havia nada antes).
+- **`RegenerateScheduleJob`** (novo, mesma receita de `SuggestScheduleJob`/
+  `ElectScheduleKeyPointsJob`: `Proposal#with_schedule_lock`, roda inteiramente em background) —
+  nunca síncrono dentro da tool call, mesmo motivo de sempre (reentrância de
+  `Conversation#complete`).
+- **`GenerateProposalDocumentTool` ganhou o parâmetro `atualizar_cronograma`** (boolean) — a IA
+  só marca `true` quando o consultor pede uma MUDANÇA num cronograma que a proposta JÁ TEM (ex.:
+  "mude para 6 meses"). Tem prioridade sobre as checagens de idempotência de
+  `ensure_schedule_background_work!`: enfileira `RegenerateScheduleJob` mesmo com
+  `schedule_items` já existindo, ao contrário de `SuggestScheduleJob`. O `description` do
+  parâmetro `prazo_de_execucao` (o TEXTO do prazo) ganhou uma nota explícita de que ele é
+  independente do cronograma — mudar só esse texto nunca reconstrói a tabela/infográfico, foi
+  exatamente essa confusão que gerou o incidente.
+- Verificado ao vivo reproduzindo o cenário exato (conversa 44 de verdade, chamada real ao
+  Bedrock, não simulada): antes, 24 itens / 52 semanas (12 meses); chamando a ferramenta com
+  `atualizar_cronograma: true` e o pedido de 6 meses no histórico da conversa, o job em
+  background apagou os 24 itens antigos e recriou 22 novos, com o último período terminando na
+  semana 27 (~6 meses) — incluindo `schedule_key_points` (o infográfico) recalculado para os
+  novos marcos, não os antigos.
+
 ---
 
 ## 9. Prompts do sistema (2 prompts principais)
@@ -1762,6 +1806,15 @@ vetorizado, não um mecanismo novo.
 - Preço é sempre calculado em Ruby, nunca pela IA — a IA só alimenta parâmetros de escopo (tipo de estudo, distância, sobreposições) que entram no motor de cálculo.
 - Layout do documento final vem do modelo `.docx` real da Papyrus (preenchido via `rubyzip`), não é gerado pela IA nem recriado em HTML/CSS — ver seção 8.
 - IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
+- **Modelo padrão via AWS Bedrock (2026-09):** `config.default_model` usa o inference profile
+  `global.anthropic.claude-sonnet-4-6` (Sonnet, era Haiku 4.5 antes) — checar os inference
+  profiles ativos disponíveis com `aws bedrock list-inference-profiles --region "$AWS_REGION"`
+  antes de trocar de novo (nem todo modelo listado na AWS já está no registro local do
+  `ruby_llm`, ver `RubyLLM.config.model_registry_file` — um model id ausente dali quebra com
+  `RubyLLM::ModelNotFoundError`, mesmo que a AWS aceite a chamada). **Trocar `default_model`
+  exige também atualizar `test/fixtures/models.yml`** (o comentário no arquivo explica por quê:
+  fixture pula o callback que resolve `model_id` numa `Conversation`/`GeneralChat` de teste) —
+  sem isso, toda a suíte quebra com "Unknown model" na hora de criar qualquer chat.
 - Views HTML+ERB são validadas pela gem `herb` (`bin/herb lint`, configurada em `.herb.yml`, rodando também no `bin/ci` e no workflow do GitHub Actions). O linter em si é o pacote npm `@herb-tools/linter`, fixado no `package.json` na mesma versão da gem — ao atualizar uma, atualizar a outra e o campo `version:` do `.herb.yml`.
 - Anexos de conversa (ET, TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
 - RAG do acervo (seção 11.1): rodar `script/rag/report.rb` e revisar o HTML ANTES de

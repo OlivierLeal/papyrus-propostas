@@ -276,6 +276,47 @@ class Proposal < ApplicationRecord
     Rails.logger.error("build_with_ai_suggested_schedule! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
   end
 
+  # Reconstrói o cronograma do ZERO a partir de uma nova sugestão da IA — chamado quando o
+  # consultor pede uma MUDANÇA num cronograma que a proposta JÁ TEM (ex.: "mude para 6 meses"),
+  # nunca automaticamente. Achado em produção (conversa 44): sem isto, a IA só tinha
+  # `generate_proposal_document` pra "atualizar" o cronograma, mas essa ferramenta só LÊ
+  # `schedule_items` do banco pra montar o .docx — nunca escreve neles. A IA respondia "cronograma
+  # atualizado para 6 meses" três vezes seguidas (inclusive depois do consultor apontar a
+  # inconsistência) sem NENHUMA mudança real acontecer: os mesmos 24 itens de 12 meses/52 semanas
+  # continuavam no banco, intocados, e cada nova geração renderizava exatamente o mesmo gráfico de
+  # antes.
+  #
+  # Diferente de `build_with_ai_suggested_schedule!` (só roda quando não há item nenhum — nunca
+  # reescreve o que o consultor já ajustou), este método SEMPRE apaga o cronograma inteiro e
+  # substitui pela nova sugestão — é uma ação explícita, só disparada quando o consultor pede uma
+  # mudança de verdade (`GenerateProposalDocumentTool` param `atualizar_cronograma`). A chamada à
+  # IA (`fetch_ai_schedule_suggestion`) lê o histórico completo da conversa via `ask_internally`,
+  # então o pedido de mudança mais recente do consultor já está no contexto que ela vê.
+  #
+  # Roda em background (RegenerateScheduleJob), pelo mesmo motivo de sempre: esta ferramenta é
+  # chamada como tool call DENTRO de Conversation#complete, e uma chamada de IA síncrona aqui
+  # reentraria complete/ask_internally (ver build_with_ai_suggested_schedule!/CLAUDE.md seção 8).
+  #
+  # Só apaga o cronograma ATUAL quando a IA devolve algo (`suggestion.blank?` cobre resposta que
+  # não parseou como JSON — `fetch_ai_schedule_suggestion` devolve `{}` nesse caso). Diferente de
+  # `build_with_ai_suggested_schedule!` (falha aí não perde nada, porque não havia nada antes),
+  # aqui existe um cronograma FUNCIONANDO pra proteger — uma falha de parse nunca deve trocar um
+  # cronograma bom por um vazio.
+  def regenerate_schedule!
+    pricing = project_pricing
+    return unless pricing
+
+    suggestion = fetch_ai_schedule_suggestion
+    return if suggestion.blank?
+
+    pricing.schedule_items.destroy_all
+    apply_schedule_lines!(pricing, "servico", Array(suggestion["cronograma_servico"]))
+    apply_schedule_lines!(pricing, "implantacao", Array(suggestion["cronograma_implantacao"]))
+    pricing.update!(schedule_key_points: parse_schedule_key_points(suggestion))
+  rescue StandardError => e
+    Rails.logger.error("regenerate_schedule! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
+  end
+
   # Elege os ≤6 marcos do infográfico de linha do tempo (CLAUDE.md seção 8) a partir de um
   # cronograma_servico que JÁ EXISTE — proposta antiga (criada antes desta funcionalidade), ou
   # cronograma que o consultor montou/ajustou à mão na Tela de Precificação. `build_with_ai_

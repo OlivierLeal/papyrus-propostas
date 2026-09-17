@@ -326,6 +326,59 @@ class ProposalTest < ActiveSupport::TestCase
     assert_empty proposal.project_pricing.reload.schedule_key_points
   end
 
+  # Achado em produção (conversa 44): o consultor pediu pra encurtar um cronograma de 12 pra 6
+  # meses, e a IA só tinha generate_proposal_document pra "atualizar" — mas essa ferramenta só LÊ
+  # schedule_items, nunca escreve. regenerate_schedule! é o único caminho que de fato reconstrói.
+  test "regenerate_schedule! replaces the existing schedule instead of appending to it" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    pricing = proposal.project_pricing
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Antigo", activity_name: "Fase de 12 meses",
+      start_period: 1, duration_periods: 52, position: 0)
+    ai_response = {
+      cronograma_servico: [
+        { fase: "Novo", atividade: "Fase de 6 meses", periodo_inicio: 1, duracao: 26, marco: false }
+      ],
+      cronograma_implantacao: []
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.regenerate_schedule! }
+
+    items = pricing.schedule_items.for_type("servico").to_a
+    assert_equal [ "Fase de 6 meses" ], items.map(&:activity_name)
+    assert_equal 26, items.first.duration_periods
+  end
+
+  test "regenerate_schedule! also replaces schedule_key_points, not just the items" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    pricing = proposal.project_pricing
+    pricing.update!(schedule_key_points: [ { "nome" => "Marco antigo", "periodo" => 20 } ])
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Antigo", activity_name: "Fase de 12 meses",
+      start_period: 1, duration_periods: 52, position: 0)
+    ai_response = {
+      cronograma_servico: [ { fase: "Novo", atividade: "Fase de 6 meses", periodo_inicio: 1, duracao: 26, marco: false } ],
+      marcos_infografico: [ { nome: "Marco novo", periodo: 1 } ]
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.regenerate_schedule! }
+
+    key_points = pricing.reload.schedule_key_points
+    assert_equal [ "Marco novo" ], key_points.map { |m| m["nome"] }
+  end
+
+  test "regenerate_schedule! leaves the previous schedule untouched when the AI reply isn't valid JSON" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    pricing = proposal.project_pricing
+    pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Antigo", activity_name: "Fase de 12 meses",
+      start_period: 1, duration_periods: 52, position: 0)
+
+    stub_ai_complete("isso não é json") { proposal.regenerate_schedule! }
+
+    assert_equal [ "Fase de 12 meses" ], pricing.schedule_items.for_type("servico").map(&:activity_name)
+  end
+
   test "elect_schedule_key_points! picks the marcos from an already-built servico schedule, without touching the items" do
     proposal = @conversation.create_proposal!(status: "draft")
     proposal.build_from_template!

@@ -845,6 +845,42 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args) }
   end
 
+  # Achado em produção (conversa 44): a IA só tinha esta ferramenta pra "atualizar" o cronograma,
+  # mas ela só LÊ schedule_items do banco — nunca escreve. A IA respondeu "cronograma atualizado
+  # para 6 meses" repetidas vezes sem NENHUMA mudança real (24 itens de 12 meses continuavam
+  # intocados). Ver Proposal#regenerate_schedule!/RegenerateScheduleJob.
+  test "enqueues RegenerateScheduleJob (not SuggestScheduleJob) when atualizar_cronograma is true, even though a schedule already exists" do
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_enqueued_with(job: RegenerateScheduleJob, args: [ @proposal.id ]) do
+      assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args, atualizar_cronograma: true) }
+    end
+
+    # A tabela antiga não é tocada sincronamente — a reconstrução acontece só no job em background.
+    assert_equal 1, @proposal.project_pricing.reload.schedule_items.count
+  end
+
+  test "does not enqueue RegenerateScheduleJob when atualizar_cronograma is absent or false" do
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_no_enqueued_jobs(only: RegenerateScheduleJob) { tool.execute(**@args, atualizar_cronograma: false) }
+  end
+
+  test "mentions the schedule is being rebuilt in the background when atualizar_cronograma is true" do
+    @proposal.project_pricing.update!(schedule_papyrus_start_date: Date.new(2026, 9, 1))
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, atualizar_cronograma: true))
+
+    assert_match "reconstruindo o cronograma", result["message"]
+  end
+
   # ensure_logistics_suggested! — cobre o KMZ ter terminado DEPOIS da 1ª tentativa
   # (Conversation#ensure_proposal!). Só Ruby + HTTP, síncrono (não é chamada de IA, sem o
   # problema de reentrância do cronograma).
