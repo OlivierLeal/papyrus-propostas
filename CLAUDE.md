@@ -1388,6 +1388,89 @@ geração da proposta.
   semana 27 (~6 meses) — incluindo `schedule_key_points` (o infográfico) recalculado para os
   novos marcos, não os antigos.
 
+**Gerar a proposta direto pelo chat deixava a equipe técnica pra sempre vazia, pra qualquer
+tipo de estudo sem `study_templates` cadastrado (2026-09, relato do consultor: "ele num tá
+cadastrando a equipe técnica").** Mesma família de bug do cronograma acima (reentrância de
+`Conversation#complete`), agora afetando a equipe: `GenerateProposalDocumentTool#execute` sempre
+chama `ensure_proposal!(ai_suggestions: false)` — NUNCA a IA síncrona ali dentro, de propósito
+(ver o comentário de `ensure_proposal!`, e a família de correções de reentrância mais acima nesta
+seção). Com `ai_suggestions: false`, a equipe vem direto de `build_from_template!`, que só
+preenche linhas REAIS quando o tipo de estudo tem `study_templates` cadastrado (só `eia_rima`
+hoje) — pra qualquer outro tipo (a maioria: RAP, EMI, Relatório Técnico, Acompanhamento...), a
+proposta nascia só com os `always_included` (Diretoria/Coordenação, todos a 0h) e ficava assim
+PRA SEMPRE, a não ser que o consultor abrisse a Tela de Precificação (botão "Avançar para
+Precificação", único chamador com `ai_suggestions: true`) — o que a maioria não faz quando já
+está satisfeito com o texto gerado pelo chat. Parecia "a IA não mapeou a equipe", mas na
+verdade ela nunca tinha sido CHAMADA pra isso nesse caminho.
+
+- **`Proposal#suggest_team_if_missing!`** (novo) — mesma sugestão de sempre
+  (`fetch_ai_roster_suggestion`/`roster_suggestion_prompt`, o catálogo completo de
+  `Professional.active`), mas só age quando (1) o(s) tipo(s) de estudo desta conversa NÃO têm
+  `study_templates` (`study_templates_menu_empty?`, novo método público — `eia_rima` já sai do
+  `build_from_template!` com linhas reais, não é o buraco que isto cobre) e (2) a equipe ainda só
+  tem os `always_included` (nenhuma linha real ainda). Idempotente e nunca destrutivo: não
+  reescreve o que a IA já sugeriu antes nem o que o consultor ajustou na Tela de Precificação.
+- **`SuggestTeamJob`** (novo, mesma receita de `SuggestScheduleJob`) — roda inteiramente em
+  BACKGROUND, nunca síncrono dentro da tool call, mesmo motivo de sempre. Protegido por
+  `Proposal#with_team_lock` (mesmo mecanismo de `with_schedule_lock`, `pg_advisory_xact_lock`,
+  **namespace PRÓPRIO** — team e cronograma podem rodar em paralelo sem se esperar).
+- **`GenerateProposalDocumentTool#ensure_team_background_work!`** — chamado em toda geração, ao
+  lado de `ensure_schedule_background_work!`; enfileira `SuggestTeamJob` só quando as duas
+  condições acima valem, e avisa o consultor na mensagem de retorno ("Estou sugerindo a equipe
+  técnica... peça pra gerar de novo em alguns instantes").
+- Verificado ao vivo (chamada real ao Bedrock, fluxo real — `GenerateProposalDocumentTool#execute`
+  numa conversa nova de RAP, sem passar pela Tela de Precificação): antes do job rodar, só os 3
+  `always_included` a 0h; depois do job (rodado em background, mesmo fluxo real de produção),
+  17 profissionais reais com entregável e horas específicas (geólogo, geógrafa, bióloga de fauna,
+  arqueólogo, advogado etc.), mapeados a partir do escopo da conversa.
+
+**"Gere de novo em alguns instantes" era ruim — o consultor tinha que voltar e pedir de novo
+manualmente (2026-09, relato do consultor a partir de um print de chat real).** Todas as
+correções acima (cronograma/equipe/infográfico em background) terminavam avisando "peça pra
+gerar de novo em alguns instantes" — o `.docx` saía incompleto NA HORA, e só ficava completo se o
+consultor voltasse e pedisse de novo. Na prática ele às vezes só pedia a REVISÃO (`"gere de
+novo"`) sem mudar nada, e recebia de volta o MESMO conteúdo, sem cronograma, só com a revisão
+incrementada — "qual sentido de gerar a proposta sem cronograma e depois pedir pra gerar
+novamente?"
+
+**Correção — o sistema termina sozinho, sem pedir nada ao consultor:**
+- **`proposals.content_json`** (coluna jsonb já existente, sem uso até então) passou a guardar
+  os parâmetros de CONTEÚDO da última geração (`GenerateProposalDocumentTool#execute` grava
+  `args` inteiro logo ao resolver a proposta) — é o que permite remontar o `.docx` depois, sem
+  precisar de uma chamada de IA nova pra reescrever o texto (a IA já escreveu; só falta
+  remontar).
+- **`GenerateProposalDocumentTool.replay_pending_regeneration!(proposal)`** (novo método de
+  classe) — chamado pelos jobs de sugestão em background (`SuggestScheduleJob`, `SuggestTeamJob`,
+  `RegenerateScheduleJob`, `ElectScheduleKeyPointsJob`) DEPOIS que cada um termina a própria
+  parte. Sem chamada de IA nenhuma aqui: só relê `content_json` e chama `execute(**args)` de
+  novo — os dados que faltavam (cronograma/equipe) já estão no banco a esta altura, então o
+  `.docx` sai completo desta vez. Dois cuidados:
+  - `atualizar_cronograma` é sempre forçado a `false` no replay — sem isso, um `content_json`
+    antigo com esse parâmetro `true` reenfileiraria `RegenerateScheduleJob`, que ao terminar
+    chamaria este método de novo com os MESMOS args → loop infinito.
+  - `descricao_revisao` é sobrescrita com um texto próprio ("Complementação automática...") —
+    sem isso, a revisão automática saía com a descrição da geração ORIGINAL no Sumário de
+    Revisões, confundindo o que mudou de fato entre uma revisão e outra.
+  - No-op (não faz nada) se ainda não existe NENHUM `.docx` gerado, ou se `content_json` está
+    vazio — este método nunca gera a PRIMEIRA versão, só completa uma que já existe.
+  - Ao terminar, cria a mensagem `assistant` com o texto de retorno da nova geração (mesmo texto
+    que o consultor veria se tivesse pedido "gere de novo" manualmente) e chama
+    `broadcast_refresh` — o consultor vê o arquivo novo aparecer sozinho no chat, sem fazer nada.
+- Todas as 4 mensagens de aviso ("Estou sugerindo o cronograma/equipe/infográfico... peça pra
+  gerar de novo") trocaram pra "...quando terminar, gero uma nova versão sozinho e aviso aqui,
+  sem precisar pedir de novo."
+- Verificado ao vivo, do jeito mais realista possível (nenhuma chamada manual ao job — deixado
+  rodar pelo worker de verdade do Solid Queue, tempo real de espera pela chamada ao Bedrock,
+  ~30s): gerada uma proposta nova de EIA-RIMA sem cronograma ainda (`Rev.00`, versão 1); passado
+  o tempo da sugestão em background, **sem nenhuma ação do consultor**, saiu sozinho o
+  `Rev.01` (versão 2) já com os 30 itens de cronograma incluídos, e uma mensagem nova do
+  assistente no chat anunciando o arquivo — exatamente o fluxo que o consultor pediu.
+  **Achado ao testar**: uma primeira tentativa de verificação usando `queue_adapter = :inline`
+  deu falso negativo — com esse adapter o job roda ANTES do resto do `#execute` (que ainda ia
+  anexar o `.docx` original) terminar, uma ordem que NUNCA acontece em produção (lá o job só é
+  pego pelo worker depois que a chamada síncrona já retornou). Sempre validar este tipo de
+  correção com o adapter assíncrono de verdade, nunca com `:inline`.
+
 ---
 
 ## 9. Prompts do sistema (2 prompts principais)
@@ -1806,15 +1889,41 @@ vetorizado, não um mecanismo novo.
 - Preço é sempre calculado em Ruby, nunca pela IA — a IA só alimenta parâmetros de escopo (tipo de estudo, distância, sobreposições) que entram no motor de cálculo.
 - Layout do documento final vem do modelo `.docx` real da Papyrus (preenchido via `rubyzip`), não é gerado pela IA nem recriado em HTML/CSS — ver seção 8.
 - IA: usar a gem `ruby_llm` (não chamar a API da Anthropic diretamente). Instalada via `rails generate ruby_llm:install chat:Conversation message:Message` — por isso `Conversation` usa `acts_as_chat` e `Message` usa `acts_as_message` (gem renomeia associações automaticamente, ex.: `acts_as_message chat: :conversation`). `ToolCall` e `Model` mantêm os nomes padrão da gem. Configuração em `config/initializers/ruby_llm.rb` (`anthropic_api_key`, `default_model`); rodar `bin/rails ruby_llm:load_models` para popular a tabela `models` assim que a chave real da Anthropic estiver configurada.
-- **Modelo padrão via AWS Bedrock (2026-09):** `config.default_model` usa o inference profile
-  `global.anthropic.claude-sonnet-4-6` (Sonnet, era Haiku 4.5 antes) — checar os inference
-  profiles ativos disponíveis com `aws bedrock list-inference-profiles --region "$AWS_REGION"`
-  antes de trocar de novo (nem todo modelo listado na AWS já está no registro local do
-  `ruby_llm`, ver `RubyLLM.config.model_registry_file` — um model id ausente dali quebra com
-  `RubyLLM::ModelNotFoundError`, mesmo que a AWS aceite a chamada). **Trocar `default_model`
-  exige também atualizar `test/fixtures/models.yml`** (o comentário no arquivo explica por quê:
-  fixture pula o callback que resolve `model_id` numa `Conversation`/`GeneralChat` de teste) —
-  sem isso, toda a suíte quebra com "Unknown model" na hora de criar qualquer chat.
+- **Tentativa de trocar o modelo padrão pra Sonnet via AWS Bedrock, revertida (2026-09).**
+  `config.default_model` foi trocado por um instante de `global.anthropic.claude-haiku-4-5-
+  20251001-v1:0` pra `global.anthropic.claude-sonnet-4-6` — **revertido pro Haiku 4.5 no mesmo
+  dia**, depois de três incidentes em produção seguidos, sem espaço pra investigar com calma:
+  1. `RubyLLM::ModelNotFoundError` — a tabela `models` do banco de PRODUÇÃO é independente da
+     de dev/test, e `bin/rails ruby_llm:load_models` só tinha rodado em dev. `test/fixtures/
+     models.yml` também precisa acompanhar (o comentário no arquivo explica por quê — sem isso
+     a suíte quebra com "Unknown model" ao criar qualquer chat de teste).
+  2. Depois de corrigir o item 1, `ProcessEtJob` (o primeiro passo do pipeline) começou a falhar
+     com `RubyLLM::BadRequestError: The provided model identifier is invalid` — vindo da própria
+     API da AWS, não do registro local do `ruby_llm`. Credenciais/região de produção são as
+     MESMAS de dev (confirmado com o consultor), então não é conta AWS diferente.
+  3. O consultor reportou que "o modelo não tá funcionando de forma nenhuma em produção" — sinal
+     de que não era um caso isolado.
+  **Não deu tempo de isolar a causa exata do item 2 antes de reverter** — chamada de texto puro
+  funcionava (`RubyLLM.chat.ask` de verdade, confirmado via `aws bedrock-runtime converse` direto
+  também), então a suspeita mais forte é algo específico do caminho com ANEXO nativo (PDF/DOCX,
+  o que `ProcessEtJob`/`ProcessTrJob` sempre mandam) contra esse inference profile — mas os testes
+  de reprodução em dev usaram PDFs fake de fixture (`%PDF-1.4` sem conteúdo real), que a API
+  rejeita por SI SÓ ("document source bytes could not be parsed") com QUALQUER modelo, Haiku
+  incluso — não prova nada sobre o Sonnet especificamente. Só com um PDF de verdade (gerado via
+  LibreOffice) é que confirmei o caminho de anexo voltando a funcionar depois do revert pro
+  Haiku — mas não testei esse MESMO PDF de verdade contra o Sonnet antes de reverter, então a
+  causa raiz do item 2 continua **não confirmada**, só a correção (reverter) foi validada.
+  **Antes de tentar o Sonnet de novo**: reproduzir localmente com um PDF real (não fixture) e
+  `default_model` = Sonnet antes de trocar em produção, e rodar nos TRÊS lugares (dev via
+  `ruby_llm:load_models`, `test/fixtures/models.yml`, e produção via
+  `bin/kamal app exec "bin/rails ruby_llm:load_models"`) — os três fazem parte do mesmo deploy,
+  nunca só o primeiro. `ruby_llm:load_models` não depende de rede/chave nenhuma (só lê o
+  `models.json` empacotado na gem e grava no banco via `RubyLLM.models.load_from_json!` +
+  `Model.save_to_database`), então é seguro rodar em produção a qualquer momento.
+  Checar inference profiles ativos com `aws bedrock list-inference-profiles --region
+  "$AWS_REGION"` — nem todo modelo listado na AWS já está no registro local do `ruby_llm` (ver
+  `RubyLLM.config.model_registry_file`), um id ausente dali quebra com `ModelNotFoundError`
+  mesmo que a AWS aceite a chamada.
 - Views HTML+ERB são validadas pela gem `herb` (`bin/herb lint`, configurada em `.herb.yml`, rodando também no `bin/ci` e no workflow do GitHub Actions). O linter em si é o pacote npm `@herb-tools/linter`, fixado no `package.json` na mesma versão da gem — ao atualizar uma, atualizar a outra e o campo `version:` do `.herb.yml`.
 - Anexos de conversa (ET, TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
 - RAG do acervo (seção 11.1): rodar `script/rag/report.rb` e revisar o HTML ANTES de
