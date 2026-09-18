@@ -845,6 +845,92 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args) }
   end
 
+  # Achado em produção: gerar a proposta direto pelo chat (ensure_proposal!(ai_suggestions:
+  # false)) deixava a equipe pra sempre só com Diretoria/Coordenação, pra qualquer tipo de estudo
+  # sem study_templates — parecia "a IA não mapeou a equipe". Ver Proposal#suggest_team_if_missing!.
+  test "enqueues SuggestTeamJob when the team only has always_included lines and there's no study_templates" do
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_enqueued_with(job: SuggestTeamJob, args: [ @proposal.id ]) { tool.execute(**@args) }
+  end
+
+  test "does not enqueue SuggestTeamJob when the team already has a non-always_included line" do
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_no_enqueued_jobs(only: SuggestTeamJob) { tool.execute(**@args) }
+  end
+
+  test "mentions suggesting the team in the background when SuggestTeamJob is enqueued" do
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_match "sugerindo a equipe técnica", result["message"]
+  end
+
+  test "execute persists the content args so a later background job can replay them" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    assert_equal @args.deep_stringify_keys, @proposal.reload.content_json
+  end
+
+  # .replay_pending_regeneration! é o que fecha o relato do consultor: gerar sem cronograma/
+  # equipe e pedir "gere de novo" era ruim — o sistema termina sozinho quando o background acaba.
+  test ".replay_pending_regeneration! regenerates the docx from the stored args and posts a chat message" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+    tool.execute(**@args) # 1ª geração, grava content_json
+    message_count_before = @proposal.conversation.messages.count
+    version_before = @proposal.reload.version
+
+    GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
+
+    assert_equal version_before + 1, @proposal.reload.version
+    assert_operator @proposal.conversation.messages.count, :>, message_count_before
+    last_message = @proposal.conversation.messages.order(:created_at).last
+    assert_equal "assistant", last_message.role
+    assert_match(/Gerado o arquivo/, last_message.content)
+  end
+
+  test ".replay_pending_regeneration! never replays atualizar_cronograma: true (would loop forever)" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
+      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+    tool.execute(**@args, atualizar_cronograma: true) # 1ª geração, guardou atualizar_cronograma: true
+
+    assert_no_enqueued_jobs(only: RegenerateScheduleJob) do
+      GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
+    end
+  end
+
+  test ".replay_pending_regeneration! does nothing when no document was generated yet" do
+    @proposal.update!(content_json: @args.deep_stringify_keys)
+
+    assert_no_difference "@proposal.generated_documents.count" do
+      GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
+    end
+  end
+
+  test ".replay_pending_regeneration! does nothing when there's no content_json stored" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+    tool.execute(**@args)
+    @proposal.update_column(:content_json, {})
+    version_before = @proposal.reload.version
+
+    GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
+
+    assert_equal version_before, @proposal.reload.version
+  end
+
   # Achado em produção (conversa 44): a IA só tinha esta ferramenta pra "atualizar" o cronograma,
   # mas ela só LÊ schedule_items do banco — nunca escreve. A IA respondeu "cronograma atualizado
   # para 6 meses" repetidas vezes sem NENHUMA mudança real (24 itens de 12 meses continuavam

@@ -31,6 +31,25 @@ module AiStubHelper
     Conversation.define_method(:complete, original_method)
   end
 
+  # Pra testar que um caminho é idempotente/tem gate de saída antecipada e NÃO chama a IA — sem
+  # isso, `stub_ai_error`/`stub_ai_complete` não distinguem "não chamou" de "chamou e o rescue do
+  # próprio método engoliu o erro/resposta", porque a maioria dos métodos que orquestram
+  # ask_internally tem um `rescue StandardError` próprio no fim.
+  def assert_no_ai_calls(&block)
+    calls = 0
+    original_method = Conversation.instance_method(:complete)
+
+    Conversation.define_method(:complete) do
+      calls += 1
+      messages.create!(role: "assistant", content: "não deveria ter chamado a IA")
+    end
+
+    block.call
+  ensure
+    Conversation.define_method(:complete, original_method)
+    assert_equal 0, calls, "esperava que a IA não fosse chamada, mas foi #{calls}x"
+  end
+
   # Mesma técnica acima, pra GeneralChat (chat geral de dúvidas, não amarrado a nenhuma proposta).
   def stub_general_chat_ai_complete(responses)
     queue = Array(responses).dup

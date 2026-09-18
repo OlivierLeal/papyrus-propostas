@@ -32,4 +32,27 @@ class RegenerateScheduleJobTest < ActiveJob::TestCase
     end
     assert_equal [ "Fase de 12 meses" ], @proposal.project_pricing.schedule_items.for_type("servico").map(&:activity_name)
   end
+
+  # Relato do consultor: pedir "atualizar_cronograma" e depois ter que pedir "gere de novo" pra
+  # ver o resultado era ruim — o job agora termina sozinho (CLAUDE.md seção 8).
+  test "auto-regenerates the docx after rebuilding the schedule" do
+    @proposal.generated_documents.attach(
+      io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
+      metadata: { kind: "combined", version: 1, description: "Emissão Inicial" }
+    )
+    @proposal.update!(content_json: {
+      nome_cliente: "A confirmar", contato_cliente: "A confirmar", descricao_servico: "EIA/RIMA",
+      municipios: "Vitória da Conquista", estado: "BA", cnpj_cliente: "A confirmar",
+      objetivo_dos_servicos: "Obter a LP.", caracterizacao_do_empreendimento: "Parque eólico.",
+      nome_documento_tr: "TR", escopo_e_metodologia: "Diagnósticos.", prazo_de_execucao: "120 dias",
+      produtos: [ "EIA", "RIMA" ], descricao_revisao: "Emissão Inicial", atualizar_cronograma: true
+    })
+    ai_response = '{"cronograma_servico": [{"fase": "Novo", "atividade": "Fase de 6 meses", "periodo_inicio": 1, "duracao": 26, "marco": false}], "cronograma_implantacao": []}'
+    version_before = @proposal.version
+
+    stub_ai_complete(ai_response) { RegenerateScheduleJob.new.perform(@proposal.id) }
+
+    assert_operator @proposal.reload.version, :>, version_before
+    assert_equal "assistant", @proposal.conversation.messages.order(:created_at).last.role
+  end
 end

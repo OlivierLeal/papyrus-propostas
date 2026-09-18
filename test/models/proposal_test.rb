@@ -154,6 +154,55 @@ class ProposalTest < ActiveSupport::TestCase
     assert_includes conversation.project_findings.where(nature: "sugestao").last.value, "fora do cadastro"
   end
 
+  # Achado em produção: GenerateProposalDocumentTool sempre chama ensure_proposal!(ai_suggestions:
+  # false) — gerar a proposta direto pelo chat, sem passar pela Tela de Precificação, deixava a
+  # equipe pra sempre só com Diretoria/Coordenação pra qualquer tipo de estudo sem study_templates
+  # (a maioria). suggest_team_if_missing! (via SuggestTeamJob, em background) cobre esse buraco.
+  test "suggest_team_if_missing! fills the team from the roster when only always_included lines exist" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
+    proposal = conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+    ai_response = {
+      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", hours_office: 40, hours_field: 24 } ],
+      documentos_separados: true
+    }.to_json
+
+    stub_ai_complete(ai_response) { proposal.suggest_team_if_missing! }
+
+    pricing = proposal.project_pricing.reload
+    linha = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
+    assert_equal 40, linha.hours_office
+    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora)), "a Diretoria (já presente) continua lá"
+    assert_equal "separated", proposal.reload.document_split
+  end
+
+  test "suggest_team_if_missing! does nothing when a non-always_included line already exists" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
+    proposal = conversation.create_proposal!(status: "draft")
+    pricing = proposal.build_from_template!
+    pricing.proposal_professionals.create!(professional: professionals(:biologa), deliverable_name: "Ajustado à mão", hours_office: 10, hours_field: 0)
+
+    assert_no_ai_calls { proposal.suggest_team_if_missing! }
+  end
+
+  test "suggest_team_if_missing! does nothing for a study type that has study_templates (eia_rima)" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+
+    assert_no_ai_calls { proposal.suggest_team_if_missing! }
+  end
+
+  test "suggest_team_if_missing! leaves the team untouched when the AI reply isn't valid JSON" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
+    proposal = conversation.create_proposal!(status: "draft")
+    proposal.build_from_template!
+
+    stub_ai_complete("isso não é json") { proposal.suggest_team_if_missing! }
+
+    pricing = proposal.project_pricing.reload
+    assert_not pricing.proposal_professionals.joins(:professional).where(professionals: { always_included: false }).exists?
+  end
+
   test "build_from_template! includes always_included professionals even when the study_type has no study_templates at all" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")

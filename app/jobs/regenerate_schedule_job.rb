@@ -20,6 +20,9 @@ class RegenerateScheduleJob < ApplicationJob
 
     proposal.with_schedule_lock { proposal.regenerate_schedule! }
     proposal.conversation.broadcast_refresh
+    # Mesmo motivo de SuggestScheduleJob: termina sozinho, sem o consultor precisar pedir "gere
+    # de novo" depois que o cronograma atualizado terminar (CLAUDE.md seção 8).
+    GenerateProposalDocumentTool.replay_pending_regeneration!(proposal)
   rescue StandardError => e
     Rails.logger.error("RegenerateScheduleJob failed for proposal #{proposal_id}: #{e.class} #{e.message}")
   end

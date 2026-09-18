@@ -177,6 +177,35 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "\"Realizar treinamento da equipe do cliente em SST antes do início dos serviços\"). Não invente — só o " \
           "que estiver escrito no documento. Se nada exigir algo além do padrão, não envie este parâmetro."
 
+  # Chamado pelos jobs de sugestão em background (SuggestScheduleJob, SuggestTeamJob,
+  # RegenerateScheduleJob) DEPOIS que eles terminam — relato do consultor: gerar a proposta sem
+  # cronograma/equipe (porque a IA ainda estava sugerindo em background) e só depois de avisado
+  # "peça pra gerar de novo" era ruim — ele queria que o sistema TERMINASSE sozinho, sem precisar
+  # pedir de novo. Remonta o .docx com os MESMOS parâmetros de conteúdo da última geração
+  # (`proposal.content_json`, gravado em #execute) — nenhuma chamada de IA nova aqui, só reusa o
+  # texto que a IA já escreveu antes; os dados que estavam faltando (cronograma/equipe) já estão
+  # no banco a esta altura, então o .docx sai completo. Sem geração anterior (`generated_documents`
+  # vazio) ou sem `content_json` guardado, não faz nada — não é este método que gera a PRIMEIRA
+  # versão. `atualizar_cronograma` é sempre forçado a `false` aqui — sem isso, replay de um args
+  # antigo com esse parâmetro `true` reenfileiraria RegenerateScheduleJob, que ao terminar chamaria
+  # este método de novo com os MESMOS args → loop infinito.
+  def self.replay_pending_regeneration!(proposal)
+    return if proposal.generated_documents.none?
+    return if proposal.content_json.blank?
+
+    args = proposal.content_json.symbolize_keys.merge(
+      atualizar_cronograma: false,
+      descricao_revisao: "Complementação automática — cronograma e/ou equipe técnica ficaram prontos em segundo plano"
+    )
+    result = JSON.parse(new(conversation: proposal.conversation).execute(**args))
+    return unless result["success"]
+
+    proposal.conversation.messages.create!(role: "assistant", content: result["message"])
+    proposal.conversation.broadcast_refresh
+  rescue StandardError => e
+    Rails.logger.error("GenerateProposalDocumentTool.replay_pending_regeneration! falhou para proposal #{proposal.id}: #{e.class} #{e.message}")
+  end
+
   def initialize(conversation:)
     super()
     @conversation = conversation
@@ -192,6 +221,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     @proposal = @conversation.proposal || @conversation.ensure_proposal!(ai_suggestions: false)
     return { error: blocked_reason }.to_json if @proposal.nil?
 
+    # Guarda o ÚLTIMO conjunto de parâmetros de conteúdo desta geração — usado por
+    # .replay_pending_regeneration! pra remontar o .docx sozinho, sem IA, quando o cronograma/
+    # equipe (sugeridos em background) terminam DEPOIS que este documento já saiu (ver abaixo).
+    # jsonb aceita os args como vieram (arrays/booleans/strings, sem hash aninhado nos parâmetros
+    # desta ferramenta) — símbolo vira string na volta, por isso o `.symbolize_keys` no replay.
+    @proposal.update!(content_json: args)
+
+    team_background_task = ensure_team_background_work!
     schedule_background_task = ensure_schedule_background_work!(args)
     ensure_logistics_suggested!
     apply_schedule_start_date_overrides!(args)
@@ -226,7 +263,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
           "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
+          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica")
       commercial_filename = @proposal.docx_filename("comercial")
@@ -241,7 +278,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
+          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined")
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
@@ -249,7 +286,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -573,8 +610,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       end
     end
 
-    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types = [])
+    def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types = [], team_background_task: nil)
       parts = []
+      if team_background_task == :team
+        parts << " Estou sugerindo a equipe técnica desta proposta em segundo plano — quando " \
+          "terminar, gero uma nova versão sozinho e aviso aqui, sem precisar pedir de novo."
+      end
       if schedule_filenames.present?
         parts << " O cronograma também saiu em formato MS Project (#{schedule_filenames.join(', ')}). " \
           "Pra importar: no MS Project, Arquivo > Abrir > Procurar, troque o tipo de arquivo de " \
@@ -596,15 +637,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       end
       case schedule_background_task
       when :schedule
-        parts << " Estou sugerindo o cronograma desta proposta em segundo plano — peça pra gerar " \
-          "de novo em alguns instantes pra ele já sair incluído."
+        parts << " Estou sugerindo o cronograma desta proposta em segundo plano — quando " \
+          "terminar, gero uma nova versão sozinho e aviso aqui, sem precisar pedir de novo."
       when :key_points
         parts << " Estou selecionando os principais marcos do cronograma pro infográfico em " \
-          "segundo plano — peça pra gerar de novo em alguns instantes pra ele já sair resumido."
+          "segundo plano — quando terminar, gero uma nova versão sozinho e aviso aqui, sem " \
+          "precisar pedir de novo."
       when :schedule_update
         parts << " Estou reconstruindo o cronograma (tabela e infográfico) com a mudança pedida, " \
-          "em segundo plano — peça pra gerar de novo em alguns instantes pra ele já sair " \
-          "atualizado."
+          "em segundo plano — quando terminar, gero uma nova versão sozinho e aviso aqui, sem " \
+          "precisar pedir de novo."
       end
       parts.join
     end
@@ -643,6 +685,23 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     def ensure_logistics_suggested!
       pricing = @proposal.project_pricing
       pricing.suggest_logistics! if pricing && pricing.distance_km.zero?
+    end
+
+    # Achado em produção: gerar a proposta direto pelo chat (`ensure_proposal!(ai_suggestions:
+    # false)`, ver Conversation) deixa a equipe só com Diretoria/Coordenação pra qualquer tipo de
+    # estudo sem study_templates cadastrado — parecia "a IA não mapeou a equipe". Enfileira
+    # SuggestTeamJob (nunca a IA síncrona aqui, mesmo motivo do cronograma — reentrância de
+    # Conversation#complete) só quando ainda não há NENHUMA linha além dos always_included.
+    # Idempotente: nunca reescreve o que já foi sugerido ou ajustado. Devolve `:team` (ou nil),
+    # pra #schedule_message avisar o consultor.
+    def ensure_team_background_work!
+      pricing = @proposal.project_pricing
+      return nil unless pricing
+      return nil unless @proposal.study_templates_menu_empty?
+      return nil if pricing.proposal_professionals.joins(:professional).where(professionals: { always_included: false }).exists?
+
+      SuggestTeamJob.perform_later(@proposal.id)
+      :team
     end
 
     def ensure_schedule_background_work!(args)

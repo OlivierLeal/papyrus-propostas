@@ -33,7 +33,13 @@ class SuggestScheduleJob < ApplicationJob
       proposal.build_with_ai_suggested_schedule!
       built = true
     end
-    proposal.conversation.broadcast_refresh if built
+    if built
+      proposal.conversation.broadcast_refresh
+      # Relato do consultor: gerar sem cronograma e pedir "gere de novo" era ruim — o sistema
+      # agora termina sozinho, remontando o .docx com o cronograma já incluído (CLAUDE.md seção
+      # 8). No-op se ainda não existe nenhum documento gerado (nada a completar).
+      GenerateProposalDocumentTool.replay_pending_regeneration!(proposal)
+    end
   rescue StandardError => e
     Rails.logger.error("SuggestScheduleJob failed for proposal #{proposal_id}: #{e.class} #{e.message}")
   end

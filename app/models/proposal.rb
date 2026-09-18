@@ -225,6 +225,55 @@ class Proposal < ApplicationRecord
     finalize!(pricing)
   end
 
+  # Preenche a equipe com a sugestão da IA quando a proposta ainda só tem os `always_included`
+  # (Diretoria/Coordenação) — o estado que `build_from_template!` deixa sozinho pra qualquer tipo
+  # de estudo SEM `study_templates` cadastrado (a maioria — só `eia_rima` tem hoje). Achado em
+  # produção: `GenerateProposalDocumentTool#execute` sempre chama `ensure_proposal!(ai_suggestions:
+  # false)` (nunca a IA síncrono, por reentrância — ver o comentário de `ensure_proposal!` em
+  # conversation.rb), então gerar a proposta direto pelo chat, sem passar pela Tela de
+  # Precificação (que usa `ai_suggestions: true`), deixava a equipe SEMPRE vazia — só Diretoria/
+  # Coordenação a 0h — pra qualquer estudo sem template, e o consultor via isso como "a equipe não
+  # foi mapeada".
+  #
+  # Idempotente e seguro: só age quando NENHUMA linha além dos `always_included` existe ainda —
+  # nunca reescreve o que a IA já sugeriu antes, nem o que o consultor ajustou na Tela de
+  # Precificação. Estudo COM `study_templates` (eia_rima) nunca entra aqui: `build_from_template!`
+  # já deixa as linhas reais do template (horas padrão, não vazio) — não é o buraco que isto
+  # cobre.
+  #
+  # Roda em BACKGROUND (SuggestTeamJob), mesmo motivo de sempre: esta lógica é acionada de dentro
+  # da tool call de `generate_proposal_document`, e uma chamada de IA síncrona ali reentraria
+  # `Conversation#complete`/`#ask_internally` (ver `regenerate_schedule!`/CLAUDE.md seção 8).
+  def suggest_team_if_missing!
+    pricing = project_pricing
+    return unless pricing
+    return if study_templates_menu.present?
+    return if pricing.proposal_professionals.joins(:professional).where(professionals: { always_included: false }).exists?
+
+    suggestion = fetch_ai_roster_suggestion
+    return if suggestion.blank?
+
+    apply_roster_lines!(pricing, Array(suggestion["linhas"]))
+    update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
+    pricing.recalculate!
+  rescue StandardError => e
+    Rails.logger.error("suggest_team_if_missing! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
+  end
+
+  # Mesmo mecanismo de `with_schedule_lock`, namespace PRÓPRIO (classid diferente) — serializa
+  # SuggestTeamJob contra outra chamada concorrente pra MESMA proposta, sem colidir com a trava do
+  # cronograma (as duas podem rodar em paralelo pra propostas diferentes, ou até pra fases
+  # diferentes da MESMA proposta, sem se esperar uma pela outra à toa).
+  TEAM_LOCK_NAMESPACE = 982453
+  private_constant :TEAM_LOCK_NAMESPACE
+
+  def with_team_lock(&block)
+    self.class.transaction do
+      self.class.connection.execute("SELECT pg_advisory_xact_lock(#{TEAM_LOCK_NAMESPACE}, #{id.to_i})")
+      block.call
+    end
+  end
+
   # SuggestScheduleJob/ElectScheduleKeyPointsJob rodam FORA da conversa que pediu a geração (ver
   # comentário nos dois), então mais de um pode ser enfileirado pra a MESMA proposta antes que o
   # primeiro termine — achado ao vivo (chat 32, 2026-09, "saiu muita coisa repetida no
@@ -390,6 +439,14 @@ class Proposal < ApplicationRecord
     ordered.first(6).map do |item|
       { "nome" => item.activity_name.to_s.truncate(45), "periodo" => [ item.start_period.to_i, 1 ].max }
     end
+  end
+
+  # Usado por GenerateProposalDocumentTool#ensure_team_background_work! pra decidir se vale
+  # enfileirar SuggestTeamJob — só quando NÃO há study_templates cadastrado pro(s) tipo(s) de
+  # estudo desta conversa (eia_rima já sai de build_from_template! com linhas reais, não com o
+  # "buraco" que SuggestTeamJob cobre).
+  def study_templates_menu_empty?
+    study_templates_menu.empty?
   end
 
   private
