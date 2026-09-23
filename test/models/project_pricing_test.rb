@@ -108,6 +108,30 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal 1550.50, pricing.external_costs_total
   end
 
+  # Serviços Terceirizados (2026-09) — mesma lista de sempre (external_costs), só particionada
+  # por `kind` pra exibição separada na Tela de Precificação (preço continua somando os dois).
+  test "outsourced_costs and other_external_costs partition the same jsonb list by kind, keeping the original index" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.external_costs = [
+      { "description" => "ART", "value" => 350 },
+      { "description" => "Topografia", "value" => 1200, "kind" => "terceirizado" },
+      { "description" => "Laudo fauna", "value" => 800 }
+    ]
+
+    assert_equal [ [ "Topografia", 1 ] ], pricing.outsourced_costs.map { |cost, index| [ cost["description"], index ] }
+    assert_equal [ [ "ART", 0 ], [ "Laudo fauna", 2 ] ], pricing.other_external_costs.map { |cost, index| [ cost["description"], index ] }
+  end
+
+  test "external_costs_total sums outsourced and other costs together" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.external_costs = [
+      { "description" => "ART", "value" => 350 },
+      { "description" => "Topografia", "value" => 1200, "kind" => "terceirizado" }
+    ]
+
+    assert_equal 1550.0, pricing.external_costs_total
+  end
+
   test "recalculate! updates every line subtotal and the total_value" do
     pricing = project_pricings(:priced_pricing)
     pricing.update!(bdi: 1.20, tax_multiplier: 1.25)

@@ -196,4 +196,36 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     pricing = @proposal.project_pricing.reload
     assert_empty pricing.external_costs
   end
+
+  # Serviços Terceirizados (2026-09) — mesmo armazenamento de sempre (external_costs), só com
+  # `kind: "terceirizado"` pra aparecer na seção separada da Tela de Precificação.
+  test "add_external_cost tags the entry as terceirizado when kind is sent" do
+    post add_external_cost_conversation_proposal_path(@conversation), params: { description: "Topografia", value: "1200", kind: "terceirizado" }
+
+    pricing = @proposal.project_pricing.reload
+    assert_includes pricing.external_costs, { "description" => "Topografia", "value" => 1200.0, "kind" => "terceirizado" }
+    assert_equal [ "Topografia" ], pricing.outsourced_costs.map { |cost, _index| cost["description"] }
+  end
+
+  test "add_external_cost ignores an unknown kind value instead of tagging the entry" do
+    post add_external_cost_conversation_proposal_path(@conversation), params: { description: "ART", value: "350", kind: "qualquer_coisa" }
+
+    pricing = @proposal.project_pricing.reload
+    assert_includes pricing.external_costs, { "description" => "ART", "value" => 350.0 }
+    assert_empty pricing.outsourced_costs
+  end
+
+  test "show renders both the external costs and the terceirizados sections" do
+    @proposal.project_pricing.update!(external_costs: [
+      { "description" => "ART", "value" => 350 },
+      { "description" => "Topografia", "value" => 1200, "kind" => "terceirizado" }
+    ])
+
+    get conversation_proposal_path(@conversation)
+
+    assert_select "h2", text: "Custos externos"
+    assert_select "h2", text: "Serviços terceirizados"
+    assert_match "ART", response.body
+    assert_match "Topografia", response.body
+  end
 end

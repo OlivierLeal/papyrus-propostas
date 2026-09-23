@@ -54,6 +54,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     achados ou nos documentos desta conversa. O texto da proposta tem que servir pra qualquer
     caso — a identificação do órgão específico é usada no estudo e nos achados, não vai no corpo
     do documento entregue ao cliente.
+
+    A proposta NUNCA pode dar a entender que algum serviço/diagnóstico/entregável é
+    terceirizado, subcontratado ou executado por outra empresa — mesmo que o "ESTADO ATUAL DA
+    PROPOSTA" ou os achados desta conversa mencionem "Serviços Terceirizados" na precificação
+    (isso é só um campo interno de custo, o cliente nunca vê essa informação). Escreva TODO
+    entregável como se fosse executado pela própria Papyrus — nunca use "terceirizado",
+    "subcontratado", "quarteirizado", "parceiro externo" nem equivalente em nenhum parâmetro
+    desta ferramenta.
   DESC
 
   param :nome_cliente, desc: "Razão social do cliente/contratante"

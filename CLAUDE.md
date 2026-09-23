@@ -253,6 +253,70 @@ HTTP à Mapbox Directions, nunca inferência de IA sobre dinheiro.
   `MAPBOX_API_KEY`, cai pro fallback de linha reta sem erro (394,8km pro mesmo ponto que deu
   498,7km por estrada — a subestimativa esperada do fallback).
 
+**Busca de profissional na Tela de Precificação, em vez de `<select>` longo (2026-09, pedido do
+consultor a partir de uma referência de outro app — "algo mais esperto pra puxar os
+funcionários").** O "Adicionar linha" da Equipe tinha um `<select>` puro com todo
+`Professional.active` — ~20-30 nomes pra rolar, sem busca. Trocado por um campo de texto que
+filtra por nome, cargo OU especialidade (`app/javascript/controllers/
+professional_picker_controller.js`) e mostra até 8 resultados clicáveis, cada um com cargo
+abaixo do nome. 100% client-side — o catálogo é pequeno, os dados (id/nome/cargo/especialidades)
+já vêm prontos num atributo `data-professional-picker-professionals-value` (mesmo JSON que já
+alimentava o `<select>` antigo), sem round-trip nenhum ao servidor pra buscar. Clicar num
+resultado preenche um `hidden_field :professional_id` (o que o form realmente envia —
+`ProposalProfessionalsController` não mudou nada) e mostra um selo com cargo/especialidade da
+escolha, pra confirmar visualmente antes de digitar o entregável e as horas. Enter no campo
+escolhe o 1º resultado filtrado, sem precisar tirar a mão do teclado. O resto do fluxo (submit,
+`ProposalProfessionalsController#create`, tabela da equipe) continua exatamente igual — só a
+FORMA de escolher quem entra mudou, nada na gravação. Verificado com teste de sistema de verdade
+(`test/system/professional_picker_test.rb`, Selenium/Chrome headless, não só o JS isolado):
+buscar "Fauna" filtra pro profissional certo, clicar preenche o campo escondido, e adicionar a
+linha cria o profissional escolhido na tabela da equipe.
+
+**Um só campo "Horas" na Tela de Precificação, em vez de "Horas escritório"/"Horas campo"
+separados (2026-09, pedido do consultor: "não precisa de campo de horas escritório e horas
+campo, é o mesmo valor").** Na digitação MANUAL do consultor (grade da Equipe e o mini-formulário
+"Adicionar linha") os dois campos sempre recebiam o mesmo número — dois inputs era redundante.
+`app/javascript/controllers/hours_sync_controller.js` (novo, pequeno) espelha um único
+`number_field` visível ("Horas") em dois `hidden_field` (`hours_office`/`hours_field`) com os
+MESMOS nomes que o backend já esperava — `ProposalProfessionalsController`/`ProposalsController#
+pricing_params`/`ProposalProfessional#recalculate_subtotal` não mudaram nada, continuam recebendo
+e calculando os dois valores separados (`C1 = hours_office × rate_office`, `C2 = hours_field ×
+rate_field` — as taxas continuam diferentes por profissional, isso **não** muda; ver
+[[precificacao-taxa-unica-pendente]] na memória do projeto, decisão de unificar TAXA é outra
+discussão, ainda pendente, não mexida aqui). Só a ENTRADA manual foi consolidada — a sugestão da
+IA (`build_with_ai_suggested_team!`/`apply_lines!`/`apply_roster_lines!`) e os `study_templates`
+continuam podendo gravar valores DIFERENTES nos dois campos livremente (ex.: bióloga com 30h
+escritório / 48h campo, fixture real de teste) — não passam pelo controller novo, só a edição na
+tela. Grade da Equipe: a linha existente mostra o valor de `hours_office` como o "Horas" atual
+(assume que os dois já estão iguais, convenção reforçada pelo próprio pedido); editar e submeter
+grava o mesmo número nos dois. Verificado com teste de sistema de verdade
+(`test/system/hours_sync_test.rb`, Selenium/Chrome headless): editar o "Horas" de uma linha
+existente e recalcular grava `hours_office == hours_field` no banco com o subtotal certo;
+adicionar linha nova pelo campo único faz o mesmo.
+
+**"Serviços Terceirizados" — campo separado de Custos Externos, 100% manual (2026-09, pedido do
+consultor a partir de conversa com o time — "a parte terceirizada a gente coloca um campo
+específico... 100% responsabilidade dela inserir").** Mesmo armazenamento de sempre
+(`ProjectPricing#external_costs`, jsonb de `{description, value}`, já usado pra ARTs/fauna/
+flora/drone) — só ganhou uma chave opcional `"kind" => "terceirizado"` pra separar na exibição.
+`ProjectPricing#outsourced_costs`/`#other_external_costs` particionam a MESMA lista por `kind`,
+devolvendo pares `[item, índice_na_lista_completa]` — o índice importa porque `#remove_external_
+cost` (`ProposalsController`) usa posição na lista INTEIRA pra remover, não posição na sublista
+filtrada exibida. `app/views/proposals/_external_costs_section.html.erb` (novo parcial,
+reaproveitado pelos dois blocos — mesma disciplina de `_schedule_section.html.erb`, que já fazia
+o mesmo pra cronograma). O formulário de "Serviços Terceirizados" manda um `hidden_field :kind`
+fixo — é a ÚNICA forma de uma entrada nascer marcada assim; `AddExternalCostTool` (a ferramenta
+que a IA usa pra adicionar custo pelo chat) continua SEM esse parâmetro de propósito, nunca marca
+nada como terceirizado sozinha — decisão explícita do consultor, esse campo é 100% escolha
+humana. Preço não muda (`external_costs_total` soma os dois grupos igual sempre somou).
+- **A proposta gerada nunca pode revelar terceirização** — `GenerateProposalDocumentTool`
+  ganhou uma instrução explícita (mesmo padrão já usado pra nunca nomear o órgão ambiental no
+  texto): mesmo que o snapshot `[ESTADO ATUAL DA PROPOSTA]` ou os achados mencionem "Serviços
+  Terceirizados" na precificação, a IA nunca escreve "terceirizado"/"subcontratado"/
+  "quarteirizado"/"parceiro externo" em nenhum parâmetro de texto — todo entregável é escrito
+  como se fosse executado pela própria Papyrus. Só reforço de PROMPT (mesmo caminho do órgão),
+  sem filtro de código — o cliente nunca vê esse campo, é só precificação interna.
+
 ---
 
 ## 6. Pipeline de processamento de dados
@@ -1470,6 +1534,19 @@ novamente?"
   anexar o `.docx` original) terminar, uma ordem que NUNCA acontece em produção (lá o job só é
   pego pelo worker depois que a chamada síncrona já retornou). Sempre validar este tipo de
   correção com o adapter assíncrono de verdade, nunca com `:inline`.
+
+**Confirmado: a regeneração automática acima já cobre o documento COMERCIAL/combinado, sem
+precisar de nenhum código a mais (2026-09, pedido do consultor pra confirmar essa cobertura).**
+`replay_pending_regeneration!` chama `execute(**args)` de novo, e `execute` decide técnica-só ×
+combinado/separado a partir do `@proposal.status` **no momento em que roda** — nunca do status
+que valia na geração original. Então se a proposta já estava "priced"/"approved" quando o job de
+fundo terminou, o replay sai automaticamente com o prefixo "PTC" (combinado) ou os dois arquivos
+("PT"+"PC", se `document_split == "separated"`), igual a geração normal. Verificado ao vivo com
+worker de verdade (Solid Queue, não `:inline`): proposta em status "priced" gerada sem
+cronograma ainda → `Rev.00` só com o prefixo "PTC" (confirmando que o comercial já entrava desde
+a 1ª geração, pela regra de status já existente) → cronograma terminou em background →
+`Rev.01` saiu sozinho, ainda "PTC", com o cronograma incluído, e a mensagem certa no chat
+("disponível na Tela de Precificação", não a variante "só a parte técnica").
 
 ---
 

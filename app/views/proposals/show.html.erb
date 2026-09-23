@@ -32,8 +32,7 @@
             <tr>
               <th>Profissional</th>
               <th>Entregável</th>
-              <th class="text-right">Horas escritório</th>
-              <th class="text-right">Horas campo</th>
+              <th class="text-right">Horas</th>
               <th class="text-right">Subtotal</th>
               <th></th>
             </tr>
@@ -44,14 +43,14 @@
               <tr>
                 <td class="text-base-content"><%= line.professional.name %></td>
                 <td class="text-base-content/70"><%= line.deliverable_name %></td>
-                <td class="text-right">
+                <td class="text-right" data-controller="hours-sync">
                   <%= pp_form.hidden_field :id %>
-                  <%= pp_form.number_field :hours_office, step: 0.5, min: 0, disabled: !editable,
-                        class: "input input-bordered input-sm w-24 text-right" %>
-                </td>
-                <td class="text-right">
-                  <%= pp_form.number_field :hours_field, step: 0.5, min: 0, disabled: !editable,
-                        class: "input input-bordered input-sm w-24 text-right" %>
+                  <%= pp_form.hidden_field :hours_office, data: { hours_sync_target: "hidden" } %>
+                  <%= pp_form.hidden_field :hours_field, data: { hours_sync_target: "hidden" } %>
+                  <input type="number" step="0.5" min="0" autocomplete="off" value="<%= line.hours_office %>"
+                         <% unless editable %>disabled<% end %>
+                         class="input input-bordered input-sm w-24 text-right"
+                         data-hours-sync-target="visible" data-action="input->hours-sync#sync">
                 </td>
                 <td class="text-right text-base-content/70"><%= number_to_currency(line.subtotal, unit: "R$", separator: ",", delimiter: ".") %></td>
                 <td class="text-right">
@@ -69,7 +68,7 @@
               </tr>
             <% end %>
             <% if pricing.proposal_professionals.none? %>
-              <tr><td colspan="6" class="text-center text-base-content/50 py-4">Nenhum profissional na equipe ainda.</td></tr>
+              <tr><td colspan="5" class="text-center text-base-content/50 py-4">Nenhum profissional na equipe ainda.</td></tr>
             <% end %>
           </tbody>
         </table>
@@ -85,22 +84,35 @@
             tela. %>
         <%= form_with url: conversation_proposal_proposal_professionals_path(@conversation), scope: :proposal_professional,
               class: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-base-300" do |add_form| %>
-          <div class="form-control">
+          <%# Busca em vez de <select> longo (2026-09, pedido do consultor — "algo mais esperto
+              pra puxar os funcionários"): filtro 100% client-side (catálogo pequeno, ~20-30
+              profissionais ativos), ver app/javascript/controllers/professional_picker_controller.js.
+              O <select> sumiu — quem o form realmente envia é o hidden_field abaixo, preenchido
+              pelo JS quando o consultor clica num resultado. %>
+          <div class="form-control relative"
+               data-controller="professional-picker"
+               data-professional-picker-professionals-value="<%= @professionals.map { |p| { id: p.id, name: p.name, role: p.role, specialties: p.specialties } }.to_json %>">
             <div class="label"><span class="label-text text-xs">Profissional</span></div>
-            <%= add_form.select :professional_id, @professionals.map { |p| [ p.name, p.id ] },
-                  { include_blank: "Selecione" }, { class: "select select-bordered select-sm" } %>
+            <input type="text" autocomplete="off" placeholder="Buscar por nome, cargo ou especialidade..."
+                   class="input input-bordered input-sm w-64"
+                   data-professional-picker-target="search"
+                   data-action="input->professional-picker#search keydown->professional-picker#submitOnEnter blur->professional-picker#blur">
+            <ul data-professional-picker-target="results"
+                class="hidden absolute z-10 top-full mt-1 w-72 max-h-56 overflow-y-auto bg-base-100 border border-base-300 rounded-field shadow-lg"></ul>
+            <span data-professional-picker-target="selectedBadge" class="text-xs text-base-content/50 mt-1"></span>
+            <%= add_form.hidden_field :professional_id, data: { professional_picker_target: "hiddenId" } %>
           </div>
           <div class="form-control">
             <div class="label"><span class="label-text text-xs">Entregável</span></div>
             <%= add_form.text_field :deliverable_name, class: "input input-bordered input-sm" %>
           </div>
-          <div class="form-control">
-            <div class="label"><span class="label-text text-xs">Horas escritório</span></div>
-            <%= add_form.number_field :hours_office, step: 0.5, min: 0, value: 0, class: "input input-bordered input-sm w-24" %>
-          </div>
-          <div class="form-control">
-            <div class="label"><span class="label-text text-xs">Horas campo</span></div>
-            <%= add_form.number_field :hours_field, step: 0.5, min: 0, value: 0, class: "input input-bordered input-sm w-24" %>
+          <div class="form-control" data-controller="hours-sync">
+            <div class="label"><span class="label-text text-xs">Horas</span></div>
+            <%= add_form.hidden_field :hours_office, value: 0, data: { hours_sync_target: "hidden" } %>
+            <%= add_form.hidden_field :hours_field, value: 0, data: { hours_sync_target: "hidden" } %>
+            <input type="number" step="0.5" min="0" autocomplete="off" value="0"
+                   class="input input-bordered input-sm w-24"
+                   data-hours-sync-target="visible" data-action="input->hours-sync#sync">
           </div>
           <%= add_form.submit "Adicionar linha", class: "btn btn-sm btn-outline" %>
         <% end %>
@@ -226,45 +238,15 @@
     </div>
   <% end %>
 
-  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
-    <h2 class="font-semibold text-base-content mb-4">Custos externos</h2>
+  <%= render "external_costs_section", title: "Custos externos", empty_message: "Nenhum custo externo lançado.",
+        costs: pricing.other_external_costs, kind: nil, conversation: @conversation, editable: editable %>
 
-    <ul class="flex flex-col gap-2 mb-4">
-      <% pricing.external_costs.each_with_index do |cost, index| %>
-        <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
-          <span class="text-sm text-base-content"><%= cost["description"] %></span>
-          <div class="flex items-center gap-3 shrink-0">
-            <span class="text-sm text-base-content/70"><%= number_to_currency(cost["value"], unit: "R$", separator: ",", delimiter: ".") %></span>
-            <% if editable %>
-              <%= button_to remove_external_cost_conversation_proposal_path(@conversation, index: index), method: :delete,
-                    class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover" do %>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                </svg>
-              <% end %>
-            <% end %>
-          </div>
-        </li>
-      <% end %>
-      <% if pricing.external_costs.empty? %>
-        <li class="text-center text-base-content/50 py-2 text-sm">Nenhum custo externo lançado.</li>
-      <% end %>
-    </ul>
-
-    <% if editable %>
-      <%= form_with url: add_external_cost_conversation_proposal_path(@conversation), class: "flex flex-wrap items-end gap-2" do |cost_form| %>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Descrição</span></div>
-          <%= cost_form.text_field :description, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Valor (R$)</span></div>
-          <%= cost_form.number_field :value, step: 0.01, min: 0, class: "input input-bordered input-sm w-32" %>
-        </div>
-        <%= cost_form.submit "Adicionar custo", class: "btn btn-sm btn-outline" %>
-      <% end %>
-    <% end %>
-  </div>
+  <%# Serviços Terceirizados (2026-09, pedido do consultor): campo separado, 100% manual — nunca
+      preenchido pela IA (AddExternalCostTool não manda `kind`). O texto da proposta nunca revela
+      que um serviço é terceirizado (ver GenerateProposalDocumentTool#description) — este campo é
+      só pra precificação, o cliente nunca vê a palavra "terceirizado" no documento. %>
+  <%= render "external_costs_section", title: "Serviços terceirizados", empty_message: "Nenhum serviço terceirizado lançado.",
+        costs: pricing.outsourced_costs, kind: "terceirizado", conversation: @conversation, editable: editable %>
 
   <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
     <h2 class="font-semibold text-base-content mb-4">Resumo</h2>

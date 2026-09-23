@@ -68,18 +68,25 @@ class ProposalsController < ApplicationController
   def add_external_cost
     description = params[:description].to_s.strip
     value = params[:value].to_f
+    # `kind` só chega da tela ("terceirizado", ver formulário de Serviços Terceirizados) — nunca
+    # da IA (AddExternalCostTool não manda esse parâmetro de propósito, ver CLAUDE.md seção 5:
+    # "100% responsabilidade dela inserir").
+    kind = params[:kind].to_s == "terceirizado" ? "terceirizado" : nil
 
     if description.blank? || value <= 0
       redirect_to conversation_proposal_path(@conversation), alert: "Informe descrição e valor do custo externo."
       return
     end
 
+    entry = { "description" => description, "value" => value }
+    entry["kind"] = kind if kind
+
     pricing = @proposal.project_pricing
-    pricing.external_costs = pricing.external_costs + [ { "description" => description, "value" => value } ]
+    pricing.external_costs = pricing.external_costs + [ entry ]
     pricing.save!
     pricing.recalculate!
 
-    redirect_to conversation_proposal_path(@conversation), notice: "Custo externo adicionado."
+    redirect_to conversation_proposal_path(@conversation), notice: "Custo adicionado."
   end
 
   def remove_external_cost

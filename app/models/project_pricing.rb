@@ -89,6 +89,24 @@ class ProjectPricing < ApplicationRecord
     external_costs.sum { |item| item["value"].to_f }
   end
 
+  # Partição de external_costs por `kind` (chave opcional dentro de cada item do jsonb — entradas
+  # antigas, ou lançadas via chat por AddExternalCostTool, não têm essa chave e caem em
+  # #other_external_costs). "Serviços Terceirizados" (2026-09, pedido do consultor: mostrar isso
+  # separado do resto de Custos Externos na Tela de Precificação, campo 100% manual — a IA nunca
+  # marca um custo como terceirizado, só o consultor via este formulário dedicado) — mesmo
+  # armazenamento de sempre (description/value), só uma tag a mais pra separar na exibição. Preço
+  # (C5/#external_costs_total) não muda: soma os dois grupos igual, é só questão de UI.
+  # Pares [item, índice] em vez de só os itens — a view precisa do índice na lista COMPLETA
+  # (não da sublista filtrada) pra montar o link de remover (#remove_external_cost usa índice
+  # posicional em `external_costs`, ver ProposalsController).
+  def outsourced_costs
+    external_costs.each_with_index.select { |item, _index| item["kind"] == "terceirizado" }
+  end
+
+  def other_external_costs
+    external_costs.each_with_index.reject { |item, _index| item["kind"] == "terceirizado" }
+  end
+
   # C6 = TOTAL = Σ profissionais + logística + externos
   def recalculate!
     # Usa a mesma lista de objetos pra calcular, salvar e somar — carregar a associação de novo
