@@ -1548,6 +1548,41 @@ a 1ª geração, pela regra de status já existente) → cronograma terminou em 
 `Rev.01` saiu sozinho, ainda "PTC", com o cronograma incluído, e a mensagem certa no chat
 ("disponível na Tela de Precificação", não a variante "só a parte técnica").
 
+**HABILITAÇÃO/REGISTRO incompleto na tabela EQUIPE TÉCNICA — dado de cadastro, não bug de código
+(2026-09, relato do consultor: "ele está botando as pessoas no projeto mas a habilitação/registro
+tá incompleto", a partir de um `Equipe.docx` de referência trazido pela Papyrus).**
+`Proposal#team_rows_for_docx` sempre montou a coluna HABILITAÇÃO como
+`professional.specialties — professional.registration` (seção acima) — o mecanismo estava
+certo, o que faltava era o CONTEÚDO real de `specialties` em `db/seeds.rb`: desde a criação do
+cadastro (2026-08) esse campo guardava só uma etiqueta curta de área de atuação ("Fauna geral",
+"Segurança do trabalho", "Análise jurídica"), pensada pro menu da IA
+(`roster_suggestion_prompt`, "cargo + especialidades") — nunca a formação acadêmica completa
+(graduação/pós/mestrado/doutorado) que a Papyrus de fato usa em `HABILITAÇÃO / REGISTRO` no
+documento impresso de verdade. Os 23 profissionais em `db/seeds.rb` tiveram `specialties`
+reescrito a partir do `Equipe.docx` real (frase por formação, "Doutora em Gestão Ambiental.
+Mestre em Engenharia Ambiental Urbana. ..."), sem tocar em `registration` (CREA/CRBio já batia
+com o documento na maioria dos casos).
+- **Seed passou de "só cria" pra "sempre sincroniza identidade/qualificação, preserva
+  operacional"**: `Professional.find_or_create_by!` com bloco (só rodava em criação) virou
+  `find_or_initialize_by` + atribuição direta de `role`/`registration`/`specialties`/
+  `always_included` em TODA execução — sem isso, editar `db/seeds.rb` de novo não alcançaria
+  quem já estava cadastrado (o caso real: os 23 já existiam no banco de dev desde agosto).
+  `rate_office`/`rate_field`/`active` continuam só no `new_record?` — são dado operacional que o
+  consultor edita em Configurações > Profissionais (taxa real, ou desativar alguém), e um reseed
+  nunca pode sobrescrever isso.
+- **Nota da Sara Marçal ("só entra em propostas da Região Sul") saiu do `specialties`** — antes
+  vivia dentro do campo que agora é sempre impresso no `.docx`, e essa frase não é
+  habilitação nenhuma. Virou comentário no seed, ao lado do registro dela; a orientação nunca foi
+  aplicada por código (é só um lembrete pro consultor ajustar a equipe manualmente), então tirar
+  do campo impresso não muda nenhum comportamento, só corrige o que sai no documento.
+- Verificado ao vivo (`bin/rails db:seed` no banco de dev real, não um teste isolado):
+  `Professional.count` continua 23 (nenhum duplicado), `rate_office`/`rate_field`/`active` de um
+  profissional já cadastrado (Wlisses Batista) continuam intocados, e
+  `Proposal#team_rows_for_docx` numa proposta real de dev passou a devolver a habilitação
+  completa — ex. Charlene Luz: `"Doutora em Gestão Ambiental. Mestre em Engenharia Ambiental
+  Urbana. ... Técnica em Meio Ambiente. — CREA 46778"`, em vez de `"Direção de negócios — CREA
+  46778"`.
+
 ---
 
 ## 9. Prompts do sistema (2 prompts principais)
