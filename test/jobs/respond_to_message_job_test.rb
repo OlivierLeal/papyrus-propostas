@@ -30,7 +30,7 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
   end
 
   test "registers the document-generation tool even without a proposal yet (it creates one on demand), but not the external-cost tool" do
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
 
     # reviewing_conversation não tem proposal ainda, por isso a de custo externo fica de fora.
     # A de memória (RememberForFutureProposalsTool) e a de aprender com versão revisada
@@ -42,7 +42,7 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
   test "registers both the document-generation and external-cost tools when there is a proposal" do
     conversation = conversations(:priced_conversation)
 
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(conversation.id) } }
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(conversation.id) } }
 
     assert_includes with_tool_calls, GenerateProposalDocumentTool
     assert_includes with_tool_calls, AddExternalCostTool
@@ -51,30 +51,41 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
   end
 
   test "does not register the schedule-insertion tool when there is no proposal yet" do
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
 
     assert_not_includes with_tool_calls, InsertScheduleSectionTool
   end
 
   test "registers the CAL legal norms tool only when CAL_EMAIL/CAL_PASSWORD are configured" do
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
     assert_not_includes with_tool_calls, SearchLegalNormsTool
 
-    with_tool_calls = with_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    with_tool_calls = without_web_search_configured { with_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } } }
     assert_includes with_tool_calls, SearchLegalNormsTool
   end
 
   # 2026-09, CLAUDE.md seção 11.2 — mesmo gate condicional de SearchHistoricalArchiveTool
   # (HistoricalProposalChunk.embedded.exists?), pra legislação já lida e guardada.
   test "registers the legal norms archive tool only when there is legislation already indexed locally" do
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
     assert_not_includes with_tool_calls, SearchLegalNormsArchiveTool
 
     legal_norm = LegalNorm.create!(codigo: "NL9924", referencia: "NL9924 — teste (CAL/Ius Natura)")
     legal_norm.chunks.create!(position: 0, content: "Trecho de teste", embedded_at: Time.current)
 
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
     assert_includes with_tool_calls, SearchLegalNormsArchiveTool
+  end
+
+  # 2026-09, CLAUDE.md seção 11.2 — a IA não tinha NENHUM acesso à internet até aqui (achado ao
+  # vivo: ela respondeu corretamente "não tenho acesso" quando perguntada sobre um procedimento
+  # municipal fora do CAL/acervo). Mesmo gate "sem credencial, sem ferramenta" do CAL/Stay22.
+  test "registers the web search tool only when TAVILY_API_KEY is configured" do
+    with_tool_calls = without_optional_tools_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } }
+    assert_not_includes with_tool_calls, WebSearchTool
+
+    with_tool_calls = without_cal_configured { with_web_search_configured { capture_tool_calls { RespondToMessageJob.perform_now(@conversation.id) } } }
+    assert_includes with_tool_calls, WebSearchTool
   end
 
   # Achado ao vivo nesta sessão: RememberForFutureProposalsTool grava uma mensagem assistant
@@ -161,6 +172,13 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
   end
 
   private
+    # Combina without_cal_configured/without_web_search_configured — a maioria dos testes de
+    # gating aqui só quer isolar UMA ferramenta condicional de cada vez, então as outras duas
+    # (CAL, Tavily) precisam ficar neutras (desligadas) pra não depender do .env de quem roda.
+    def without_optional_tools_configured
+      without_cal_configured { without_web_search_configured { yield } }
+    end
+
     def capture_tool_calls
       with_tool_calls = []
       original_method = Conversation.instance_method(:with_tool)

@@ -35,7 +35,7 @@ class RespondToGeneralChatMessageJobTest < ActiveSupport::TestCase
   end
 
   test "registers the historical archive tool only when there is embedded acervo, and the CAL tool only when configured" do
-    with_tool_calls = without_cal_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } }
+    with_tool_calls = without_cal_configured { without_web_search_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } } }
     assert_equal [ RememberForFutureProposalsTool ], with_tool_calls
 
     historical_proposal = HistoricalProposal.create!(
@@ -50,10 +50,19 @@ class RespondToGeneralChatMessageJobTest < ActiveSupport::TestCase
     legal_norm = LegalNorm.create!(codigo: "NL9924", referencia: "NL9924 — teste (CAL/Ius Natura)")
     legal_norm.chunks.create!(position: 0, content: "trecho de norma", embedded_at: Time.current)
 
-    with_tool_calls = with_cal_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } }
+    with_tool_calls = without_web_search_configured { with_cal_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } } }
     assert_includes with_tool_calls, SearchHistoricalArchiveTool
     assert_includes with_tool_calls, SearchLegalNormsTool
     assert_includes with_tool_calls, SearchLegalNormsArchiveTool
+  end
+
+  # 2026-09, CLAUDE.md seção 11.2 — mesmo gate "sem credencial, sem ferramenta" do CAL/Stay22.
+  test "registers the web search tool only when TAVILY_API_KEY is configured" do
+    with_tool_calls = without_cal_configured { without_web_search_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } } }
+    assert_not_includes with_tool_calls, WebSearchTool
+
+    with_tool_calls = without_cal_configured { with_web_search_configured { capture_tool_calls { RespondToGeneralChatMessageJob.perform_now(@general_chat.id) } } }
+    assert_includes with_tool_calls, WebSearchTool
   end
 
   # Achado ao vivo nesta sessão: RememberForFutureProposalsTool grava uma mensagem assistant

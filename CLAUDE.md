@@ -1990,6 +1990,52 @@ vetorizado, não um mecanismo novo.
   passa a cachear daqui pra frente); persistir uma linha "tentei e não consegui ler" pra normas
   sem texto extraível (o cache de OCR por SHA256 já cobre a parte cara).
 
+### 11.3. Busca na internet (Tavily, implementado)
+
+Até 2026-09 a IA não tinha NENHUM acesso à internet — achado ao vivo num chat de produção real:
+um consultor perguntou se o processo de Dispensa/Inexigibilidade de licenciamento ambiental da
+Prefeitura de Teresina/PI é feito online, e a IA respondeu corretamente "não tenho acesso à
+internet para verificar o portal da Prefeitura... a base do CAL também não contém legislação
+municipal de Teresina" — nenhuma das ferramentas registradas (`GenerateProposalDocumentTool`,
+`AddExternalCostTool`, `InsertScheduleSectionTool`, `SearchHistoricalArchiveTool`,
+`SearchLegalNormsTool`/`SearchLegalNormsArchiveTool`, `RememberForFutureProposalsTool`,
+`LearnFromRevisedProposalTool`) faz busca web, e o Bedrock (diferente da API direta da
+Anthropic) não tem um "web search" nativo do lado do servidor — só function-calling comum, onde
+o código da aplicação executa a busca. Cobre exatamente o buraco que o CAL deixa: o CAL (seção
+11.2) só tem legislação ESTADUAL/FEDERAL, nunca MUNICIPAL.
+
+- **`WebSearch::Client`** (`app/services/web_search/client.rb`) — cliente HTTP pro
+  [Tavily](https://tavily.com), motor de busca desenhado pra agentes de IA (devolve
+  `{título, url, trecho}` já prontos, sem precisar raspar HTML de página de resultado — ao
+  contrário de integrar direto com Google/Bing, que exigiria parsear SERP ou criar um
+  "mecanismo de busca programável"). Chamada HTTP crua (`Net::HTTP`, sem gem), mesmo estilo do
+  resto do projeto (CAL, Mapbox) — 1 requisição POST síncrona, `api_key` no corpo JSON.
+  `.configured?` (mesmo padrão de `Cal::Client.configured?`/Stay22 — "sem credencial, sem
+  ferramenta") reflete só a presença de `TAVILY_API_KEY` no `.env`.
+- **`WebSearchTool`** — registrada em `RespondToMessageJob` E `RespondToGeneralChatMessageJob`
+  (as duas superfícies de chat), só quando `WebSearch::Client.configured?`. Parâmetros: `busca`
+  (obrigatório) e `max_resultados` (opcional, padrão 5, teto 10 — o próprio teto do Tavily).
+  Mesma disciplina de citação das outras ferramentas de fonte externa (`SearchLegalNormsTool`/
+  `SearchHistoricalArchiveTool`): cada resultado já vem com `referencia` = a própria URL, e a
+  `description` exige citar toda URL usada na resposta. **Diferença deliberada em relação ao
+  CAL**: a `description` também instrui a IA a tratar o conteúdo como PONTO DE PARTIDA, nunca
+  fonte definitiva de exigência legal, e a recomendar ao consultor confirmar no site oficial —
+  a internet muda e tem ruído (notícia desatualizada, blog de terceiro) de um jeito que uma
+  base de legislação assinada (CAL) não tem. Preço continua nunca vindo daqui (seção 1) — a
+  ferramenta é só pra escopo/condicionante, igual as outras de embasamento.
+- **Ordem de preferência explícita no prompt**: CAL primeiro (legislação estadual/federal),
+  acervo histórico pro que a Papyrus já escreveu, e a internet só pro que sobra — sobretudo
+  procedimento MUNICIPAL, que nenhuma das outras fontes cobre.
+- Verificado ao vivo, duas camadas: (1) chamada direta ao `WebSearch::Client` com a chave real
+  de produção (`bin/rails runner`, sem mock) — devolveu 3 resultados reais pra "licenciamento
+  ambiental Prefeitura de Teresina dispensa inexigibilidade", incluindo a página oficial da
+  SEMAM; (2) reproduzindo o cenário exato do chat de produção que motivou a ferramenta
+  (`RespondToGeneralChatMessageJob.perform_now` de verdade, chamada real ao Bedrock): a IA
+  encontrou o Decreto Municipal 21.429/2021 (inexigibilidade de licenciamento), os três sistemas
+  online da SEMAM (SEI/SLIC/Piauí Digital) e o Relatório de Gestão SEMAM 2025 — cada afirmação
+  com "📎 Fonte:" + URL, e terminou recomendando confirmar com a SEMAM antes de assumir o dado
+  como definitivo, exatamente como a `description` da ferramenta pede.
+
 ---
 
 ## 12. Convenções do projeto
@@ -2055,6 +2101,7 @@ vetorizado, não um mecanismo novo.
   o documento disse.
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
 - CAL/Ius Natura (normas legais, ver seção 11.2): credenciais em `CAL_EMAIL`/`CAL_PASSWORD` no `.env`, nunca hardcoded — não é chave de API, é login real (usuário/senha) da conta que a Papyrus assina. `Cal::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22.
+- Busca na internet (Tavily, ver seção 11.3): chave em `TAVILY_API_KEY` no `.env`, nunca hardcoded. `WebSearch::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22/CAL.
 
 ---
 

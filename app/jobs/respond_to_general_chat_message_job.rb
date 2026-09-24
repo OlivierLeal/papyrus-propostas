@@ -12,6 +12,7 @@ class RespondToGeneralChatMessageJob < ApplicationJob
     general_chat.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
     general_chat.with_tool(SearchLegalNormsTool.new) if Cal::Client.configured?
     general_chat.with_tool(SearchLegalNormsArchiveTool.new) if LegalNormChunk.embedded.exists?
+    general_chat.with_tool(WebSearchTool.new) if WebSearch::Client.configured?
     general_chat.with_tool(RememberForFutureProposalsTool.new(general_chat: general_chat))
     general_chat.complete
 

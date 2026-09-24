@@ -25,6 +25,9 @@ class RespondToMessageJob < ApplicationJob
     # Legislação já lida e guardada (LegalNorm/LegalNormChunk) — mesmo critério do acervo acima:
     # só oferece quando há algo pra achar.
     conversation.with_tool(SearchLegalNormsArchiveTool.new) if LegalNormChunk.embedded.exists?
+    # Busca na internet (CLAUDE.md seção 11.2) — só registrada com TAVILY_API_KEY configurada,
+    # mesmo motivo do CAL acima: ferramenta que sempre falha vira algo que a IA acha que tentou.
+    conversation.with_tool(WebSearchTool.new) if WebSearch::Client.configured?
     conversation.with_tool(RememberForFutureProposalsTool.new(conversation: conversation))
     # Aprender com a versão final revisada manualmente pela Papyrus, quando anexada no chat (ver
     # CLAUDE.md seção 11.1) — mesma disciplina de curadoria da ferramenta acima, card pendente até
