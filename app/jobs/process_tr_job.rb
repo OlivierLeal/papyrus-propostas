@@ -32,7 +32,7 @@ class ProcessTrJob < ApplicationJob
   private
     # Ver nota em ProcessEtJob sobre não usar RubyLLM::Schema (structured output) com Gemini.
     def prompt
-      menu = StudyType.order(:name).map { |t| "- código: #{t.code} | #{t.name}" }.join("\n")
+      menu = StudyType.ai_menu
       fields = ProjectFinding::FIELDS.map { |key, config| "- #{key}: #{config[:label]}" }.join("\n")
 
       <<~TEXT

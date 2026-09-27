@@ -171,7 +171,7 @@ pro consultor B ler a mensagem do consultor A.
 
 **Configuração (admin, não muda por proposta):**
 - `professionals` — name, role, rate_man_hour (valor da hora-homem), rate_daily (valor da diária), registration, specialties, active
-- `study_types` — name, code, description (EIA-RIMA, EMI, Relatório Técnico, PEA, RAP...)
+- `study_types` — name, code, description. Catálogo em `db/seeds.rb` (37 tipos desde 2026-09-27, ampliado a partir do acervo histórico e dos achados em que a IA identificou tipo fora do cadastro — PCA, RAS, RCA, EAI, EPI, ASV/AMF, PBA, PRAD, ECQ/ECI etc.). A IA recebe `StudyType.ai_menu` (código + nome + DESCRIÇÃO) em ProcessEtJob/ProcessTrJob — a descrição é o que desambigua as siglas, então todo tipo novo precisa de uma que diga o que é e quando se aplica.
 - ~~`study_templates`~~ — **removida em 2026-09-27** (ver seção 5, item 1): a Papyrus não ia manter um menu de equipe por tipo de estudo; a IA monta a equipe direto de `professionals`.
 
 **Geoespacial:**

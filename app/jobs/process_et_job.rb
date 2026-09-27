@@ -41,7 +41,7 @@ class ProcessEtJob < ApplicationJob
     # (Proposal#build_with_ai_suggested_team!): a IA só pode responder com um código do menu,
     # nunca inventar um tipo de estudo novo.
     def prompt
-      menu = StudyType.order(:name).map { |t| "- código: #{t.code} | #{t.name}" }.join("\n")
+      menu = StudyType.ai_menu
       fields = ProjectFinding::FIELDS.map { |key, config| "- #{key}: #{config[:label]}" }.join("\n")
 
       <<~TEXT

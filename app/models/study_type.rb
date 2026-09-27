@@ -14,6 +14,13 @@ class StudyType < ApplicationRecord
   # na conversa 31 — Estudo Ambiental Intermediário, que a Papyrus simplesmente nunca cadastrou).
   # O primeiro caso é ruído de formato e o sistema resolve sozinho; o segundo é falta de cadastro
   # e precisa de gente (ver Conversation#assign_study_types_from_findings!).
+  # Menu que a IA recebe ao ler o ET/TR (ProcessEtJob/ProcessTrJob). A descrição vai junto
+  # (2026-09-27): com o catálogo ampliado, só a sigla ("ECQ", "EAI", "RAS") é ambígua demais pra
+  # IA decidir — a descrição diz o que é e quando se aplica.
+  def self.ai_menu
+    order(:name).map { |type| "- código: #{type.code} | #{type.name} — #{type.description.presence || 'sem descrição'}" }.join("\n")
+  end
+
   def self.match_ai_value(value)
     key = normalize_key(value)
     return nil if key.blank?

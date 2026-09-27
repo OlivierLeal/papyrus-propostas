@@ -33,4 +33,12 @@ class StudyTypeTest < ActiveSupport::TestCase
     assert_nil StudyType.match_ai_value("eai")
     assert_nil StudyType.match_ai_value("")
   end
+
+  # 2026-09-27: com o catálogo ampliado, a sigla sozinha é ambígua — a IA recebe a descrição junto.
+  test "ai_menu lista código, nome e descrição de cada tipo" do
+    menu = StudyType.ai_menu
+
+    assert_includes menu, "- código: eia_rima | EIA-RIMA — Estudo de Impacto Ambiental"
+    assert_equal StudyType.count, menu.lines.size
+  end
 end
