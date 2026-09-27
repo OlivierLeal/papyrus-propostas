@@ -1,31 +1,34 @@
-<%= form_with model: [ :settings, study_type ], class: "flex flex-col gap-4" do |form| %>
-  <% if study_type.errors.any? %>
-    <div class="alert alert-error alert-soft">
-      <ul class="list-disc list-inside">
-        <% study_type.errors.full_messages.each do |message| %>
-          <li><%= message %></li>
-        <% end %>
-      </ul>
-    </div>
-  <% end %>
+<%= render "settings/form_errors", record: study_type %>
 
-  <label class="form-control">
-    <div class="label"><span class="label-text">Nome</span></div>
-    <%= form.text_field :name, class: "input input-bordered w-full", required: true %>
-  </label>
+<%= form_with model: [ :settings, study_type ] do |form| %>
+  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+    <section class="grid md:grid-cols-3 gap-6 p-6">
+      <div>
+        <h2 class="font-semibold text-base-content">Tipo de estudo</h2>
+        <p class="text-sm text-base-content/60 mt-1">A IA compara o que lê no ET/TR com o nome e o código daqui para classificar a proposta.</p>
+      </div>
+      <div class="md:col-span-2 grid sm:grid-cols-3 gap-x-4">
+        <fieldset class="fieldset sm:col-span-2">
+          <legend class="fieldset-legend">Nome</legend>
+          <%= form.text_field :name, class: settings_field_class(study_type, :name), placeholder: "Ex.: EIA-RIMA", required: true, autofocus: study_type.new_record? %>
+          <%= settings_field_error(study_type, :name) %>
+        </fieldset>
 
-  <label class="form-control">
-    <div class="label"><span class="label-text">Código</span></div>
-    <%= form.text_field :code, class: "input input-bordered w-full", required: true %>
-  </label>
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Código</legend>
+          <%= form.text_field :code, class: "#{settings_field_class(study_type, :code)} font-mono", placeholder: "eia_rima", required: true %>
+          <%= settings_field_error(study_type, :code) || tag.p("Identificador interno, sem espaços.", class: "label") %>
+        </fieldset>
 
-  <label class="form-control">
-    <div class="label"><span class="label-text">Descrição</span></div>
-    <%= form.text_area :description, class: "textarea textarea-bordered w-full", rows: 3 %>
-  </label>
+        <fieldset class="fieldset sm:col-span-3">
+          <legend class="fieldset-legend">Descrição <span class="font-normal text-base-content/50">(opcional)</span></legend>
+          <%= form.text_area :description, rows: 4, class: settings_field_class(study_type, :description, base: "textarea"),
+                placeholder: "Quando este estudo se aplica, o que ele inclui…" %>
+        </fieldset>
+      </div>
+    </section>
 
-  <div class="flex items-center gap-2 mt-2">
-    <%= form.submit "Salvar", class: "btn btn-primary" %>
-    <%= link_to "Cancelar", settings_study_types_path, class: "btn btn-ghost" %>
+    <%= render "settings/form_actions", form: form, cancel_path: settings_study_types_path,
+          submit_label: study_type.new_record? ? "Cadastrar tipo de estudo" : "Salvar alterações" %>
   </div>
 <% end %>

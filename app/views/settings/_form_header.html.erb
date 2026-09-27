@@ -1,0 +1,18 @@
+<%# Cabeçalho das telas de novo/editar em Configurações: breadcrumb + título + subtítulo. %>
+<div class="flex items-start gap-3 mb-6">
+  <%= link_to back_path, class: "btn btn-ghost btn-sm btn-square mt-1", title: "Voltar" do %>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+      <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+    </svg>
+  <% end %>
+  <div class="min-w-0">
+    <div class="breadcrumbs text-xs text-base-content/50 py-0">
+      <ul>
+        <li><%= link_to "Configurações", settings_root_path %></li>
+        <li><%= link_to section, back_path %></li>
+      </ul>
+    </div>
+    <h1 class="font-display text-2xl font-bold text-base-content leading-tight"><%= title %></h1>
+    <p class="text-sm text-base-content/60 mt-0.5"><%= subtitle %></p>
+  </div>
+</div>

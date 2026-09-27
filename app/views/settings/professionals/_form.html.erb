@@ -1,58 +1,94 @@
-<%= form_with model: [ :settings, professional ], class: "flex flex-col gap-4" do |form| %>
-  <% if professional.errors.any? %>
-    <div class="alert alert-error alert-soft">
-      <ul class="list-disc list-inside">
-        <% professional.errors.full_messages.each do |message| %>
-          <li><%= message %></li>
-        <% end %>
-      </ul>
+<%= render "settings/form_errors", record: professional %>
+
+<%= form_with model: [ :settings, professional ] do |form| %>
+  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+    <div class="divide-y divide-base-300">
+      <section class="grid md:grid-cols-3 gap-6 p-6">
+        <div>
+          <h2 class="font-semibold text-base-content">Identificação</h2>
+          <p class="text-sm text-base-content/60 mt-1">Nome, cargo e registro saem no quadro de Equipe Técnica da proposta.</p>
+        </div>
+        <div class="md:col-span-2 grid sm:grid-cols-2 gap-x-4">
+          <fieldset class="fieldset sm:col-span-2">
+            <legend class="fieldset-legend">Nome</legend>
+            <%= form.text_field :name, class: settings_field_class(professional, :name), placeholder: "Nome completo", required: true, autofocus: professional.new_record? %>
+            <%= settings_field_error(professional, :name) %>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend class="fieldset-legend">Cargo / formação</legend>
+            <%= form.text_field :role, class: settings_field_class(professional, :role), placeholder: "Ex.: Bióloga", required: true %>
+            <%= settings_field_error(professional, :role) %>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend class="fieldset-legend">Registro profissional <span class="font-normal text-base-content/50">(opcional)</span></legend>
+            <%= form.text_field :registration, class: settings_field_class(professional, :registration), placeholder: "Ex.: CRBio 54321" %>
+          </fieldset>
+
+          <fieldset class="fieldset sm:col-span-2">
+            <legend class="fieldset-legend">Habilitação / especialidades</legend>
+            <%= form.text_area :specialties, rows: 3, class: settings_field_class(professional, :specialties, base: "textarea"),
+                  placeholder: "Ex.: Mestre em Ecologia. Especialista em fauna silvestre." %>
+            <p class="label whitespace-normal">Formação completa — sai na coluna HABILITAÇÃO / REGISTRO e ajuda a IA a escolher quem entra na equipe.</p>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="grid md:grid-cols-3 gap-6 p-6">
+        <div>
+          <h2 class="font-semibold text-base-content">Valores</h2>
+          <p class="text-sm text-base-content/60 mt-1">Base do motor de precificação: horas-homem × valor da hora + diárias × valor da diária.</p>
+        </div>
+        <div class="md:col-span-2 grid sm:grid-cols-2 gap-x-4">
+          <fieldset class="fieldset">
+            <legend class="fieldset-legend">Valor da hora-homem</legend>
+            <label class="<%= settings_field_class(professional, :rate_man_hour) %>">
+              <span class="text-base-content/50">R$</span>
+              <%= form.number_field :rate_man_hour, step: "0.01", min: 0, required: true, class: "grow" %>
+              <span class="text-xs text-base-content/40">/ hora</span>
+            </label>
+            <%= settings_field_error(professional, :rate_man_hour) %>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend class="fieldset-legend">Valor da diária</legend>
+            <label class="<%= settings_field_class(professional, :rate_daily) %>">
+              <span class="text-base-content/50">R$</span>
+              <%= form.number_field :rate_daily, step: "0.01", min: 0, required: true, class: "grow" %>
+              <span class="text-xs text-base-content/40">/ dia</span>
+            </label>
+            <%= settings_field_error(professional, :rate_daily) %>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="grid md:grid-cols-3 gap-6 p-6">
+        <div>
+          <h2 class="font-semibold text-base-content">Participação</h2>
+          <p class="text-sm text-base-content/60 mt-1">Como este profissional entra nas propostas.</p>
+        </div>
+        <div class="md:col-span-2 flex flex-col gap-3">
+          <label class="flex items-start gap-3 p-4 rounded-box border border-base-300 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary/40 has-[:checked]:bg-primary/5">
+            <%= form.check_box :active, class: "toggle toggle-primary toggle-sm mt-0.5" %>
+            <span>
+              <span class="block text-sm font-medium text-base-content">Ativo</span>
+              <span class="block text-xs text-base-content/60 mt-0.5">Aparece para a IA ao montar a equipe e na busca da Tela de Precificação. Desative em vez de excluir quem já participou de propostas.</span>
+            </span>
+          </label>
+
+          <label class="flex items-start gap-3 p-4 rounded-box border border-base-300 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary/40 has-[:checked]:bg-primary/5">
+            <%= form.check_box :always_included, class: "toggle toggle-primary toggle-sm mt-0.5" %>
+            <span>
+              <span class="block text-sm font-medium text-base-content">Sempre incluir na equipe</span>
+              <span class="block text-xs text-base-content/60 mt-0.5">Diretoria/Coordenação — entra em toda proposta, independente do que a IA sugerir.</span>
+            </span>
+          </label>
+        </div>
+      </section>
     </div>
-  <% end %>
 
-  <label class="form-control">
-    <div class="label"><span class="label-text">Nome</span></div>
-    <%= form.text_field :name, class: "input input-bordered w-full", required: true %>
-  </label>
-
-  <label class="form-control">
-    <div class="label"><span class="label-text">Cargo / formação</span></div>
-    <%= form.text_field :role, class: "input input-bordered w-full", required: true %>
-  </label>
-
-  <div class="grid grid-cols-2 gap-4">
-    <label class="form-control">
-      <div class="label"><span class="label-text">Valor da hora-homem (R$)</span></div>
-      <%= form.number_field :rate_man_hour, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
-    </label>
-
-    <label class="form-control">
-      <div class="label"><span class="label-text">Valor da diária (R$)</span></div>
-      <%= form.number_field :rate_daily, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
-    </label>
-  </div>
-
-  <label class="form-control">
-    <div class="label"><span class="label-text">Registro profissional</span></div>
-    <%= form.text_field :registration, class: "input input-bordered w-full" %>
-  </label>
-
-  <label class="form-control">
-    <div class="label"><span class="label-text">Especialidades</span></div>
-    <%= form.text_field :specialties, class: "input input-bordered w-full", placeholder: "Ex.: fauna, flora, hidrologia" %>
-  </label>
-
-  <label class="label cursor-pointer justify-start gap-2">
-    <%= form.check_box :active, class: "checkbox checkbox-sm" %>
-    <span class="label-text">Ativo</span>
-  </label>
-
-  <label class="label cursor-pointer justify-start gap-2">
-    <%= form.check_box :always_included, class: "checkbox checkbox-sm" %>
-    <span class="label-text">Sempre incluir na equipe (Diretoria/Coordenação — entra em toda proposta, independente do que a IA sugerir)</span>
-  </label>
-
-  <div class="flex items-center gap-2 mt-2">
-    <%= form.submit "Salvar", class: "btn btn-primary" %>
-    <%= link_to "Cancelar", settings_professionals_path, class: "btn btn-ghost" %>
+    <%= render "settings/form_actions", form: form, cancel_path: settings_professionals_path,
+          submit_label: professional.new_record? ? "Cadastrar profissional" : "Salvar alterações" %>
   </div>
 <% end %>

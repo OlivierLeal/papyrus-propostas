@@ -1,0 +1,22 @@
+pt-BR:
+  activerecord:
+    attributes:
+      study_type:
+        name: Nome
+        code: Código
+        description: Descrição
+      professional:
+        name: Nome
+        role: Cargo / formação
+        registration: Registro profissional
+        specialties: Habilitação / especialidades
+        rate_man_hour: Valor da hora-homem
+        rate_daily: Valor da diária
+        active: Ativo
+        always_included: Sempre incluir na equipe
+      study_template:
+        study_type: Tipo de estudo
+        professional: Profissional
+        deliverable_name: Entregável
+        man_hours_default: Horas-homem
+        field_days_default: Diárias de campo
