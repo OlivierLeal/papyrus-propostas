@@ -12,6 +12,23 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     )
   end
 
+  # Com fichas de precedente cobrindo o acervo, "projetos semelhantes" compara job contra job.
+  test "com cobertura de precedentes, o resumo lista os projetos parecidos com valor e equipe" do
+    stub_const_value(GenerateSummaryJob, :PRECEDENT_COVERAGE, 1) do
+      precedent = JobPrecedent.create!(job_number: "26098", client_name: "Newave", year: 2026, service: "Licenciamento de BESS",
+        total_value: 185_000, team: [ { "funcao" => "Meio Físico" } ], status: "ok", embedding: Array.new(Rag::Embedder::DIMENSIONS) { 0.01 })
+      match = Rag::PrecedentFinder::Match.new(precedent: precedent, similarity: 0.8)
+      finder = Object.new.tap { |f| f.define_singleton_method(:call) { |*, **| [ match ] } }
+
+      text = stub_class_method(Rag::PrecedentFinder, :new, ->(*) { finder }) { GenerateSummaryJob.new.send(:similar_jobs_summary, @conversation) }
+
+      assert_includes text, "acervo Papyrus: projeto 26098"
+      assert_includes text, "referência direta"
+      assert_includes text, "valor da época R$ 185.000,00"
+      assert_includes text, "equipe de 1 pessoas"
+    end
+  end
+
   test "asks the AI for a summary, marks summary done and moves status to reviewing" do
     stub_ai_complete("# RESUMO ESTRUTURADO\n\nTudo certo.") { GenerateSummaryJob.perform_now(@conversation.id) }
 
@@ -125,7 +142,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     # descritor justamente por ser vocabulário de carta.
     record_finding!(field: "outro", value: "Encaminhamento via Charlene Luz da solicitação de Guilherme Altino (Rio Energy)")
 
-    context = GenerateSummaryJob.new.send(:search_context, @conversation.reload)
+    context = @conversation.reload.service_descriptor
 
     assert_includes context, "tipo licenca: Licença Unificada (LU)"
     assert_includes context, "empreendimento: sistema de armazenamento de energia em baterias (BESS)"
@@ -139,7 +156,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     record_finding!(field: "empreendimento", value: "x" * 1000)
     record_finding!(field: "ressalvas", value: "não há supressão de vegetação")
 
-    context = GenerateSummaryJob.new.send(:search_context, @conversation.reload)
+    context = @conversation.reload.service_descriptor
 
     assert_includes context, "ressalvas: não há supressão de vegetação",
       "o campo do fim não pode ser comido pelo excesso do campo anterior"
@@ -185,4 +202,14 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     FakeFinder = Struct.new(:matches) do
       def call(_context, **) = matches
     end
+
+  def stub_const_value(klass, name, value)
+    original = klass.const_get(name)
+    klass.send(:remove_const, name)
+    klass.const_set(name, value)
+    yield
+  ensure
+    klass.send(:remove_const, name)
+    klass.const_set(name, original)
+  end
 end

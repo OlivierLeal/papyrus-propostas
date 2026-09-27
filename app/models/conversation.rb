@@ -537,6 +537,41 @@ class Conversation < ApplicationRecord
     PROCESSING_STEP_LABELS.fetch(step.to_s, step.to_s)
   end
 
+  # Descritor do SERVIÇO desta proposta para busca semântica no acervo (resumo, precedentes de
+  # valor/equipe, sugestão de equipe). Saiu de GenerateSummaryJob em 2026-09-27 pra ter UM formato
+  # só — o mesmo usado pra montar o descritor de cada JobPrecedent (Rag::PrecedentExtractor): o
+  # formato da consulta pesa na similaridade (CLAUDE.md seção 11.1, "Calibragem").
+  SEARCH_FIELDS = {
+    "tipo_licenca" => 120,
+    "tipo_estudo" => 160,
+    "orgao_ambiental" => 60,
+    "municipios" => 120,
+    "empreendimento" => 300,
+    "diagnosticos" => 300,
+    "condicionantes" => 500,
+    "ressalvas" => 400
+  }.freeze
+
+  # O campo "outro" (onde cai o que não coube no menu, inclusive o tipo do documento
+  # complementar) fica FORA da consulta de propósito: é ali que aparece a carta de
+  # encaminhamento ("Encaminhamento via Fulana da solicitação de Beltrano..."), exatamente o
+  # vocabulário que puxava a recuperação para a capa das propostas antigas.
+
+  def service_descriptor
+    fields = project_findings.active.where(field: SEARCH_FIELDS.keys)
+      .group_by(&:field)
+      .transform_values { |findings| findings.map(&:value).compact_blank.uniq }
+    # O código do tipo de estudo ("EIA-RIMA") diz menos que o nome cadastrado na hora de casar
+    # com o texto de propostas antigas. Uma proposta pode ter N tipos (ou nenhum — ver
+    # CLAUDE.md seção 13) — os nomes entram todos, junto com o resto dos campos de lista.
+    fields["tipo_estudo"] = study_types.pluck(:name) if study_types.any?
+
+    SEARCH_FIELDS.filter_map do |field, budget|
+      value = Array(fields[field]).map(&:to_s).compact_blank.join("; ")
+      "#{field.tr('_', ' ')}: #{value.truncate(budget)}" if value.present?
+    end.join("\n")
+  end
+
   # Manda uma pergunta pra IA sem expor a instrução (prompt de sistema do job/controller) na
   # conversa que o consultor vê — só a resposta da IA aparece na tela de revisão/chat.
   # hide_response: true também esconde a resposta da IA do chat (ex.: extrações em JSON que não

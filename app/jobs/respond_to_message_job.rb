@@ -19,6 +19,8 @@ class RespondToMessageJob < ApplicationJob
     # indexado — sem isso a IA "descobre" uma ferramenta que sempre volta vazia e passa a
     # mencionar buscas que não trouxeram nada.
     conversation.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
+    # Fichas estruturadas (valor/prazo/equipe) de projetos anteriores parecidos — ver JobPrecedent.
+    conversation.with_tool(SearchProjectPrecedentsTool.new(conversation: conversation)) if JobPrecedent.searchable.exists?
     # CAL (Ius Natura, ver app/services/cal/) — só registrada com credenciais configuradas, mesmo
     # motivo do acervo acima: ferramenta que sempre falha vira algo que a IA acha que tentou.
     conversation.with_tool(SearchLegalNormsTool.new) if Cal::Client.configured?

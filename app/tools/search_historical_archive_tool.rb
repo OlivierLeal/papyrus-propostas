@@ -42,6 +42,11 @@ class SearchHistoricalArchiveTool < RubyLLM::Tool
   }.freeze
 
   LIMIT = 5
+  # No máximo N trechos do MESMO job nos resultados (2026-09-27, avaliação do RAG: uma proposta
+  # enorme e genérica — 26044, programa de gestão da operação, 232 trechos — aparecia em 13 de 42
+  # buscas sobre assuntos diferentes, ocupando os 5 lugares). Busca mais candidatos e diversifica.
+  MAX_PER_JOB = 2
+  CANDIDATES = 20
 
   def initialize(retriever: nil)
     super()
@@ -51,12 +56,12 @@ class SearchHistoricalArchiveTool < RubyLLM::Tool
   def execute(busca:, fonte: "papyrus", cliente: nil)
     return { error: "Preciso saber o que buscar no acervo." }.to_json if busca.to_s.strip.blank?
 
-    hits = @retriever.call(
+    hits = diversify(@retriever.call(
       busca.to_s.strip,
       roles: SOURCES.fetch(fonte.to_s.downcase, SOURCES["papyrus"]),
-      limit: LIMIT,
+      limit: CANDIDATES,
       client_name: cliente.presence
-    )
+    ))
 
     return { resultados: [], aviso: "Nada parecido no acervo histórico." }.to_json if hits.empty?
 
@@ -70,6 +75,14 @@ class SearchHistoricalArchiveTool < RubyLLM::Tool
   end
 
   private
+
+  def diversify(hits)
+    per_job = Hash.new(0)
+    hits.select do |hit|
+      job = hit.chunk.historical_proposal.job_number || hit.chunk.historical_proposal.job_name
+      (per_job[job] += 1) <= MAX_PER_JOB
+    end.first(LIMIT)
+  end
 
   # Além dos campos soltos, cada trecho vem com a citação já montada em `referencia`. Deixar a
   # IA compor a frase de origem a partir dos metadados dá margem a ela simplesmente não compor —

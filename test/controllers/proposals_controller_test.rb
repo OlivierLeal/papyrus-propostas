@@ -62,6 +62,20 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 4, @proposal.project_pricing.reload.payment_schedule.size
   end
 
+  test "show mostra projetos anteriores parecidos como referência (valor histórico, equipe)" do
+    precedent = JobPrecedent.create!(job_number: "26098", client_name: "Newave", year: 2026, service: "Licenciamento de BESS",
+      total_value: 185_000, team: [ { "funcao" => "Meio Físico", "horas_homem" => 80 } ], status: "ok")
+    match = Rag::PrecedentFinder::Match.new(precedent: precedent, similarity: 0.8)
+    finder = Object.new.tap { |f| f.define_singleton_method(:call) { |*, **| [ match ] } }
+
+    stub_class_method(Rag::PrecedentFinder, :new, ->(*) { finder }) { get conversation_proposal_path(@conversation) }
+
+    assert_select "h2", text: "Projetos parecidos"
+    assert_match "26098", response.body
+    assert_match "R$ 185.000,00", response.body
+    assert_match "referência de porte, não preço", response.body
+  end
+
   test "show renders the new logistics fields and the recalculate button" do
     get conversation_proposal_path(@conversation)
 

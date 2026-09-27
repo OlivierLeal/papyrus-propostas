@@ -10,6 +10,7 @@ class RespondToGeneralChatMessageJob < ApplicationJob
     # RememberForFutureProposalsTool vale aqui também: algo dito neste chat pode ajudar em
     # propostas futuras, mesma memória por cliente de sempre (ver KnowledgeNote).
     general_chat.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
+    general_chat.with_tool(SearchProjectPrecedentsTool.new) if JobPrecedent.searchable.exists?
     general_chat.with_tool(SearchLegalNormsTool.new) if Cal::Client.configured?
     general_chat.with_tool(SearchLegalNormsArchiveTool.new) if LegalNormChunk.embedded.exists?
     general_chat.with_tool(WebSearchTool.new) if WebSearch::Client.configured?

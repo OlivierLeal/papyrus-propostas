@@ -45,6 +45,18 @@ class Rag::RetrieverTest < ActiveSupport::TestCase
     assert_empty Rag::Retriever.new(embedder: FixedEmbedder.new(far)).call("nada a ver")
   end
 
+  # Avaliação do RAG (2026-09-27): sem varredura iterativa, o HNSW pegava os ~40 vizinhos do
+  # acervo inteiro e o filtro por papel descartava todos (0 resultados com 6.879 candidatos). Com
+  # poucos registros o Postgres nem usa o índice, então o teste trava a configuração da busca.
+  test "busca filtrada liga a varredura iterativa do HNSW" do
+    settings = Rag::VectorScan.with_filtered_scan do
+      connection = ActiveRecord::Base.connection
+      [ connection.select_value("SHOW hnsw.iterative_scan"), connection.select_value("SHOW hnsw.ef_search") ]
+    end
+
+    assert_equal [ "strict_order", Rag::VectorScan::EF_SEARCH.to_s ], settings
+  end
+
   private
 
   def retrieve(query, **options)

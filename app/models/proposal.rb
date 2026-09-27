@@ -588,6 +588,34 @@ class Proposal < ApplicationRecord
       AiJsonResponse.parse(response.content) || {}
     end
 
+    # Equipes de projetos anteriores parecidos (JobPrecedent), entregues de uma vez no prompt de
+    # equipe — em vez de depender da IA lembrar de chamar a ferramenta (2026-09-27, avaliação do
+    # RAG: nas conversas reais ela buscava "equipe… horas homem diárias…" em texto corrido e não
+    # achava). Referência de COMPOSIÇÃO e ESFORÇO; os nomes eram de quem estava na época.
+    def precedent_teams_context
+      matches = Rag::PrecedentFinder.new.call(conversation.service_descriptor, limit: 3)
+      return "" if matches.empty?
+
+      lines = matches.map do |match|
+        precedent = match.precedent
+        team = precedent.team_members.map do |member|
+          effort = [ ("#{member['horas_homem'].to_f.round} HH" if member["horas_homem"]), ("#{member['diarias'].to_f.round} diárias" if member["diarias"]) ].compact.join(", ")
+          [ member["funcao"], effort.presence&.then { "(#{_1})" } ].compact.join(" ")
+        end.join("; ")
+        "- #{precedent.reference} — #{precedent.service.to_s.truncate(140)}#{"; prazo #{precedent.duration.truncate(60)}" if precedent.duration}: #{team}"
+      end
+
+      <<~TEXT.strip
+        EQUIPES DE PROJETOS ANTERIORES PARECIDOS DA PAPYRUS (referência de composição e esforço —
+        quais frentes costumam entrar e quanto esforço cada uma levou; escolha as pessoas pelo
+        quadro atual abaixo, não pelos nomes antigos):
+        #{lines.join("\n")}
+      TEXT
+    rescue StandardError => e
+      Rails.logger.warn("[Proposal] precedentes de equipe indisponíveis: #{e.class} #{e.message}")
+      ""
+    end
+
     def team_suggestion_prompt
       describe = lambda do |professional|
         "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
@@ -600,6 +628,7 @@ class Proposal < ApplicationRecord
         Você monta a composição de equipe de uma proposta de consultoria ambiental da Papyrus,
         com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, documentos
         complementares e propostas anteriores semelhantes, se houver). #{study_types_context}
+        #{precedent_teams_context}
         Se a ferramenta search_historical_archive estiver disponível, use-a pra ver como a Papyrus
         dimensionou a equipe em projetos parecidos — referência, não cópia.
 

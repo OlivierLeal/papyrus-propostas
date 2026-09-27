@@ -8,6 +8,7 @@ class ProposalsController < ApplicationController
     # Configurações ficava com o subtotal antigo gravado — refaz a conta ao abrir. Aprovada não:
     # preço aprovado fica congelado.
     @proposal.project_pricing.recalculate! if editable? && @proposal.project_pricing.stale_subtotals?
+    @precedent_matches = precedent_matches
     @proposal.project_pricing.proposal_professionals.includes(:professional).load
   end
 
@@ -125,6 +126,21 @@ class ProposalsController < ApplicationController
 
     def set_proposal
       @proposal = @conversation.proposal
+    end
+
+    # Projetos anteriores parecidos (JobPrecedent) pro card de referência da tela. Cacheado por
+    # conversa + última mudança nos achados: o descritor só muda quando o escopo muda, e cada
+    # busca custa um embedding.
+    def precedent_matches
+      key = [ "precedents", @conversation.id, @conversation.project_findings.maximum(:updated_at)&.to_i, JobPrecedent.maximum(:updated_at)&.to_i ]
+      pairs = Rails.cache.fetch(key, expires_in: 12.hours) do
+        Rag::PrecedentFinder.new.call(@conversation.service_descriptor, limit: 3).map { |match| [ match.precedent.id, match.similarity ] }
+      end
+      records = JobPrecedent.where(id: pairs.map(&:first)).index_by(&:id)
+      pairs.filter_map { |id, similarity| Rag::PrecedentFinder::Match.new(precedent: records[id], similarity: similarity) if records[id] }
+    rescue StandardError => e
+      Rails.logger.warn("[ProposalsController] precedentes indisponíveis: #{e.class} #{e.message}")
+      []
     end
 
     def editable?

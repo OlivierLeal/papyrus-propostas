@@ -1910,6 +1910,44 @@ O que é valioso mas depende de pré-requisitos que ainda não existem, nesta or
        chamadores (aprovação de proposta E aprovação deste card) — só o gatilho e os atributos
        de origem mudam entre os dois.
 
+   - **Avaliação e correção do RAG (2026-09-27, pedido do consultor: "ver se está fazendo sentido e
+     melhorar o fluxo").** Medido sobre os dados reais (`script/rag/eval.rb`, reexecuta as buscas que
+     a IA fez nas conversas e as sugestões de "projetos semelhantes" de cada proposta):
+     - **A busca filtrada estava quebrada:** o HNSW devolve os ~40 vizinhos do acervo INTEIRO e só
+       depois o filtro ("só voz da Papyrus", ~11% dos 71 mil trechos) descarta — "composição de
+       equipe RAP PCH" devolvia ZERO trechos. `Rag::VectorScan.with_filtered_scan` liga
+       `hnsw.iterative_scan = strict_order` (pgvector ≥ 0.8; senão só sobe `ef_search`) em toda
+       busca filtrada (Retriever, SimilarJobFinder via Retriever, legislação, precedentes).
+       Buscas reais vazias: 4 → 0.
+     - **Boilerplate nunca tinha rodado** no acervo atual: 2.105 de 8.305 trechos da voz da
+       Papyrus (equipe técnica, obrigações, produtos, prazo, validade, preço) são texto de modelo.
+       `script/rag/boilerplate.rb` (sem custo, ~6 min). O `SqlExporter` NÃO leva essa coluna — em
+       produção, rodar o script lá também.
+     - **Um job enorme dominava os resultados** (26044: 13 de 42 buscas): a ferramenta busca 20
+       candidatos e devolve no máximo 2 trechos por job (`SearchHistoricalArchiveTool::MAX_PER_JOB`).
+     - **Valor e equipe de projetos anteriores não existiam como dado** — a IA buscava "equipe…
+       horas homem diárias…" em texto corrido. Agora há `JobPrecedent` (1 ficha por job: serviço,
+       estudos, atos, empreendimento, local, valor total, prazo, equipe com HH/diárias, BDI/
+       impostos/logística), extraída por `Rag::PrecedentExtractor` (1 chamada de IA por job, que
+       TRANSCREVE, nunca calcula) + embedding do descritor no MESMO formato de
+       `Conversation#service_descriptor` (movido de GenerateSummaryJob). **O valor mora na planilha
+       de precificação** (`HistoricalProposal#spreadsheet_path`, 200 vinculadas pelo inventário):
+       nas propostas arquivadas o quadro de preço costuma estar em branco. A planilha só é lida
+       onde o acervo está montado — rodar `script/rag/precedents.rb` na máquina com o SSD e levar
+       com `script/rag/export_precedents.rb`.
+     - Uso: `SearchProjectPrecedentsTool` (chat de proposta e Tira-Dúvidas), as equipes dos 3 mais
+       parecidos entram SOZINHAS no prompt de sugestão de equipe (`Proposal#precedent_teams_context`),
+       e a Tela de Precificação mostra o card "Projetos parecidos" (valor histórico, equipe, HH,
+       diárias, prazo — referência de porte, nunca preço; cacheado por conversa).
+     - **"Projetos semelhantes" do resumo passa a ser job contra job** quando houver ≥ 50 fichas
+       (`GenerateSummaryJob::PRECEDENT_COVERAGE`): a calibragem por trechos
+       (`SimilarJobFinder`, dominância da cabeça do ranking) dava "nenhum" em TODAS as 22 propostas
+       do dev, mesmo com a busca já acertando (BESS+solar: os 8 jobs certos na cabeça, cada um com
+       10-20% dela). Cortes medidos na amostra: ≥ 0,75 "referência direta", ≥ 0,68 "aproveitável
+       em parte"; descritor sem empreendimento nem diagnósticos não compara
+       (`PrecedentFinder.distinctive?`, "tipo estudo: RAP" casava 0,57-0,60 com qualquer RAP).
+       **Refazer os cortes com `script/rag/eval.rb` depois da extração completa.**
+
 4. ~~**Memória por cliente**~~ — **implementado** (`KnowledgeNote`), com a curadoria como
    parte do desenho, não como refinamento futuro:
    - A IA PROPÕE via `RememberForFutureProposalsTool` (categorias fechadas: preferência do

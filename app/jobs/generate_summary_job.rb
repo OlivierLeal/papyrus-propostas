@@ -57,8 +57,17 @@ class GenerateSummaryJob < ApplicationJob
     # demanda pela ferramenta search_historical_archive, na hora de escrever cada uma. Despejar
     # propostas inteiras aqui encheria o contexto de toda a conversa com material que talvez
     # não seja usado.
+    # Com as fichas de precedente (JobPrecedent) cobrindo o acervo, a comparação é JOB contra JOB
+    # (descritor x descritor, mesmo formato) — mais limpa que trecho contra trecho, cuja calibragem
+    # (dominância da cabeça do ranking) quebra quando o assunto se divide entre vários jobs
+    # parecidos (avaliação de 2026-09-27: BESS+solar com 8 jobs certos na cabeça, "nenhum
+    # semelhante" no resumo). Sem fichas suficientes, segue o método por trechos.
+    PRECEDENT_COVERAGE = 50
+
     def similar_jobs_summary(conversation)
-      matches = Rag::SimilarJobFinder.new.call(search_context(conversation))
+      return precedents_summary(conversation) if JobPrecedent.searchable.count >= PRECEDENT_COVERAGE
+
+      matches = Rag::SimilarJobFinder.new.call(conversation.service_descriptor)
       return nothing_similar_notice if matches.empty?
 
       <<~TEXT
@@ -73,6 +82,32 @@ class GenerateSummaryJob < ApplicationJob
       # Acervo é um reforço, não um pré-requisito: falha aqui não pode impedir o resumo.
       Rails.logger.warn("[GenerateSummaryJob] busca de similares falhou: #{e.class} #{e.message}")
       ""
+    end
+
+    def precedents_summary(conversation)
+      matches = Rag::PrecedentFinder.new.call(conversation.service_descriptor, limit: 3)
+        .select { |match| match.similarity >= Rag::PrecedentFinder::PARTIAL_SIMILARITY }
+      return nothing_similar_notice if matches.empty?
+
+      lines = matches.map do |match|
+        precedent = match.precedent
+        facts = [
+          (precedent.total_value && "valor da época #{ActiveSupport::NumberHelper.number_to_currency(precedent.total_value, unit: 'R$', separator: ',', delimiter: '.')}"),
+          (precedent.team_members.any? && "equipe de #{precedent.team_members.size} pessoas"),
+          (precedent.duration && "prazo #{precedent.duration.truncate(50)}")
+        ].compact_blank.join(", ")
+        "- #{precedent.reference} — #{precedent.service.to_s.truncate(150)} — #{match.confidence_label}#{"; #{facts}" if facts.present?}"
+      end
+
+      <<~TEXT
+        Projetos semelhantes que a Papyrus já executou (fichas do acervo histórico):
+        #{lines.join("\n")}
+
+        Informe isso ao consultor em um tópico próprio do resumo, dizendo que servirão de
+        referência para estruturar esta proposta (a ferramenta search_project_precedents traz a
+        equipe completa). Valores são da época — referência de porte, nunca preço desta proposta.
+        Não afirme que o escopo é idêntico — quem confirma isso é o consultor.
+      TEXT
     end
 
     # O que a Papyrus já aprendeu sobre ESTE cliente em propostas anteriores — aprovado por um
@@ -127,37 +162,6 @@ class GenerateSummaryJob < ApplicationJob
     #
     # Cliente NÃO entra: é faceta de filtro, nunca semântica. Cada campo tem orçamento próprio,
     # para nenhum deles comer o espaço dos outros.
-    SEARCH_FIELDS = {
-      "tipo_licenca" => 120,
-      "tipo_estudo" => 160,
-      "orgao_ambiental" => 60,
-      "municipios" => 120,
-      "empreendimento" => 300,
-      "diagnosticos" => 300,
-      "condicionantes" => 500,
-      "ressalvas" => 400
-    }.freeze
-
-    # O campo "outro" (onde cai o que não coube no menu, inclusive o tipo do documento
-    # complementar) fica FORA da consulta de propósito: é ali que aparece a carta de
-    # encaminhamento ("Encaminhamento via Fulana da solicitação de Beltrano..."), exatamente o
-    # vocabulário que puxava a recuperação para a capa das propostas antigas.
-
-    def search_context(conversation)
-      fields = conversation.project_findings.active.where(field: SEARCH_FIELDS.keys)
-        .group_by(&:field)
-        .transform_values { |findings| findings.map(&:value).compact_blank.uniq }
-      # O código do tipo de estudo ("EIA-RIMA") diz menos que o nome cadastrado na hora de casar
-      # com o texto de propostas antigas. Uma proposta pode ter N tipos (ou nenhum — ver
-      # CLAUDE.md seção 13) — os nomes entram todos, junto com o resto dos campos de lista.
-      fields["tipo_estudo"] = conversation.study_types.pluck(:name) if conversation.study_types.any?
-
-      SEARCH_FIELDS.filter_map do |field, budget|
-        value = Array(fields[field]).map(&:to_s).compact_blank.join("; ")
-        "#{field.tr('_', ' ')}: #{value.truncate(budget)}" if value.present?
-      end.join("\n")
-    end
-
     # Determinístico (KmzGeometryExtractor) — só informa o que já foi calculado, a IA não
     # recalcula nem estima área/perímetro por conta própria (CLAUDE.md seção 1).
     def geospatial_summary(conversation)

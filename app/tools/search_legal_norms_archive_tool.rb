@@ -40,11 +40,13 @@ class SearchLegalNormsArchiveTool < RubyLLM::Tool
     return { error: "Preciso saber o que procurar na legislação já guardada." }.to_json if busca.to_s.strip.blank?
 
     vector = @embedder.embed_query(busca.to_s.strip)
-    chunks = LegalNormChunk.embedded
-      .nearest_neighbors(:embedding, vector, distance: "cosine")
-      .preload(:legal_norm)
-      .limit(LIMIT)
-      .select { |chunk| chunk.neighbor_distance && chunk.neighbor_distance <= MAX_DISTANCE }
+    chunks = Rag::VectorScan.with_filtered_scan do
+      LegalNormChunk.embedded
+        .nearest_neighbors(:embedding, vector, distance: "cosine")
+        .preload(:legal_norm)
+        .limit(LIMIT)
+        .select { |chunk| chunk.neighbor_distance && chunk.neighbor_distance <= MAX_DISTANCE }
+    end
 
     return { resultados: [], aviso: "Nada guardado localmente parecido com isso — tente search_legal_norms." }.to_json if chunks.empty?
 

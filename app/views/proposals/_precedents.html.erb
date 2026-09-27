@@ -1,0 +1,49 @@
+<%# Projetos anteriores parecidos (JobPrecedent) — referência de porte, equipe e valor histórico,
+    NUNCA preço desta proposta (quem calcula é o motor). locals: matches (Rag::PrecedentFinder::Match) %>
+<% if matches.any? %>
+  <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+    <div class="px-6 pt-5 pb-3">
+      <h2 class="font-semibold text-base-content">Projetos parecidos</h2>
+      <p class="text-xs text-base-content/60 mt-0.5">Do acervo da Papyrus. Valores são históricos (ano indicado): referência de porte, não preço.</p>
+    </div>
+    <ul class="divide-y divide-base-300 border-t border-base-300">
+      <% matches.each do |match| %>
+        <% precedent = match.precedent %>
+        <li class="px-6 py-3">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-sm font-medium text-base-content font-mono"><%= precedent.job_number %></span>
+            <span class="text-xs text-base-content/50"><%= [ precedent.client_name, precedent.year ].compact_blank.join(" · ") %></span>
+          </div>
+          <p class="text-xs text-base-content/70 mt-1 line-clamp-2" title="<%= precedent.service %>"><%= precedent.service %></p>
+          <dl class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 text-xs">
+            <dt class="text-base-content/50">Valor</dt>
+            <dd class="text-right tabular-nums text-base-content"><%= precedent.total_value ? brl(precedent.total_value) : "não registrado" %></dd>
+            <dt class="text-base-content/50">Equipe</dt>
+            <dd class="text-right tabular-nums text-base-content">
+              <%= pluralize(precedent.team_members.size, "pessoa", plural: "pessoas") %>
+              <% if precedent.total_man_hours.positive? %> · <%= number_with_delimiter(precedent.total_man_hours.round, delimiter: ".") %> HH<% end %>
+              <% if precedent.total_field_days.positive? %> · <%= number_with_delimiter(precedent.total_field_days.round, delimiter: ".") %> diárias<% end %>
+            </dd>
+            <% if precedent.duration.present? %>
+              <dt class="text-base-content/50">Prazo</dt>
+              <dd class="text-right text-base-content truncate" title="<%= precedent.duration %>"><%= precedent.duration.truncate(40) %></dd>
+            <% end %>
+          </dl>
+          <% if precedent.team_members.any? %>
+            <details class="mt-2">
+              <summary class="text-xs text-primary cursor-pointer">Ver equipe</summary>
+              <ul class="mt-1 flex flex-col gap-0.5 text-xs text-base-content/70">
+                <% precedent.team_members.each do |member| %>
+                  <li class="flex justify-between gap-2">
+                    <span class="truncate"><%= member["funcao"] %></span>
+                    <span class="tabular-nums shrink-0"><%= [ ("#{member['horas_homem'].to_f.round} HH" if member["horas_homem"]), ("#{member['diarias'].to_f.round} d" if member["diarias"]) ].compact.join(" · ").presence || "—" %></span>
+                  </li>
+                <% end %>
+              </ul>
+            </details>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>

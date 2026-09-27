@@ -13,7 +13,7 @@ module Rag
   #
   # O que NÃO é marcado, de propósito: o Preâmbulo. Ele carrega o "Ref.: Proposta Técnica para
   # ..." — muitas vezes a frase que melhor descreve o job. O que atraía a capa errada era o nome
-  # do cliente na CONSULTA (ver GenerateSummaryJob#search_context), não a capa estar indexada.
+  # do cliente na CONSULTA (ver Conversation#service_descriptor), não a capa estar indexada.
   class BoilerplateDetector
     # Distância cosseno abaixo da qual dois trechos são "o mesmo texto" para este fim. Frouxa de
     # propósito: a capa e as obrigações variam em nome, data e número sem mudar de natureza.

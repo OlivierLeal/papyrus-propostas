@@ -93,6 +93,7 @@
 
     <aside class="flex flex-col gap-6 xl:sticky xl:top-6">
       <%= render "summary", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
+      <%= render "precedents", matches: @precedent_matches %>
       <%= render "generated_documents", proposal: @proposal %>
     </aside>
   </div>

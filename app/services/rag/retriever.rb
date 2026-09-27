@@ -44,11 +44,13 @@ module Rag
       scope = scope.without_sensitive unless include_sensitive
       scope = scope.without_boilerplate unless include_boilerplate
 
-      scope
-        .nearest_neighbors(:embedding, vector, distance: "cosine")
-        .preload(:historical_proposal)
-        .limit(limit)
-        .filter_map { |chunk| build_hit(chunk) }
+      VectorScan.with_filtered_scan do
+        scope
+          .nearest_neighbors(:embedding, vector, distance: "cosine")
+          .preload(:historical_proposal)
+          .limit(limit)
+          .filter_map { |chunk| build_hit(chunk) }
+      end
     end
 
     # Busca nas notas de conhecimento aprovadas (KnowledgeNote) — memória do que foi aprendido
@@ -60,10 +62,12 @@ module Rag
       scope = KnowledgeNote.searchable
       scope = scope.where(client_name: client_name) if client_name.present?
 
-      scope
-        .nearest_neighbors(:embedding, vector, distance: "cosine")
-        .limit(limit)
-        .select { |note| note.neighbor_distance && note.neighbor_distance <= MAX_DISTANCE }
+      VectorScan.with_filtered_scan do
+        scope
+          .nearest_neighbors(:embedding, vector, distance: "cosine")
+          .limit(limit)
+          .select { |note| note.neighbor_distance && note.neighbor_distance <= MAX_DISTANCE }
+      end
     end
 
     private

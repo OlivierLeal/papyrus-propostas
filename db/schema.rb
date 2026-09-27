@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -201,6 +201,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_200000) do
     t.datetime "updated_at", null: false
     t.index ["code_ibge"], name: "index_ibge_municipalities_on_code_ibge", unique: true
     t.index ["geom"], name: "index_ibge_municipalities_on_geom", using: :gist
+  end
+
+  create_table "job_precedents", force: :cascade do |t|
+    t.string "client_name"
+    t.datetime "created_at", null: false
+    t.text "descriptor"
+    t.string "duration"
+    t.vector "embedding", limit: 1024
+    t.string "embedding_model"
+    t.text "enterprise"
+    t.string "error_message"
+    t.datetime "extracted_at"
+    t.string "extraction_model"
+    t.boolean "from_spreadsheet", default: false, null: false
+    t.string "job_number", null: false
+    t.string "license_acts", default: [], array: true
+    t.string "location"
+    t.jsonb "other_costs", default: [], null: false
+    t.jsonb "pricing_details", default: {}, null: false
+    t.text "service"
+    t.string "source_documents", default: [], array: true
+    t.string "status", default: "ok", null: false
+    t.string "study_types", default: [], array: true
+    t.jsonb "team", default: [], null: false
+    t.decimal "total_value", precision: 14, scale: 2
+    t.datetime "updated_at", null: false
+    t.string "value_notes"
+    t.integer "year"
+    t.index ["embedding"], name: "index_job_precedents_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
+    t.index ["job_number"], name: "index_job_precedents_on_job_number", unique: true
   end
 
   create_table "knowledge_notes", force: :cascade do |t|

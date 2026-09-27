@@ -89,6 +89,7 @@ module ApplicationHelper
   # apoiou numa consulta.
   TOOL_ACTIVITY_LABELS = {
     "search_historical_archive" => "Consultou o acervo histórico",
+    "search_project_precedents" => "Consultou valores e equipes de projetos anteriores",
     "search_legal_norms" => "Pesquisou normas no CAL",
     "search_legal_norms_archive" => "Consultou normas já estudadas",
     "web_search" => "Pesquisou na internet",

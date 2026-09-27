@@ -85,15 +85,26 @@ class SearchHistoricalArchiveToolTest < ActiveSupport::TestCase
     assert result["error"].present?
   end
 
+  # Avaliação do RAG (2026-09-27): uma proposta enorme ocupava os 5 lugares de toda busca.
+  test "no máximo 2 trechos do mesmo job, completando com os outros jobs" do
+    hits = Array.new(4) { |i| hit("trecho #{i} do 25001") } + [ hit("trecho do 26098", job: "26098") ]
+    retriever = SpyRetriever.new(hits)
+
+    result = call(retriever, busca: "escopo")
+
+    assert_equal SearchHistoricalArchiveTool::CANDIDATES, retriever.options[:limit]
+    assert_equal [ "25001", "25001", "26098" ], result["resultados"].map { |r| r["referencia"][/projeto (\d+)/, 1] }
+  end
+
   private
 
   def call(retriever, **args)
     JSON.parse(SearchHistoricalArchiveTool.new(retriever: retriever).execute(**args))
   end
 
-  def hit(content)
+  def hit(content, job: "25001")
     proposal = HistoricalProposal.new(
-      client_name: "Petrobras", filename: "proposta.docx", job_number: "25001", year: 2025,
+      client_name: "Petrobras", filename: "proposta.docx", job_number: job, year: 2025,
       role: "proposta_papyrus", job_name: "25001_Petrobras", source_path: "/x", relative_path: "x",
       source_sha256: "a" * 64, chunker_version: "1", role_source: "ai", status: "ok"
     )

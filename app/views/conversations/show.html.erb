@@ -47,6 +47,12 @@
           </p>
         </div>
 
+        <% if @conversation.status == "reviewing" %>
+          <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
+        <% elsif @conversation.status.in?(%w[pricing completed]) %>
+          <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
+        <% end %>
+
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
           <h2 class="font-semibold text-base-content mb-4">Documentos</h2>
 
@@ -136,12 +142,6 @@
 
             <p class="text-sm text-base-content/70"><%= @conversation.geospatial_result.summary_text %></p>
           </div>
-        <% end %>
-
-        <% if @conversation.status == "reviewing" %>
-          <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
-        <% elsif @conversation.status.in?(%w[pricing completed]) %>
-          <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
         <% end %>
       </div>
 

@@ -72,6 +72,31 @@ class ProposalTest < ActiveSupport::TestCase
     assert_includes prompt, "EIA-RIMA"
   end
 
+  # Avaliação do RAG (2026-09-27): equipes de projetos anteriores parecidos entram no prompt de
+  # equipe sozinhas, sem depender da IA chamar ferramenta.
+  test "prompt de equipe traz as equipes de projetos anteriores parecidos" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    precedent = JobPrecedent.new(job_number: "26098", client_name: "Newave", year: 2026, service: "Licenciamento de BESS",
+      duration: "24 meses", team: [ { "funcao" => "Meio Físico", "horas_homem" => 80, "diarias" => 5 } ])
+    match = Rag::PrecedentFinder::Match.new(precedent: precedent, similarity: 0.8)
+    finder = Object.new.tap { |f| f.define_singleton_method(:call) { |*, **| [ match ] } }
+
+    prompt = stub_class_method(Rag::PrecedentFinder, :new, ->(*) { finder }) { proposal.send(:team_suggestion_prompt) }
+
+    assert_includes prompt, "EQUIPES DE PROJETOS ANTERIORES PARECIDOS"
+    assert_includes prompt, "acervo Papyrus: projeto 26098"
+    assert_includes prompt, "Meio Físico (80 HH, 5 diárias)"
+  end
+
+  test "prompt de equipe segue normal quando a busca de precedentes falha" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    prompt = stub_class_method(Rag::PrecedentFinder, :new, ->(*) { raise "Bedrock fora" }) { proposal.send(:team_suggestion_prompt) }
+
+    assert_includes prompt, "EQUIPE FIXA"
+    assert_not_includes prompt, "PROJETOS ANTERIORES"
+  end
+
   # A linha fora do cadastro continua fora da precificação, mas para de sumir em silêncio: ou
   # falta cadastro, ou a IA inventou, e as duas coisas são informação para o consultor.
   test "build_with_ai_suggested_team! descarta e sinaliza profissional inexistente ou inativo" do
