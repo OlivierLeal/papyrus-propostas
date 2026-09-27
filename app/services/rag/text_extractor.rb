@@ -42,7 +42,17 @@ module Rag
       @ocr = ocr
     end
 
+    # Planilhas (2026-09-27, achado ao vivo: complementar .xlsx de edital "não foi possível
+    # extrair o conteúdo"). Viram texto aba a aba — nunca vão pro provider como anexo bruto.
+    SPREADSHEET_EXTENSIONS = %w[.xlsx .xlsm .xls .ods .csv].freeze
+
+    def self.spreadsheet?(filename)
+      SPREADSHEET_EXTENSIONS.include?(File.extname(filename.to_s).downcase)
+    end
+
     def call
+      return extract_spreadsheet if self.class.spreadsheet?(@path.to_s)
+
       pages = case @path.extname.downcase
       when ".pdf"  then extract_pdf
       when ".docx" then extract_docx
@@ -59,6 +69,47 @@ module Rag
     end
 
     private
+
+    # Planilha não tem "página" nem OCR: a regra de caracteres por página de build_result (que
+    # detecta PDF escaneado) marcaria uma aba curta como :needs_ocr. Aqui é texto ou vazio.
+    def extract_spreadsheet
+      text = case @path.extname.downcase
+      when ".xlsx", ".xlsm" then PricingSheetReader.new(@path.to_s).call.to_text
+      when ".csv" then read_csv
+      else convert_spreadsheet_to_xlsx
+      end.to_s.strip
+
+      status = text.blank? ? :empty : :ok
+      Result.new(text: text, pages: [ text ], page_count: 1, chars_per_page: text.length, status: status)
+    end
+
+    def read_csv
+      raw = File.binread(@path)
+      text = raw.dup.force_encoding(Encoding::UTF_8)
+      # Excel brasileiro costuma salvar CSV em Windows-1252.
+      text = raw.encode(Encoding::UTF_8, Encoding::Windows_1252, invalid: :replace, undef: :replace) unless text.valid_encoding?
+      "## Planilha: #{@path.basename('.csv')}\n#{text}"
+    end
+
+    # .xls (Excel 97-2003) e .ods são binário/outro XML: converte para .xlsx com o LibreOffice
+    # headless (mesma estratégia do .doc legado) e lê com o leitor de .xlsx.
+    def convert_spreadsheet_to_xlsx
+      Dir.mktmpdir("rag-sheet") do |dir|
+        _out, err, status = Timeout.timeout(LIBREOFFICE_TIMEOUT) do
+          Open3.capture3("soffice", "--headless", "--convert-to", "xlsx", "--outdir", dir, @path.to_s)
+        end
+        converted = Dir.glob(File.join(dir, "*.xlsx")).first
+        unless status.success? && converted
+          Rails.logger.warn("[Rag::TextExtractor] conversão de #{@path} falhou: #{err}")
+          return ""
+        end
+
+        PricingSheetReader.new(converted).call.to_text
+      end
+    rescue Timeout::Error
+      Rails.logger.warn("[Rag::TextExtractor] conversão de #{@path} passou de #{LIBREOFFICE_TIMEOUT}s")
+      ""
+    end
 
     # .doc (Word 97-2003) é binário, não zip. Em vez de descartar, converte para .docx com o
     # LibreOffice headless e reentra no extrator normal — acervo antigo costuma ter bastante

@@ -1,5 +1,6 @@
 class Message < ApplicationRecord
   acts_as_message chat: :conversation
+  include LlmAttachments
   has_many_attached :attachments
   belongs_to :user, optional: true
 
@@ -81,7 +82,7 @@ class Message < ApplicationRecord
     # setup ou instrução interna já respondida) para de reenviar, mesmo continuando baixável
     # normalmente pelo consultor (isso aqui só afeta o que vai pra IA, não o Active Storage em si).
     def attachment_sources
-      super.reject { |attachment, _attachable| attachment.blob.metadata["kind"] == "kmz" || stale_for_llm? }
+      super.reject { |attachment, _attachable| attachment.blob.metadata["kind"] == "kmz" || llm_managed_attachment?(attachment) || stale_for_llm? }
     end
 
     def stale_for_llm?

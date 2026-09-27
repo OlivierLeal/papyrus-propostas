@@ -110,18 +110,20 @@ class ConversationsController < ApplicationController
 
     def validate_setup_files(ets, trs, kmz)
       errors = []
-      errors << "ET deve ser um arquivo PDF ou DOCX." if ets.any? { |et| !document_content_type?(et) }
-      errors << "TR deve ser um arquivo PDF ou DOCX." if trs.any? { |tr| !document_content_type?(tr) }
-      errors << "KMZ deve ser um arquivo .kmz ou .kml." if kmz.present? && !kmz_filename?(kmz)
+      errors << "ET deve ser um documento (PDF, Word, PowerPoint, e-mail, imagem ou planilha)." if ets.any? { |et| !readable_document?(et) }
+      errors << "TR deve ser um documento (PDF, Word, PowerPoint, e-mail, imagem ou planilha)." if trs.any? { |tr| !readable_document?(tr) }
+      errors << "A área de estudo deve ser KMZ, KML, GeoJSON, GeoPackage ou shapefile (.zip)." if kmz.present? && !kmz_filename?(kmz)
       errors
     end
 
-    def document_content_type?(file)
-      %w[
-        application/pdf
-        application/msword
-        application/vnd.openxmlformats-officedocument.wordprocessingml.document
-      ].include?(file.content_type)
+    # ET/TR podem chegar em qualquer formato que o AttachmentPreparer transforma em algo que a IA
+    # lê (2026-09-27): PDF/Word, PowerPoint/ODT/RTF (vira PDF), e-mail do cliente (.eml/.msg),
+    # imagem escaneada, planilha, texto e .zip. Recusa só o que nunca vira conteúdo (CAD,
+    # áudio/vídeo, formato desconhecido) e geometria (que tem campo próprio).
+    READABLE_CATEGORIES = %i[document office email image spreadsheet text archive].freeze
+
+    def readable_document?(file)
+      READABLE_CATEGORIES.include?(AttachmentPreparer.category(file.original_filename))
     end
 
     def setup_message_content(ets, trs, kmz, complementary_documents, notes)

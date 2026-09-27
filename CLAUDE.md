@@ -380,6 +380,48 @@ Regras:
 - Sempre informar ao usuário quais informações foram extraídas de cada documento, para validação.
 - Se um complementar conflitar com o ET ou o TR, sinalizar a divergência e pedir orientação ao usuário (nunca decidir sozinho).
 
+
+**Planilhas (.xlsx/.xlsm/.xls/.ods/.csv) viram texto, nunca anexo bruto (2026-09-27, achado ao vivo:
+complementar "MEF_BR-040 JF-RJ Edital v2.xlsx" voltou "não foi possível extrair o conteúdo").** O
+provider não lê planilha como documento. `Rag::TextExtractor` passou a ler planilhas
+(`.xlsx`/`.xlsm` pelo `Rag::PricingSheetReader`, que agora usa o nome REAL de cada aba via
+`workbook.xml.rels` e respeita a coluna de cada célula, sem deslocar valor quando há célula vazia;
+`.xls`/`.ods` convertidos pelo LibreOffice; `.csv` com fallback Windows-1252). Status é `:ok` ou
+`:empty`, nunca `:needs_ocr` (a regra de caracteres por página é de PDF escaneado).
+`AttachmentPreparer` manda planilha SEMPRE como texto, qualquer tamanho. No chat, o concern
+`LlmAttachments` (ver o bloco seguinte) tira a planilha de `attachment_sources` e põe o texto dela
+no conteúdo que a IA recebe; o chat mostra só a mensagem.
+Planilha que já tinha falhado antes disto precisa ser reenviada, porque a leitura não refaz sozinha.
+
+**Todo formato tem destino explícito (2026-09-27, levantamento "que arquivos eles podem mandar e o
+sistema não mapear").** Antes, o provider (Bedrock via ruby_llm) só aceitava PDF/DOC/DOCX, texto e
+imagem PNG/JPEG/WEBP/GIF: `.pptx`, `.msg`, `.zip`, áudio etc. levantavam `UnsupportedAttachmentError`
+e derrubavam o turno inteiro; HEIC/TIFF passavam pela gem e o Bedrock recusava; e um `.pptx` real de
+21 MB sumiu e a IA **deduziu o conteúdo pelo nome do arquivo** ("indica múltiplos tipos de
+licenças…"). Agora `AttachmentPreparer` classifica cada anexo (`AttachmentPreparer.category`) e
+`AttachmentConversions` (ferramentas de sistema, com timeout e cache em
+`tmp/attachment_cache/<checksum>/`) converte:
+- **nativo** (`AttachmentPreparer.native?`): PDF/DOC/DOCX ≤ 3,5 MB e JPG/PNG/WEBP/GIF ≤ 3,5 MB, que
+  vão como estão;
+- **PDF/DOC/DOCX grande**: texto extraído, **com OCR** (`Rag::Ocr`, cacheado) se for escaneado;
+- **PPTX/PPT/ODP/ODT/RTF…**: LibreOffice → PDF, que segue como documento;
+- **HEIC/TIFF/BMP/foto grande**: ImageMagick (HEIC via `heif-convert`/`heif-dec`) → JPEG de até
+  2000 px;
+- **e-mail `.eml`/`.msg`** (`.msg` via `msgconvert`): cabeçalho + corpo em texto, e os anexos do
+  e-mail preparados também (ignora imagem < 15 KB, que é assinatura/logo);
+- **`.zip`**: cada arquivo de dentro é preparado (até 20 arquivos / 150 MB, profundidade 2);
+- **geo** (KMZ/KML/GeoJSON/GeoPackage/GML/GPX/shapefile): aviso pra IA; a geometria vai pro
+  `ProcessKmzJob`, que agora converte não-KMZ pra KML com `ogr2ogr` (`geometry_bytes`).
+  `ApplicationController#kmz_filename?` reconhece esses formatos e `.zip` com `.shp`/`.kml` dentro;
+- **CAD (DWG/DXF), áudio/vídeo, RAR/7z, desconhecido**: aviso explícito "NÃO deduza o conteúdo pelo
+  nome; peça <formato>".
+
+Ferramenta ausente no servidor nunca quebra: vira o mesmo aviso. No chat, o concern
+`LlmAttachments` (em `Message`/`GeneralMessage`) aplica o preparo a todo anexo não nativo e o tira
+do `attachment_sources` bruto. ET/TR no setup passaram a aceitar qualquer categoria legível
+(`ConversationsController#readable_document?`), e o campo de área aceita os formatos geo.
+Verificado ao vivo no `.pptx` real de 21 MB: 3,7 s, conteúdo real extraído (outorga de recursos
+hídricos, Resolução nº 96/2014), não mais dedução pelo nome.
 ---
 
 ## 8. Geração do documento (DOCX — decisão revista, era PDF)
@@ -2157,6 +2199,14 @@ o código da aplicação executa a busca. Cobre exatamente o buraco que o CAL de
 - Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
 - CAL/Ius Natura (normas legais, ver seção 11.2): credenciais em `CAL_EMAIL`/`CAL_PASSWORD` no `.env`, nunca hardcoded — não é chave de API, é login real (usuário/senha) da conta que a Papyrus assina. `Cal::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22.
 - Busca na internet (Tavily, ver seção 11.3): chave em `TAVILY_API_KEY` no `.env`, nunca hardcoded. `WebSearch::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22/CAL.
+- **Pacotes de sistema no servidor (VPS Ubuntu, deploy manual)**: além de Ruby/Postgres/PostGIS,
+  o app chama ferramentas de linha de comando (seção 7, "Todo formato tem destino explícito", e
+  seção 8, cronograma/MSPDI):
+  `sudo apt-get install -y poppler-utils libreoffice-writer libreoffice-impress libreoffice-calc
+  imagemagick libheif-examples tesseract-ocr tesseract-ocr-por gdal-bin
+  libemail-outlook-message-perl librsvg2-bin default-jre-headless unzip`. O cache de conversões
+  (`tmp/attachment_cache/`) e o de OCR (`tmp/rag_ocr_cache/`) crescem com o uso; podem ser apagados
+  a qualquer momento, e o sistema reconverte quando precisar.
 
 ---
 

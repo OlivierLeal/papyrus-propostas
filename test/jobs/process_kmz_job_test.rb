@@ -62,6 +62,25 @@ class ProcessKmzJobTest < ActiveSupport::TestCase
     assert_equal "image/svg+xml", result.area_image.content_type
   end
 
+  # 2026-09-27: GeoJSON/GeoPackage/shapefile zipado passam pelo GDAL e viram KML — mesmo
+  # processamento, mesma área (o polígono aqui é o mesmo do VALID_KML).
+  test "processa GeoJSON pelo GDAL com o mesmo resultado do KML" do
+    skip "ogr2ogr ausente" unless AttachmentConversions.available?("ogr2ogr")
+
+    @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
+    geojson = { type: "FeatureCollection", features: [ { type: "Feature", properties: {}, geometry: {
+      type: "Polygon", coordinates: [ [ [ -40.30, -14.85 ], [ -40.28, -14.85 ], [ -40.28, -14.83 ], [ -40.30, -14.83 ], [ -40.30, -14.85 ] ] ]
+    } } ] }.to_json
+    @conversation.messages.create!(role: "user", content: "area").attachments.attach(
+      io: StringIO.new(geojson), filename: "area.geojson", metadata: { kind: "kmz" }
+    )
+
+    stub_mapbox_fetch(nil) { ProcessKmzJob.perform_now(@conversation.id) }
+
+    assert_equal "done", @conversation.reload.processing_step_status("kmz")
+    assert_in_delta 478.07, @conversation.geospatial_result.area_ha, 0.5
+  end
+
   test "uses the real Mapbox map instead of the SVG croqui when it's available" do
     @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "kmz" => "pending", "summary" => "pending" })
     attach_kmz(VALID_KML)

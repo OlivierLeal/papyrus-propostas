@@ -1,5 +1,6 @@
 class GeneralMessage < ApplicationRecord
   acts_as_message chat: :general_chat, tool_calls: :general_tool_calls
+  include LlmAttachments
   has_many_attached :attachments
   belongs_to :user, optional: true
 
@@ -28,7 +29,7 @@ class GeneralMessage < ApplicationRecord
     # caso do KMZ nem do snapshot de estado (exclusivos de Message/Conversation, ligados a
     # proposta) — só a regra "sempre a mensagem de usuário mais recente".
     def attachment_sources
-      super.reject { |_attachment, _attachable| stale_for_llm? }
+      super.reject { |attachment, _attachable| llm_managed_attachment?(attachment) || stale_for_llm? }
     end
 
     def stale_for_llm?

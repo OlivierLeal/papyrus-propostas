@@ -48,10 +48,57 @@ class Rag::TextExtractorTest < ActiveSupport::TestCase
 
   test "formato sem suporte é reportado, não estoura" do
     Dir.mktmpdir do |dir|
-      path = File.join(dir, "planilha.xlsx")
+      path = File.join(dir, "apresentacao.pptx")
       File.write(path, "x")
 
       assert_equal :unsupported, Rag::TextExtractor.new(path).call.status
+    end
+  end
+
+  # 2026-09-27, achado ao vivo: complementar .xlsx de edital voltava "não foi possível extrair".
+  test "planilha .xlsx vira texto aba a aba, com o nome real da aba e colunas alinhadas" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "edital.xlsx")
+      File.binwrite(path, xlsx_bytes)
+
+      result = Rag::TextExtractor.new(path).call
+
+      assert result.ok?
+      assert_includes result.text, "## Planilha: Orçamento"
+      assert_includes result.text, "## Planilha: Quantitativos"
+      assert_includes result.text, "Item | Unidade | Valor"
+      # B vazia no meio da linha: o valor da coluna C não pode "escorregar" pra B.
+      assert_includes result.text, "Levantamento de fauna |  | 12500"
+    end
+  end
+
+  test "planilha curta não é confundida com PDF escaneado (sem needs_ocr)" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "curta.csv")
+      File.write(path, "a;b\n1;2\n")
+
+      result = Rag::TextExtractor.new(path).call
+
+      assert_equal :ok, result.status
+      assert_includes result.text, "1;2"
+    end
+  end
+
+  test "CSV em Windows-1252 (Excel brasileiro) sai em UTF-8" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "orcamento.csv")
+      File.binwrite(path, "Descrição;Preço\n".encode(Encoding::Windows_1252))
+
+      assert_includes Rag::TextExtractor.new(path).call.text, "Descrição;Preço"
+    end
+  end
+
+  test "planilha corrompida não estoura, só volta vazia" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "quebrada.xlsx")
+      File.write(path, "x")
+
+      assert_equal :empty, Rag::TextExtractor.new(path).call.status
     end
   end
 

@@ -11,7 +11,7 @@ class ProcessKmzJob < ApplicationJob
     return conversation.mark_step!("kmz", "skipped") unless attachment
 
     conversation.mark_step!("kmz", "running")
-    result = KmzGeometryExtractor.new(attachment.blob.download).call
+    result = KmzGeometryExtractor.new(geometry_bytes(attachment)).call
 
     # `geospatial_result` é 1-1 (índice único em conversation_id) — só nasce vazio na 1ª vez
     # (setup). Desde que o KMZ passou a poder chegar a qualquer momento pelo chat (ver
@@ -37,6 +37,17 @@ class ProcessKmzJob < ApplicationJob
   end
 
   private
+    # KMZ/KML vão direto; shapefile zipado, GeoJSON, GeoPackage, GML e GPX (2026-09-27) passam
+    # pelo GDAL antes e viram KML — o resto do processamento é o mesmo.
+    def geometry_bytes(attachment)
+      return attachment.blob.download if attachment.filename.to_s.match?(/\.(kmz|kml)\z/i)
+
+      kml = AttachmentConversions.geo_to_kml(AttachmentConversions.materialize(attachment))
+      raise KmzGeometryExtractor::NoGeometryFoundError, "Não consegui converter #{attachment.filename} para KML." unless kml
+
+      File.binread(kml)
+    end
+
     # Área e perímetro medidos entram como achado igual a qualquer outro — com source_kind
     # "sistema", que é a fonte mais forte depois da decisão do consultor (ver ProjectFinding).
     # É o que permite o sistema perceber sozinho que o TR declara uma área e o polígono mede

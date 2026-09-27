@@ -135,6 +135,31 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert conversation.messages.where(role: "system").exists?
   end
 
+  # 2026-09-27: ET/TR podem chegar em qualquer formato que o AttachmentPreparer transforma em
+  # conteúdo legível (e-mail do cliente, PowerPoint, imagem…); só CAD/áudio/vídeo/desconhecido
+  # são recusados.
+  test "create aceita ET em e-mail (.msg) e recusa ET em CAD (.dwg)" do
+    msg = Rack::Test::UploadedFile.new(StringIO.new("outlook"), "application/vnd.ms-outlook", original_filename: "pedido.msg")
+    assert_difference "Conversation.count", 1 do
+      post conversations_path, params: { conversation: { client_name: "Via e-mail" }, et: msg }
+    end
+
+    dwg = Rack::Test::UploadedFile.new(StringIO.new("cad"), "image/vnd.dwg", original_filename: "planta.dwg")
+    assert_no_difference "Conversation.count" do
+      post conversations_path, params: { conversation: { client_name: "Via CAD" }, et: dwg }
+    end
+  end
+
+  test "create manda shapefile zipado pro processamento geoespacial (campo de área)" do
+    zip = Zip::OutputStream.write_buffer { |out| out.put_next_entry("area.shp"); out.write("shp") }.string
+    shp_zip = Rack::Test::UploadedFile.new(StringIO.new(zip), "application/zip", original_filename: "area_shp.zip")
+
+    assert_enqueued_with(job: ProcessKmzJob) do
+      post conversations_path, params: { conversation: { client_name: "Shapefile" }, et: fixture_file_upload("tr_sample.pdf", "application/pdf"), kmz: shp_zip }
+    end
+    assert_equal "area_shp.zip", Conversation.order(:created_at).last.attachment_of_kind("kmz").filename.to_s
+  end
+
   test "create marks cal as pending when there's an ET and the CAL is configured, skipped otherwise" do
     et = fixture_file_upload("tr_sample.pdf", "application/pdf")
 

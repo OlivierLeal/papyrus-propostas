@@ -22,7 +22,22 @@ class ApplicationController < ActionController::Base
     # Compartilhado entre ConversationsController (campo KMZ dedicado do setup) e
     # MessagesController (detecção por extensão entre os anexos soltos do chat, ver
     # MessagesController#create) — mesmo critério nos dois lugares.
+    #
+    # 2026-09-27: além de KMZ/KML, qualquer arquivo de geometria que o GDAL converte (GeoJSON,
+    # GeoPackage, GML, GPX, .shp avulso, e .zip com shapefile/KML dentro) — ver
+    # AttachmentConversions.geo_to_kml / ProcessKmzJob#geometry_bytes.
+    GEO_EXTENSIONS = %w[.kmz .kml .geojson .gpkg .gml .gpx .shp].freeze
+
     def kmz_filename?(file)
-      file.original_filename.match?(/\.(kmz|kml)\z/i)
+      extension = File.extname(file.original_filename.to_s).downcase
+      return true if GEO_EXTENSIONS.include?(extension)
+
+      extension == ".zip" && zip_with_geometry?(file)
+    end
+
+    def zip_with_geometry?(file)
+      Zip::File.open(file.tempfile.path) { |zip| zip.entries.any? { |entry| entry.name.match?(/\.(shp|kml|geojson|gpkg)\z/i) } }
+    rescue Zip::Error, StandardError
+      false
     end
 end

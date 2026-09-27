@@ -28,6 +28,14 @@ RUN apt-get update -qq && \
     proj-bin \
     poppler-utils \
     libreoffice-writer-nogui \
+    libreoffice-impress-nogui \
+    libreoffice-calc-nogui \
+    imagemagick \
+    libheif-examples \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    gdal-bin \
+    libemail-outlook-message-perl \
     default-jre-headless && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives

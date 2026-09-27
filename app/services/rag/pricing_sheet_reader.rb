@@ -30,7 +30,8 @@ module Rag
     def call
       Zip::File.open(@path) do |zip|
         shared = shared_strings(zip)
-        sheets = sheet_entries(zip).filter_map { |entry| read_sheet(entry, shared) }
+        names = sheet_names(zip)
+        sheets = sheet_entries(zip).filter_map { |entry| read_sheet(entry, shared, names) }
 
         Result.new(sheets: sheets, row_count: sheets.sum { |s| s.rows.length })
       end
@@ -52,23 +53,53 @@ module Rag
     end
 
     def sheet_entries(zip)
-      zip.glob("xl/worksheets/sheet*.xml").sort_by(&:name)
+      zip.glob("xl/worksheets/sheet*.xml").sort_by { |entry| entry.name[/\d+/].to_i }
     end
 
-    def read_sheet(entry, shared)
+    # Nome real de cada aba ("Orçamento", "Quantitativos"): workbook.xml lista as abas com um r:id,
+    # e workbook.xml.rels diz qual arquivo sheetN.xml é cada r:id. Sem isso, "sheet3".
+    def sheet_names(zip)
+      workbook = zip.find_entry("xl/workbook.xml")
+      rels = zip.find_entry("xl/_rels/workbook.xml.rels")
+      return {} unless workbook && rels
+
+      targets = Nokogiri::XML(rels.get_input_stream.read).tap(&:remove_namespaces!)
+        .xpath("//Relationship").to_h { |rel| [ rel["Id"], File.basename(rel["Target"].to_s) ] }
+      Nokogiri::XML(workbook.get_input_stream.read).tap(&:remove_namespaces!)
+        .xpath("//sheet").to_h { |sheet| [ targets[sheet["id"]], sheet["name"] ] }.compact
+    end
+
+    def read_sheet(entry, shared, names = {})
       xml = Nokogiri::XML(entry.get_input_stream.read)
       xml.remove_namespaces!
 
       rows = xml.xpath("//row").first(MAX_ROWS_PER_SHEET).filter_map do |row|
-        cells = row.xpath("./c").map { |cell| cell_value(cell, shared) }
-        cells = cells.map(&:to_s)
+        cells = row_cells(row, shared)
         next if cells.all?(&:blank?)
 
         cells
       end
       return nil if rows.empty?
 
-      Sheet.new(name: entry.name[%r{sheet\d+}], rows: rows)
+      Sheet.new(name: names[File.basename(entry.name)] || entry.name[%r{sheet\d+}], rows: rows)
+    end
+
+    # Célula vazia não existe no XML — a próxima célula preenchida diz a própria coluna ("C7").
+    # Sem respeitar isso, uma linha com a coluna B vazia jogava o valor de C para debaixo de B.
+    def row_cells(row, shared)
+      cells = []
+      row.xpath("./c").each do |cell|
+        index = column_index(cell["r"]) || cells.length
+        cells[index] = cell_value(cell, shared).to_s
+      end
+      cells.map(&:to_s)
+    end
+
+    def column_index(reference)
+      letters = reference.to_s[/\A[A-Z]+/]
+      return nil unless letters
+
+      letters.chars.reduce(0) { |acc, char| (acc * 26) + (char.ord - 64) } - 1
     end
 
     def cell_value(cell, shared)
