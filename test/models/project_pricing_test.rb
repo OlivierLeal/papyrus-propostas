@@ -6,7 +6,7 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal 15000.0 + 28260.0, pricing.professionals_total
   end
 
-  # priced_pricing tem 1 profissional em campo (biologa, hours_field > 0) e vehicles_count
+  # priced_pricing tem 1 profissional em campo (biologa, field_days > 0) e vehicles_count
   # default (1) — por isso o total bate igual ao formato antigo (150+80)*5+500, mesmo a fórmula
   # agora multiplicando por pessoas/veículos (ver os testes específicos abaixo pra >1 de cada).
   test "logistics_total combines per-person lodging/meals, per-vehicle rental over the days, plus fuel" do
@@ -14,21 +14,21 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal 1650.0, pricing.logistics_total
   end
 
-  test "field_professionals_count counts only lines with hours_field > 0, minimum 1" do
+  test "field_professionals_count counts only lines with field_days > 0, minimum 1" do
     pricing = project_pricings(:priced_pricing)
-    assert_equal 1, pricing.field_professionals_count # só a bióloga (hours_field: 48)
+    assert_equal 1, pricing.field_professionals_count # só a bióloga (field_days: 48)
 
-    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(hours_field: 10)
+    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(field_days: 10)
     assert_equal 2, pricing.field_professionals_count
 
-    pricing.proposal_professionals.update_all(hours_field: 0)
+    pricing.proposal_professionals.update_all(field_days: 0)
     assert_equal 1, pricing.field_professionals_count # nunca zero
   end
 
   test "logistics_total multiplies meals/lodging by the number of field professionals" do
     pricing = project_pricings(:priced_pricing)
     pricing.update!(lodging_per_person_per_night: 100, meal_per_person_per_day: 50, rental_per_day: 0, fuel_total: 0)
-    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(hours_field: 10)
+    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(field_days: 10)
     # 2 pessoas em campo agora (coordenação + bióloga)
 
     assert_equal (100 + 50) * 2 * 5, pricing.logistics_total
@@ -135,7 +135,7 @@ class ProjectPricingTest < ActiveSupport::TestCase
   test "recalculate! updates every line subtotal and the total_value" do
     pricing = project_pricings(:priced_pricing)
     pricing.update!(bdi: 1.20, tax_multiplier: 1.25)
-    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(hours_office: 10, hours_field: 0)
+    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(man_hours: 10, field_days: 0)
 
     pricing.recalculate!
 

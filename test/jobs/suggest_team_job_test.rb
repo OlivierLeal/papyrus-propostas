@@ -6,7 +6,7 @@ class SuggestTeamJobTest < ActiveJob::TestCase
     proposal = conversation.create_proposal!(status: "draft")
     proposal.build_from_template!
     ai_response = {
-      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", hours_office: 40, hours_field: 24 } ],
+      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 } ],
       documentos_separados: false
     }.to_json
 
@@ -66,7 +66,7 @@ class SuggestTeamJobTest < ActiveJob::TestCase
       nome_documento_tr: "ET", escopo_e_metodologia: "Escopo.", prazo_de_execucao: "90 dias",
       produtos: [ "RAP" ], descricao_revisao: "Emissão Inicial"
     })
-    ai_response = { linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", hours_office: 40, hours_field: 24 } ], documentos_separados: false }.to_json
+    ai_response = { linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 } ], documentos_separados: false }.to_json
     version_before = proposal.version
 
     stub_ai_complete(ai_response) { SuggestTeamJob.new.perform(proposal.id) }

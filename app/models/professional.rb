@@ -4,8 +4,8 @@ class Professional < ApplicationRecord
 
   validates :name, presence: true
   validates :role, presence: true
-  validates :rate_office, presence: true, numericality: { greater_than_or_equal_to: 0 }
-  validates :rate_field, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :rate_man_hour, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :rate_daily, presence: true, numericality: { greater_than_or_equal_to: 0 }
 
   scope :active, -> { where(active: true) }
   # Entra em toda proposta independente do que a IA sugerir (ver Proposal#ensure_always_included_lines!)

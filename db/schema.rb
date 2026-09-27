@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_17_120001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -311,8 +311,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_17_120001) do
     t.boolean "always_included", default: false, null: false
     t.datetime "created_at", null: false
     t.string "name", null: false
-    t.decimal "rate_field", precision: 10, scale: 2, null: false
-    t.decimal "rate_office", precision: 10, scale: 2, null: false
+    t.decimal "rate_daily", precision: 10, scale: 2, null: false
+    t.decimal "rate_man_hour", precision: 10, scale: 2, null: false
     t.string "registration"
     t.string "role", null: false
     t.string "specialties"
@@ -392,8 +392,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_17_120001) do
   create_table "proposal_professionals", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "deliverable_name", null: false
-    t.decimal "hours_field", precision: 8, scale: 2, default: "0.0", null: false
-    t.decimal "hours_office", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "field_days", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "man_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.bigint "professional_id", null: false
     t.bigint "project_pricing_id", null: false
     t.decimal "subtotal", precision: 12, scale: 2, default: "0.0", null: false
@@ -584,8 +584,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_17_120001) do
   create_table "study_templates", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "deliverable_name", null: false
-    t.decimal "hours_field_default", precision: 8, scale: 2, default: "0.0", null: false
-    t.decimal "hours_office_default", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "field_days_default", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "man_hours_default", precision: 8, scale: 2, default: "0.0", null: false
     t.bigint "professional_id", null: false
     t.bigint "study_type_id", null: false
     t.datetime "updated_at", null: false

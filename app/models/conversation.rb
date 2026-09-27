@@ -694,11 +694,11 @@ class Conversation < ApplicationRecord
     def proposal_state_text
       pricing = proposal.project_pricing
       lines = pricing.proposal_professionals.includes(:professional).map do |pp|
-        "- #{pp.professional.name}: #{pp.deliverable_name} (#{pp.hours_office}h escritório, #{pp.hours_field}h campo)"
+        "- #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s))"
       end.join("\n")
 
       external_costs = pricing.external_costs.map { |c| "#{c['description']} (R$ #{c['value']})" }.join(", ")
-      team_all_zero = pricing.proposal_professionals.none? || pricing.proposal_professionals.all? { |pp| pp.hours_office.zero? && pp.hours_field.zero? }
+      team_all_zero = pricing.proposal_professionals.none? || pricing.proposal_professionals.all? { |pp| pp.man_hours.zero? && pp.field_days.zero? }
       logistics_filled = pricing.logistics_total.positive? || pricing.distance_km.positive?
 
       <<~TEXT

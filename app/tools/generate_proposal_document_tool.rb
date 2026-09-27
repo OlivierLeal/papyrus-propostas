@@ -319,7 +319,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # na Tela de Precificação — isso obrigava um ciclo "gera sem preço → aprova preço → pede de
     # novo" só pra ver o documento completo). Continua sem bloquear NADA — só avisa
     # (#price_review_warning) quando o status ainda é "draft", porque BDI/taxas podem estar nos
-    # defaults (inclusive profissionais com rate_office/rate_field ainda em 0,00, ver CLAUDE.md
+    # defaults (inclusive profissionais com valor da hora-homem/diária ainda em 0,00, ver CLAUDE.md
     # seção 5) e o valor impresso pode não refletir o que a Papyrus vai cobrar de verdade.
     if somente_tecnica?(args)
       technical_filename = @proposal.docx_filename("tecnica")

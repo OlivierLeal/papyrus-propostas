@@ -26,10 +26,10 @@ class ProposalTest < ActiveSupport::TestCase
     coordenacao = pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral")
     fauna = pricing.proposal_professionals.find_by(deliverable_name: "Diagnóstico de fauna e flora")
 
-    assert_equal 40, coordenacao.hours_office
-    assert_equal 0, coordenacao.hours_field
-    assert_equal 30, fauna.hours_office
-    assert_equal 48, fauna.hours_field
+    assert_equal 40, coordenacao.man_hours
+    assert_equal 0, coordenacao.field_days
+    assert_equal 30, fauna.man_hours
+    assert_equal 48, fauna.field_days
     assert pricing.total_value.positive?
   end
 
@@ -38,8 +38,8 @@ class ProposalTest < ActiveSupport::TestCase
 
     ai_response = {
       linhas: [
-        { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", hours_office: 60, hours_field: 0 },
-        { professional_id: 999_999, deliverable_name: "Profissional inventado", hours_office: 100, hours_field: 100 }
+        { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 },
+        { professional_id: 999_999, deliverable_name: "Profissional inventado", man_hours: 100, field_days: 100 }
       ],
       documentos_separados: false
     }.to_json
@@ -49,7 +49,7 @@ class ProposalTest < ActiveSupport::TestCase
     # 2, não 1: a diretora (always_included) entra sozinha via ensure_always_included_lines!,
     # mesmo não estando nas linhas que a IA sugeriu.
     assert_equal 2, pricing.proposal_professionals.count
-    assert_equal 60, pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").hours_office
+    assert_equal 60, pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").man_hours
     assert_equal "combined", proposal.reload.document_split
   end
 
@@ -60,8 +60,8 @@ class ProposalTest < ActiveSupport::TestCase
 
     ai_response = {
       linhas: [
-        { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", hours_office: 60, hours_field: 0 },
-        { professional_id: 999_999, deliverable_name: "Arqueólogo sênior", hours_office: 100, hours_field: 100 }
+        { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 },
+        { professional_id: 999_999, deliverable_name: "Arqueólogo sênior", man_hours: 100, field_days: 100 }
       ],
       documentos_separados: false
     }.to_json
@@ -88,7 +88,7 @@ class ProposalTest < ActiveSupport::TestCase
     proposal = @conversation.create_proposal!(status: "draft")
 
     ai_response = {
-      linhas: [ { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", hours_office: 60, hours_field: 0 } ],
+      linhas: [ { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 } ],
       documentos_separados: false
     }.to_json
 
@@ -96,22 +96,22 @@ class ProposalTest < ActiveSupport::TestCase
 
     diretora_line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
     assert diretora_line.present?
-    assert_equal 0, diretora_line.hours_office
-    assert_equal 0, diretora_line.hours_field
+    assert_equal 0, diretora_line.man_hours
+    assert_equal 0, diretora_line.field_days
   end
 
   test "build_with_ai_suggested_team! keeps the AI's real hours for an always_included professional instead of overwriting with the zero default" do
     proposal = @conversation.create_proposal!(status: "draft")
 
     ai_response = {
-      linhas: [ { professional_id: professionals(:diretora).id, deliverable_name: "Direção de Negócios", hours_office: 15, hours_field: 0 } ],
+      linhas: [ { professional_id: professionals(:diretora).id, deliverable_name: "Direção de Negócios", man_hours: 15, field_days: 0 } ],
       documentos_separados: false
     }.to_json
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
     assert_equal 1, pricing.proposal_professionals.where(professional: professionals(:diretora)).count
-    assert_equal 15, pricing.proposal_professionals.find_by(professional: professionals(:diretora)).hours_office
+    assert_equal 15, pricing.proposal_professionals.find_by(professional: professionals(:diretora)).man_hours
   end
 
   # BUG achado comparando uma proposta EMI gerada pelo sistema com a PTC real aprovada pela
@@ -137,8 +137,8 @@ class ProposalTest < ActiveSupport::TestCase
 
     ai_response = {
       linhas: [
-        { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", hours_office: 40, hours_field: 24 },
-        { professional_id: professionals(:inativo).id, deliverable_name: "Meio Físico", hours_office: 10, hours_field: 0 }
+        { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 },
+        { professional_id: professionals(:inativo).id, deliverable_name: "Meio Físico", man_hours: 10, field_days: 0 }
       ],
       documentos_separados: true
     }.to_json
@@ -147,7 +147,7 @@ class ProposalTest < ActiveSupport::TestCase
 
     linha = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
     assert_equal "Diagnóstico de Fauna e Flora", linha.deliverable_name
-    assert_equal 40, linha.hours_office
+    assert_equal 40, linha.man_hours
     assert pricing.proposal_professionals.exists?(professional: professionals(:diretora)), "a Diretoria continua entrando sozinha"
     assert_not pricing.proposal_professionals.exists?(professional: professionals(:inativo)), "profissional inativo não entra"
     assert_equal "separated", proposal.reload.document_split
@@ -163,7 +163,7 @@ class ProposalTest < ActiveSupport::TestCase
     proposal = conversation.create_proposal!(status: "draft")
     proposal.build_from_template!
     ai_response = {
-      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", hours_office: 40, hours_field: 24 } ],
+      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 } ],
       documentos_separados: true
     }.to_json
 
@@ -171,7 +171,7 @@ class ProposalTest < ActiveSupport::TestCase
 
     pricing = proposal.project_pricing.reload
     linha = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
-    assert_equal 40, linha.hours_office
+    assert_equal 40, linha.man_hours
     assert pricing.proposal_professionals.exists?(professional: professionals(:diretora)), "a Diretoria (já presente) continua lá"
     assert_equal "separated", proposal.reload.document_split
   end
@@ -180,7 +180,7 @@ class ProposalTest < ActiveSupport::TestCase
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
     pricing = proposal.build_from_template!
-    pricing.proposal_professionals.create!(professional: professionals(:biologa), deliverable_name: "Ajustado à mão", hours_office: 10, hours_field: 0)
+    pricing.proposal_professionals.create!(professional: professionals(:biologa), deliverable_name: "Ajustado à mão", man_hours: 10, field_days: 0)
 
     assert_no_ai_calls { proposal.suggest_team_if_missing! }
   end
@@ -212,8 +212,8 @@ class ProposalTest < ActiveSupport::TestCase
     line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
     assert line.present?
     assert_equal "Diretora de Negócios", line.deliverable_name # role do professional, sem template pra saber o entregável
-    assert_equal 0, line.hours_office
-    assert_equal 0, line.hours_field
+    assert_equal 0, line.man_hours
+    assert_equal 0, line.field_days
   end
 
   test "build_from_template! includes an always_included professional even when their own template defaults to zero hours" do
@@ -479,7 +479,7 @@ class ProposalTest < ActiveSupport::TestCase
     proposal = proposals(:priced_proposal)
     proposal.project_pricing.proposal_professionals.create!(
       professional: professionals(:diretora), deliverable_name: "Direção de Negócios",
-      hours_office: 0, hours_field: 0, subtotal: 0
+      man_hours: 0, field_days: 0, subtotal: 0
     )
 
     rows = proposal.team_rows_for_docx

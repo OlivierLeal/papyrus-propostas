@@ -18,7 +18,7 @@ class Settings::StudyTemplatesControllerTest < ActionDispatch::IntegrationTest
       post settings_study_templates_path, params: {
         study_template: {
           study_type_id: study_types(:rap).id, professional_id: professionals(:biologa).id,
-          deliverable_name: "Diagnóstico do meio biótico", hours_office_default: "20", hours_field_default: "16"
+          deliverable_name: "Diagnóstico do meio biótico", man_hours_default: "20", field_days_default: "16"
         }
       }
     end
@@ -33,7 +33,7 @@ class Settings::StudyTemplatesControllerTest < ActionDispatch::IntegrationTest
       post settings_study_templates_path, params: {
         study_template: {
           study_type_id: template.study_type_id, professional_id: template.professional_id,
-          deliverable_name: template.deliverable_name, hours_office_default: "10", hours_field_default: "0"
+          deliverable_name: template.deliverable_name, man_hours_default: "10", field_days_default: "0"
         }
       }
     end
@@ -52,12 +52,12 @@ class Settings::StudyTemplatesControllerTest < ActionDispatch::IntegrationTest
     patch settings_study_template_path(template), params: {
       study_template: {
         study_type_id: template.study_type_id, professional_id: template.professional_id,
-        deliverable_name: template.deliverable_name, hours_office_default: "50", hours_field_default: "0"
+        deliverable_name: template.deliverable_name, man_hours_default: "50", field_days_default: "0"
       }
     }
 
     assert_redirected_to settings_study_templates_path
-    assert_equal 50, template.reload.hours_office_default
+    assert_equal 50, template.reload.man_hours_default
   end
 
   test "update re-renders the edit form when the update collides with another template's menu key" do
@@ -67,7 +67,7 @@ class Settings::StudyTemplatesControllerTest < ActionDispatch::IntegrationTest
     patch settings_study_template_path(template), params: {
       study_template: {
         study_type_id: other.study_type_id, professional_id: other.professional_id,
-        deliverable_name: other.deliverable_name, hours_office_default: "10", hours_field_default: "0"
+        deliverable_name: other.deliverable_name, man_hours_default: "10", field_days_default: "0"
       }
     }
 

@@ -43,7 +43,7 @@ module Settings
 
       def study_template_params
         params.require(:study_template).permit(
-          :study_type_id, :professional_id, :deliverable_name, :hours_office_default, :hours_field_default
+          :study_type_id, :professional_id, :deliverable_name, :man_hours_default, :field_days_default
         )
       end
   end

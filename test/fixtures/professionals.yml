@@ -1,8 +1,8 @@
 coordenador:
   name: Pedro Almeida
   role: Coordenador Técnico
-  rate_office: 250.00
-  rate_field: 350.00
+  rate_man_hour: 250.00
+  rate_daily: 350.00
   registration: CREA 12345
   specialties: Coordenação de estudos ambientais
   active: true
@@ -10,8 +10,8 @@ coordenador:
 biologa:
   name: Beth Ferreira
   role: Bióloga
-  rate_office: 180.00
-  rate_field: 280.00
+  rate_man_hour: 180.00
+  rate_daily: 280.00
   registration: CRBio 54321
   specialties: Fauna e flora
   active: true
@@ -19,8 +19,8 @@ biologa:
 inativo:
   name: Profissional Inativo
   role: Engenheiro Ambiental
-  rate_office: 200.00
-  rate_field: 300.00
+  rate_man_hour: 200.00
+  rate_daily: 300.00
   registration: CREA 99999
   specialties: Meio físico
   active: false
@@ -28,8 +28,8 @@ inativo:
 diretora:
   name: Diretora Fixa
   role: Diretora de Negócios
-  rate_office: 300.00
-  rate_field: 0.00
+  rate_man_hour: 300.00
+  rate_daily: 0.00
   registration: CREA 00000
   specialties: Direção
   active: true

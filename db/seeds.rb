@@ -71,8 +71,8 @@ end
   end
 end
 
-# Equipe real da Papyrus (lista trazida pela empresa em 2026-08). rate_office/rate_field ainda
-# NÃO têm valor real — a lista não veio com diária — então ficam em 0.00 de propósito (placeholder
+# Equipe real da Papyrus (lista trazida pela empresa em 2026-08). rate_man_hour/rate_daily
+# (hora-homem/diária) ainda NÃO têm valor real — a lista não veio com preço — então ficam em 0.00 de propósito (placeholder
 # óbvio, nunca um número inventado) até alguém preencher em Configurações > Profissionais. Uma
 # proposta cuja precificação inclua algum destes fica com subtotal 0 pra essa linha até lá — falha
 # de um jeito visível (preço zerado chama atenção), não silencioso.
@@ -159,8 +159,8 @@ end
   professional.specialties = attrs[:specialties]
   professional.always_included = attrs[:always_included] || false
   if professional.new_record?
-    professional.rate_office = 0
-    professional.rate_field = 0
+    professional.rate_man_hour = 0
+    professional.rate_daily = 0
     professional.active = true
   end
   professional.save!
@@ -172,8 +172,8 @@ end
 # subconjunto desta equipe atende cada um é uma decisão de prática da Papyrus que não dá pra
 # adivinhar aqui — sem isso, a IA simplesmente não tem esses profissionais no menu pra sugerir
 # nesses tipos de estudo, até alguém completar via Configurações > Profissionais/Templates.
-# hours_office_default/hours_field_default em 0 pelo mesmo motivo das taxas: nenhum número real
-# de horas foi informado, e 0 é o placeholder que já é o default da coluna.
+# man_hours_default/field_days_default em 0 pelo mesmo motivo das taxas: nenhum número real
+# de HH/diárias foi informado, e 0 é o placeholder que já é o default da coluna.
 if (eia_rima = StudyType.find_by(code: "eia_rima"))
   [
     { professional: "Charlene Luz", deliverable: "Direção de Negócios" },
@@ -202,8 +202,8 @@ if (eia_rima = StudyType.find_by(code: "eia_rima"))
   ].each do |attrs|
     professional = Professional.find_by!(name: attrs[:professional])
     StudyTemplate.find_or_create_by!(study_type: eia_rima, professional: professional, deliverable_name: attrs[:deliverable]) do |template|
-      template.hours_office_default = 0
-      template.hours_field_default = 0
+      template.man_hours_default = 0
+      template.field_days_default = 0
     end
   end
 end

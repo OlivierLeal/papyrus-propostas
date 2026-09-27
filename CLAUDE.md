@@ -167,12 +167,12 @@ pro consultor B ler a mensagem do consultor A.
 **Proposta e precificação (implementado):**
 - `proposals` — conversation_id, content_json, pdf_url, version, status (`draft`/`priced`/`approved`)
 - `project_pricings` — proposal_id, bdi, tax_multiplier, distance_km, logistics_days, rental_per_day, meal_per_day, fuel_total, external_costs (jsonb, `[{description, value}]`), payment_schedule (jsonb, default 30/60/5/5), total_value. Os parâmetros de logística (aluguel, alimentação, combustível) são campos diretos aqui — **não existe mais uma tabela `logistics_configs`** (removida; ver seção 5).
-- `proposal_professionals` — project_pricing_id, professional_id, deliverable_name, hours_office, hours_field, subtotal
+- `proposal_professionals` — project_pricing_id, professional_id, deliverable_name, man_hours (horas-homem), field_days (diárias), subtotal
 
 **Configuração (admin, não muda por proposta):**
-- `professionals` — name, role, rate_office, rate_field, registration, specialties, active
+- `professionals` — name, role, rate_man_hour (valor da hora-homem), rate_daily (valor da diária), registration, specialties, active
 - `study_types` — name, code, description (EIA-RIMA, EMI, Relatório Técnico, PEA, RAP...)
-- `study_templates` — study_type_id, professional_id, deliverable_name, hours_office_default, hours_field_default (horas padrão copiadas para `proposal_professionals` no início; a taxa vem sempre atualizada de `professionals`)
+- `study_templates` — study_type_id, professional_id, deliverable_name, man_hours_default, field_days_default (HH/diárias padrão copiadas para `proposal_professionals` no início; a taxa vem sempre atualizada de `professionals`)
 
 **Geoespacial:**
 - `geospatial_results` — conversation_id, area_ha, perimeter_km, municipalities (jsonb), mata_atlantica (bool), unidade_conservacao (bool), terra_indigena (bool), quilombo (bool), watershed, map_image_url, polygon (geometry, PostGIS)
@@ -186,13 +186,13 @@ Relacionamentos principais: `users` 1—N `conversations`; `conversations` 1—N
 Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística, sobreposições geoespaciais.
 
 1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do ET, do TR (quando houver) e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). Dois caminhos, conforme o tipo de estudo ter ou não `study_templates` cadastrados:
-   - **Com `study_templates` (hoje só `eia_rima`):** a sugestão é **restrita ao "menu"** de profissionais × entregáveis já cadastrados para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada e vira achado `sugestao`. Falha/nenhuma linha válida cai no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`hours_office_default`/`hours_field_default`) direto do template.
+   - **Com `study_templates` (hoje só `eia_rima`):** a sugestão é **restrita ao "menu"** de profissionais × entregáveis já cadastrados para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada e vira achado `sugestao`. Falha/nenhuma linha válida cai no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`man_hours_default`/`field_days_default`) direto do template.
    - **Sem `study_templates` (2026-09, pedido da Papyrus):** o "menu" passa a ser `Professional.active` inteiro (menos os `always_included`), com cargo + especialidades, e a IA escolhe QUEM entra e o QUE cada um entrega nesta proposta (`roster_suggestion_prompt`/`apply_roster_lines!`). Continua sem inventar gente (`professional_id` tem que ser de profissional real e ativo — id inválido vira achado `sugestao`), mas o `deliverable_name` é livre (não há catálogo de entregável por tipo de estudo fora do `eia_rima`). Falha/JSON inválido cai no mesmo `rescue` → `build_from_template!` (só Diretoria/Coordenação).
    - Em ambos os casos os `always_included` (Diretoria/Coordenação) entram sozinhos via `ensure_always_included_lines!`, e o consultor ajusta tudo na Tela de Precificação.
 2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas escritório/campo, mais adição/remoção de linhas fora do menu sugerido (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
 3. **Cálculo** (`ProjectPricing#recalculate!` / `ProposalProfessional#recalculate_subtotal`):
-   - `C1` = horas escritório × taxa escritório
-   - `C2` = horas campo × taxa campo
+   - `C1` = horas-homem × valor da hora-homem
+   - `C2` = diárias × valor da diária
    - `C3` = subtotal profissional = (C1 + C2) × BDI × impostos
    - `C4` = logística = (hospedagem/pessoa/noite + alimentação/pessoa/dia) × profissionais em campo × dias + aluguel/veículo/dia × nº de veículos × dias + combustível (ver "Logística automática" abaixo — 2026-09; hospedagem/alimentação passaram a ser POR PESSOA, aluguel continua por VEÍCULO)
    - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta em `external_costs` (jsonb)
@@ -245,7 +245,7 @@ HTTP à Mapbox Directions, nunca inferência de IA sobre dinheiro.
 - **Hospedagem/alimentação passaram a ser POR PESSOA** (`lodging_per_person_per_night`/
   `meal_per_person_per_day`, o 2º renomeado de `meal_per_day` — mudança de sentido deliberada,
   não escondida atrás do mesmo nome), multiplicadas por `ProjectPricing#field_professionals_count`
-  (profissionais com `hours_field > 0`, mínimo 1). Aluguel continua por VEÍCULO/dia
+  (profissionais com `field_days > 0`, mínimo 1). Aluguel continua por VEÍCULO/dia
   (`rental_per_day`), multiplicado por `vehicles_count` em vez de sempre 1.
 - Verificado ao vivo (3 caminhos, Mapbox real): centroide de KMZ → 498,7km/9,9h até um ponto no
   interior da Bahia (fuel_total calculado); município sem KMZ (Salvador/BA) → 28,6km/0,7h; destino
@@ -272,27 +272,17 @@ FORMA de escolher quem entra mudou, nada na gravação. Verificado com teste de 
 buscar "Fauna" filtra pro profissional certo, clicar preenche o campo escondido, e adicionar a
 linha cria o profissional escolhido na tabela da equipe.
 
-**Um só campo "Horas" na Tela de Precificação, em vez de "Horas escritório"/"Horas campo"
-separados (2026-09, pedido do consultor: "não precisa de campo de horas escritório e horas
-campo, é o mesmo valor").** Na digitação MANUAL do consultor (grade da Equipe e o mini-formulário
-"Adicionar linha") os dois campos sempre recebiam o mesmo número — dois inputs era redundante.
-`app/javascript/controllers/hours_sync_controller.js` (novo, pequeno) espelha um único
-`number_field` visível ("Horas") em dois `hidden_field` (`hours_office`/`hours_field`) com os
-MESMOS nomes que o backend já esperava — `ProposalProfessionalsController`/`ProposalsController#
-pricing_params`/`ProposalProfessional#recalculate_subtotal` não mudaram nada, continuam recebendo
-e calculando os dois valores separados (`C1 = hours_office × rate_office`, `C2 = hours_field ×
-rate_field` — as taxas continuam diferentes por profissional, isso **não** muda; ver
-[[precificacao-taxa-unica-pendente]] na memória do projeto, decisão de unificar TAXA é outra
-discussão, ainda pendente, não mexida aqui). Só a ENTRADA manual foi consolidada — a sugestão da
-IA (`build_with_ai_suggested_team!`/`apply_lines!`/`apply_roster_lines!`) e os `study_templates`
-continuam podendo gravar valores DIFERENTES nos dois campos livremente (ex.: bióloga com 30h
-escritório / 48h campo, fixture real de teste) — não passam pelo controller novo, só a edição na
-tela. Grade da Equipe: a linha existente mostra o valor de `hours_office` como o "Horas" atual
-(assume que os dois já estão iguais, convenção reforçada pelo próprio pedido); editar e submeter
-grava o mesmo número nos dois. Verificado com teste de sistema de verdade
-(`test/system/hours_sync_test.rb`, Selenium/Chrome headless): editar o "Horas" de uma linha
-existente e recalcular grava `hours_office == hours_field` no banco com o subtotal certo;
-adicionar linha nova pelo campo único faz o mesmo.
+**Hora-homem e diária em vez de hora escritório/hora campo (2026-09, pedido do consultor).**
+Substituiu tanto as duas taxas quanto o antigo campo único "Horas" (`hours_sync_controller.js`,
+removido). Cadastro do profissional: `rate_man_hour` (valor da hora-homem) e `rate_daily` (valor
+da diária). Proposta/template: `man_hours`/`field_days` (e `*_default`) — HH de trabalho técnico e
+DIÁRIAS de campo (contagem de dias, nunca horas). Tela de Precificação com dois campos por linha
+("Horas-homem"/"Diárias"). Os dois prompts de equipe da IA (`suggestion_prompt`/
+`roster_suggestion_prompt`) explicam as unidades via `Proposal::EFFORT_UNITS_GUIDE` e pedem as
+chaves `man_hours`/`field_days`. `field_professionals_count` (logística) conta quem tem
+`field_days > 0`. Migração dos dados (`SwitchToManHoursAndDailyRates`): taxas renomeadas sem
+mudar valor; horas de escritório → HH direto; horas de campo → diárias (÷ 8, meia diária pra
+cima), exceto quando campo == escritório (espelho do antigo campo único) → 0 diárias.
 
 **"Serviços Terceirizados" — campo separado de Custos Externos, 100% manual (2026-09, pedido do
 consultor a partir de conversa com o time — "a parte terceirizada a gente coloca um campo
@@ -1567,7 +1557,7 @@ com o documento na maioria dos casos).
   `find_or_initialize_by` + atribuição direta de `role`/`registration`/`specialties`/
   `always_included` em TODA execução — sem isso, editar `db/seeds.rb` de novo não alcançaria
   quem já estava cadastrado (o caso real: os 23 já existiam no banco de dev desde agosto).
-  `rate_office`/`rate_field`/`active` continuam só no `new_record?` — são dado operacional que o
+  `rate_man_hour`/`rate_daily`/`active` continuam só no `new_record?` — são dado operacional que o
   consultor edita em Configurações > Profissionais (taxa real, ou desativar alguém), e um reseed
   nunca pode sobrescrever isso.
 - **Nota da Sara Marçal ("só entra em propostas da Região Sul") saiu do `specialties`** — antes
@@ -1576,7 +1566,7 @@ com o documento na maioria dos casos).
   aplicada por código (é só um lembrete pro consultor ajustar a equipe manualmente), então tirar
   do campo impresso não muda nenhum comportamento, só corrige o que sai no documento.
 - Verificado ao vivo (`bin/rails db:seed` no banco de dev real, não um teste isolado):
-  `Professional.count` continua 23 (nenhum duplicado), `rate_office`/`rate_field`/`active` de um
+  `Professional.count` continua 23 (nenhum duplicado), `rate_man_hour`/`rate_daily`/`active` de um
   profissional já cadastrado (Wlisses Batista) continuam intocados, e
   `Proposal#team_rows_for_docx` numa proposta real de dev passou a devolver a habilitação
   completa — ex. Charlene Luz: `"Doutora em Gestão Ambiental. Mestre em Engenharia Ambiental

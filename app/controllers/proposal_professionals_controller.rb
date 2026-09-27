@@ -31,6 +31,6 @@ class ProposalProfessionalsController < ApplicationController
     end
 
     def line_params
-      params.require(:proposal_professional).permit(:professional_id, :deliverable_name, :hours_office, :hours_field)
+      params.require(:proposal_professional).permit(:professional_id, :deliverable_name, :man_hours, :field_days)
     end
 end

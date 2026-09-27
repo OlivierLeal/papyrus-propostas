@@ -47,11 +47,11 @@ class ProjectPricing < ApplicationRecord
     lodging + meals + rental + fuel_total
   end
 
-  # Nº de profissionais desta proposta que vão a campo (hours_field > 0) — mínimo 1 pra nunca
+  # Nº de profissionais desta proposta que vão a campo (diárias > 0) — mínimo 1 pra nunca
   # zerar hospedagem/alimentação/veículo quando há dias de campo mas a equipe ainda não foi
   # detalhada (ex.: logo depois de build_from_template!, antes do consultor ajustar horas).
   def field_professionals_count
-    n = proposal_professionals.where("hours_field > 0").count
+    n = proposal_professionals.where("field_days > 0").count
     n.zero? ? 1 : n
   end
 

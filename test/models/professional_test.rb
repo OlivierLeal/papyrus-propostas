@@ -2,26 +2,26 @@ require "test_helper"
 
 class ProfessionalTest < ActiveSupport::TestCase
   test "valid with required fields" do
-    professional = Professional.new(name: "Fulano", role: "Engenheiro", rate_office: 100, rate_field: 150)
+    professional = Professional.new(name: "Fulano", role: "Engenheiro", rate_man_hour: 100, rate_daily: 150)
     assert professional.valid?
   end
 
-  test "requires name, role, rate_office and rate_field" do
+  test "requires name, role, rate_man_hour and rate_daily" do
     professional = Professional.new
     assert_not professional.valid?
     assert_includes professional.errors[:name], "não pode ficar em branco"
     assert_includes professional.errors[:role], "não pode ficar em branco"
-    assert_includes professional.errors[:rate_office], "não pode ficar em branco"
-    assert_includes professional.errors[:rate_field], "não pode ficar em branco"
+    assert_includes professional.errors[:rate_man_hour], "não pode ficar em branco"
+    assert_includes professional.errors[:rate_daily], "não pode ficar em branco"
   end
 
   test "rejects negative rates" do
-    professional = Professional.new(name: "Fulano", role: "Engenheiro", rate_office: -1, rate_field: -1)
+    professional = Professional.new(name: "Fulano", role: "Engenheiro", rate_man_hour: -1, rate_daily: -1)
     assert_not professional.valid?
   end
 
   test "accepts zero rates" do
-    professional = Professional.new(name: "Fulano", role: "Engenheiro", rate_office: 0, rate_field: 0)
+    professional = Professional.new(name: "Fulano", role: "Engenheiro", rate_man_hour: 0, rate_daily: 0)
     assert professional.valid?
   end
 

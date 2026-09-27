@@ -43,7 +43,7 @@ module Settings
 
       def professional_params
         params.require(:professional).permit(
-          :name, :role, :rate_office, :rate_field, :registration, :specialties, :active, :always_included
+          :name, :role, :rate_man_hour, :rate_daily, :registration, :specialties, :active, :always_included
         )
       end
   end

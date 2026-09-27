@@ -6,8 +6,8 @@ class StudyTemplateTest < ActiveSupport::TestCase
       study_type: study_types(:rap),
       professional: professionals(:coordenador),
       deliverable_name: "Novo entregável",
-      hours_office_default: 10,
-      hours_field_default: 5
+      man_hours_default: 10,
+      field_days_default: 5
     )
     assert template.valid?
   end
@@ -18,8 +18,8 @@ class StudyTemplateTest < ActiveSupport::TestCase
       study_type: existing.study_type,
       professional: existing.professional,
       deliverable_name: existing.deliverable_name,
-      hours_office_default: 1,
-      hours_field_default: 1
+      man_hours_default: 1,
+      field_days_default: 1
     )
     assert_not duplicate.valid?
     assert_includes duplicate.errors[:deliverable_name], "já está em uso"
@@ -31,8 +31,8 @@ class StudyTemplateTest < ActiveSupport::TestCase
       study_type: study_types(:rap),
       professional: existing.professional,
       deliverable_name: existing.deliverable_name,
-      hours_office_default: 1,
-      hours_field_default: 1
+      man_hours_default: 1,
+      field_days_default: 1
     )
     assert template.valid?
   end
@@ -42,8 +42,8 @@ class StudyTemplateTest < ActiveSupport::TestCase
       study_type: study_types(:rap),
       professional: professionals(:coordenador),
       deliverable_name: "Entregável negativo",
-      hours_office_default: -1,
-      hours_field_default: -1
+      man_hours_default: -1,
+      field_days_default: -1
     )
     assert_not template.valid?
   end

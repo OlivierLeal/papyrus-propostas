@@ -55,6 +55,15 @@ class Proposal < ApplicationRecord
   # Nome do arquivo MSPDI (cronograma pro MS Project, ver ScheduleMspdiExporter/CLAUDE.md seção
   # 8) — mesma base do nome da proposta TÉCNICA (o cronograma nunca é dado de preço, sai igual em
   # qualquer status), só com sufixo do tipo e extensão .xml em vez de .docx.
+  # Unidades de esforço que a IA usa ao sugerir equipe (2026-09: hora escritório/hora campo
+  # viraram hora-homem e diária). Mesmo texto nos dois prompts de equipe.
+  EFFORT_UNITS_GUIDE = <<~TEXT.strip
+    - "man_hours" = HORAS-HOMEM (HH) de trabalho técnico/escritório: elaboração, análise,
+      geoprocessamento, relatórios, reuniões, coordenação.
+    - "field_days" = DIÁRIAS de campo: quantos dias o profissional fica em campo (vistoria,
+      campanha de fauna/flora, levantamento). É contagem de DIAS, nunca de horas.
+  TEXT
+
   SCHEDULE_FILENAME_LABELS = { "servico" => "Cronograma_Servico", "implantacao" => "Cronograma_Implantacao" }.freeze
 
   def schedule_filename(type)
@@ -62,11 +71,6 @@ class Proposal < ApplicationRecord
     "#{base}_#{SCHEDULE_FILENAME_LABELS.fetch(type)}.xml"
   end
 
-  # Nome/qualificação da Equipe Técnica no DOCX vêm de dados reais do sistema (proposal_
-  # professionals + professionals.registration), nunca da IA — ela não deve inventar nome ou
-  # registro profissional de alguém. "Líder do projeto" = quem tem mais horas de escritório
-  # (normalmente quem coordena); "Segurança do trabalho" = quem tiver esse termo no cargo, se
-  # existir alguém assim na equipe desta proposta (em branco se não houver).
   # Siglas dos atos de licenciamento (LP, LI, RLP, ASV…) dos achados `tipo_licenca` ativos desta
   # conversa. Usado pelo gerador do .docx pra aplicar a regra de prazo de 12 meses da família
   # Prévia/Instalação (ver GenerateProposalDocumentTool) e, internamente, por #ato_licenciamento.
@@ -602,7 +606,7 @@ class Proposal < ApplicationRecord
     def suggestion_prompt(templates)
       menu = templates.map do |t|
         "- professional_id: #{t.professional_id} | #{t.professional.name} (#{t.professional.role}) | " \
-        "entregável: \"#{t.deliverable_name}\" | padrão: #{t.hours_office_default}h escritório, #{t.hours_field_default}h campo"
+        "entregável: \"#{t.deliverable_name}\" | padrão: #{t.man_hours_default} HH, #{t.field_days_default} diária(s)"
       end.join("\n")
 
       <<~TEXT
@@ -614,9 +618,11 @@ class Proposal < ApplicationRecord
         (não sugira nada fora desta lista — nunca invente professional_id ou entregável novo):
         #{menu}
 
-        Para CADA item da lista acima, sugira as horas necessárias para este projeto específico,
+        Para CADA item da lista acima, sugira o esforço necessário para este projeto específico,
         considerando a complexidade, os diagnósticos exigidos e as demais informações já extraídas
-        nesta conversa. Se um item não for necessário para este projeto, sugira 0 para ambas as horas.
+        nesta conversa, em duas quantidades:
+        #{EFFORT_UNITS_GUIDE}
+        Se um item não for necessário para este projeto, sugira 0 nas duas.
 
         Além disso, releia o ET e o TR (quando houver) e diga se algum deles exige que a proposta
         técnica e a proposta comercial sejam apresentadas como documentos/envelopes SEPARADOS
@@ -628,7 +634,7 @@ class Proposal < ApplicationRecord
 
         {
           "linhas": [
-            { "professional_id": 12, "deliverable_name": "Coordenação geral", "hours_office": 30, "hours_field": 0 }
+            { "professional_id": 12, "deliverable_name": "Coordenação geral", "man_hours": 30, "field_days": 0 }
           ],
           "documentos_separados": false,
           "justificativa_documentos_separados": "..."
@@ -672,9 +678,10 @@ class Proposal < ApplicationRecord
         - Só inclua um profissional se o escopo desta proposta realmente exigir a atuação dele.
         - "deliverable_name" é o entregável/frente de trabalho dele NESTA proposta (ex.:
           "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Análise Jurídica").
-        - Sugira as horas de escritório e de campo necessárias para este projeto. Se não tiver
-          base para estimar, use 0 nos dois campos (o consultor ajusta na Tela de Precificação),
-          mas ainda assim inclua a linha.
+        - Sugira o esforço necessário para este projeto em duas quantidades:
+          #{EFFORT_UNITS_GUIDE}
+          Se não tiver base para estimar, use 0 nas duas (o consultor ajusta na Tela de
+          Precificação), mas ainda assim inclua a linha.
         - Um mesmo profissional pode ter mais de uma linha se entregar frentes distintas.
 
         Diga também se o ET ou o TR exige que a proposta técnica e a comercial sejam apresentadas
@@ -686,7 +693,7 @@ class Proposal < ApplicationRecord
 
         {
           "linhas": [
-            { "professional_id": 12, "deliverable_name": "Geoprocessamento e Cartografia", "hours_office": 40, "hours_field": 0 }
+            { "professional_id": 12, "deliverable_name": "Geoprocessamento e Cartografia", "man_hours": 40, "field_days": 2 }
           ],
           "documentos_separados": false,
           "justificativa_documentos_separados": "..."
@@ -834,12 +841,12 @@ class Proposal < ApplicationRecord
         deliverable = line["deliverable_name"].to_s.strip
         next flag_out_of_catalog(line, reason: :roster) if professional.nil? || deliverable.blank?
 
-        hours_office = line["hours_office"].to_f
-        hours_field = line["hours_field"].to_f
+        man_hours = line["man_hours"].to_f
+        field_days = line["field_days"].to_f
 
         pricing.proposal_professionals.create!(
           professional: professional, deliverable_name: deliverable,
-          hours_office: hours_office, hours_field: hours_field
+          man_hours: man_hours, field_days: field_days
         )
       end
     end
@@ -856,15 +863,15 @@ class Proposal < ApplicationRecord
         # inventou), não um detalhe de implementação.
         next flag_out_of_catalog(line) unless template
 
-        hours_office = line["hours_office"].to_f
-        hours_field = line["hours_field"].to_f
-        next if hours_office.zero? && hours_field.zero?
+        man_hours = line["man_hours"].to_f
+        field_days = line["field_days"].to_f
+        next if man_hours.zero? && field_days.zero?
 
         pricing.proposal_professionals.create!(
           professional: template.professional,
           deliverable_name: template.deliverable_name,
-          hours_office: hours_office,
-          hours_field: hours_field
+          man_hours: man_hours,
+          field_days: field_days
         )
       end
     end
@@ -895,8 +902,8 @@ class Proposal < ApplicationRecord
             pricing.proposal_professionals.create!(
               professional: template.professional,
               deliverable_name: template.deliverable_name,
-              hours_office: template.hours_office_default,
-              hours_field: template.hours_field_default
+              man_hours: template.man_hours_default,
+              field_days: template.field_days_default
             )
           end
         else
@@ -904,7 +911,7 @@ class Proposal < ApplicationRecord
           next if present.include?([ professional.id, deliverable_name ])
 
           pricing.proposal_professionals.create!(
-            professional: professional, deliverable_name: deliverable_name, hours_office: 0, hours_field: 0
+            professional: professional, deliverable_name: deliverable_name, man_hours: 0, field_days: 0
           )
         end
       end
@@ -932,8 +939,8 @@ class Proposal < ApplicationRecord
         {
           "professional_id" => t.professional_id,
           "deliverable_name" => t.deliverable_name,
-          "hours_office" => t.hours_office_default,
-          "hours_field" => t.hours_field_default
+          "man_hours" => t.man_hours_default,
+          "field_days" => t.field_days_default
         }
       end
     end

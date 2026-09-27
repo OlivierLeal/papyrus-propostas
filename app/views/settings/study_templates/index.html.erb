@@ -33,8 +33,8 @@
             <th class="font-semibold">Tipo de Estudo</th>
             <th class="font-semibold">Profissional</th>
             <th class="font-semibold">Entregável</th>
-            <th class="font-semibold">Horas escritório</th>
-            <th class="font-semibold">Horas campo</th>
+            <th class="font-semibold">Horas-homem</th>
+            <th class="font-semibold">Diárias</th>
             <th class="w-1"></th>
           </tr>
         </thead>
@@ -44,8 +44,8 @@
               <td><span class="badge badge-ghost"><%= study_template.study_type.name %></span></td>
               <td class="font-medium text-base-content"><%= study_template.professional.name %></td>
               <td class="text-base-content/70"><%= study_template.deliverable_name %></td>
-              <td class="text-base-content/70"><%= study_template.hours_office_default %>h</td>
-              <td class="text-base-content/70"><%= study_template.hours_field_default %>h</td>
+              <td class="text-base-content/70"><%= study_template.man_hours_default %> HH</td>
+              <td class="text-base-content/70"><%= study_template.field_days_default %></td>
               <td>
                 <div class="flex items-center gap-1 justify-end">
                   <%= link_to edit_settings_study_template_path(study_template), class: "btn btn-ghost btn-sm btn-square", title: "Editar" do %>

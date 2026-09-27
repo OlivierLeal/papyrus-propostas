@@ -21,13 +21,13 @@
 
   <div class="grid grid-cols-2 gap-4">
     <label class="form-control">
-      <div class="label"><span class="label-text">Taxa escritório/dia (R$)</span></div>
-      <%= form.number_field :rate_office, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
+      <div class="label"><span class="label-text">Valor da hora-homem (R$)</span></div>
+      <%= form.number_field :rate_man_hour, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
     </label>
 
     <label class="form-control">
-      <div class="label"><span class="label-text">Taxa campo/dia (R$)</span></div>
-      <%= form.number_field :rate_field, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
+      <div class="label"><span class="label-text">Valor da diária (R$)</span></div>
+      <%= form.number_field :rate_daily, class: "input input-bordered w-full", step: "0.01", min: 0, required: true %>
     </label>
   </div>
 

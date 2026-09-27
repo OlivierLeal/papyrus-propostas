@@ -24,7 +24,7 @@
 
   <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, class: "flex flex-col gap-4" do |form| %>
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-      <h2 class="font-semibold text-base-content mb-4">Equipe e horas</h2>
+      <h2 class="font-semibold text-base-content mb-4">Equipe, horas-homem e diárias</h2>
 
       <div class="overflow-x-auto">
         <table class="table">
@@ -32,7 +32,8 @@
             <tr>
               <th>Profissional</th>
               <th>Entregável</th>
-              <th class="text-right">Horas</th>
+              <th class="text-right">Horas-homem</th>
+              <th class="text-right">Diárias</th>
               <th class="text-right">Subtotal</th>
               <th></th>
             </tr>
@@ -43,14 +44,14 @@
               <tr>
                 <td class="text-base-content"><%= line.professional.name %></td>
                 <td class="text-base-content/70"><%= line.deliverable_name %></td>
-                <td class="text-right" data-controller="hours-sync">
+                <td class="text-right">
                   <%= pp_form.hidden_field :id %>
-                  <%= pp_form.hidden_field :hours_office, data: { hours_sync_target: "hidden" } %>
-                  <%= pp_form.hidden_field :hours_field, data: { hours_sync_target: "hidden" } %>
-                  <input type="number" step="0.5" min="0" autocomplete="off" value="<%= line.hours_office %>"
-                         <% unless editable %>disabled<% end %>
-                         class="input input-bordered input-sm w-24 text-right"
-                         data-hours-sync-target="visible" data-action="input->hours-sync#sync">
+                  <%= pp_form.number_field :man_hours, step: 0.5, min: 0, disabled: !editable, autocomplete: "off",
+                        class: "input input-bordered input-sm w-24 text-right" %>
+                </td>
+                <td class="text-right">
+                  <%= pp_form.number_field :field_days, step: 0.5, min: 0, disabled: !editable, autocomplete: "off",
+                        class: "input input-bordered input-sm w-20 text-right" %>
                 </td>
                 <td class="text-right text-base-content/70"><%= number_to_currency(line.subtotal, unit: "R$", separator: ",", delimiter: ".") %></td>
                 <td class="text-right">
@@ -68,7 +69,7 @@
               </tr>
             <% end %>
             <% if pricing.proposal_professionals.none? %>
-              <tr><td colspan="5" class="text-center text-base-content/50 py-4">Nenhum profissional na equipe ainda.</td></tr>
+              <tr><td colspan="6" class="text-center text-base-content/50 py-4">Nenhum profissional na equipe ainda.</td></tr>
             <% end %>
           </tbody>
         </table>
@@ -106,13 +107,13 @@
             <div class="label"><span class="label-text text-xs">Entregável</span></div>
             <%= add_form.text_field :deliverable_name, class: "input input-bordered input-sm" %>
           </div>
-          <div class="form-control" data-controller="hours-sync">
-            <div class="label"><span class="label-text text-xs">Horas</span></div>
-            <%= add_form.hidden_field :hours_office, value: 0, data: { hours_sync_target: "hidden" } %>
-            <%= add_form.hidden_field :hours_field, value: 0, data: { hours_sync_target: "hidden" } %>
-            <input type="number" step="0.5" min="0" autocomplete="off" value="0"
-                   class="input input-bordered input-sm w-24"
-                   data-hours-sync-target="visible" data-action="input->hours-sync#sync">
+          <div class="form-control">
+            <div class="label"><span class="label-text text-xs">Horas-homem</span></div>
+            <%= add_form.number_field :man_hours, value: 0, step: 0.5, min: 0, autocomplete: "off", class: "input input-bordered input-sm w-24" %>
+          </div>
+          <div class="form-control">
+            <div class="label"><span class="label-text text-xs">Diárias</span></div>
+            <%= add_form.number_field :field_days, value: 0, step: 0.5, min: 0, autocomplete: "off", class: "input input-bordered input-sm w-20" %>
           </div>
           <%= add_form.submit "Adicionar linha", class: "btn btn-sm btn-outline" %>
         <% end %>

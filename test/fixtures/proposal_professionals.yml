@@ -2,14 +2,14 @@ coordenacao_line:
   project_pricing: priced_pricing
   professional: coordenador
   deliverable_name: Coordenação geral
-  hours_office: 40
-  hours_field: 0
+  man_hours: 40
+  field_days: 0
   subtotal: 15000.00
 
 fauna_flora_line:
   project_pricing: priced_pricing
   professional: biologa
   deliverable_name: Diagnóstico de fauna e flora
-  hours_office: 30
-  hours_field: 48
+  man_hours: 30
+  field_days: 48
   subtotal: 28260.00
