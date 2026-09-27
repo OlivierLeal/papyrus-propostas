@@ -1,10 +1,10 @@
 require "test_helper"
 
 class SuggestTeamJobTest < ActiveJob::TestCase
-  test "fills the team when the proposal only has always_included lines and no study_templates" do
+  test "fills the team when the proposal only has the fixed team at 0h" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = {
       linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 } ],
       documentos_separados: false
@@ -21,9 +21,9 @@ class SuggestTeamJobTest < ActiveJob::TestCase
     assert_no_ai_calls { SuggestTeamJob.new.perform(proposal.id) }
   end
 
-  test "does nothing for a study type with study_templates (eia_rima)" do
+  test "does nothing when the consultant already gave hours to the fixed team" do
     proposal = conversations(:reviewing_conversation).create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!.proposal_professionals.sole.update!(field_days: 2)
 
     assert_no_ai_calls { SuggestTeamJob.new.perform(proposal.id) }
   end
@@ -41,7 +41,7 @@ class SuggestTeamJobTest < ActiveJob::TestCase
   test "logs and swallows the error instead of raising when the AI call fails" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
 
     assert_nothing_raised do
       stub_ai_error { SuggestTeamJob.new.perform(proposal.id) }
@@ -54,7 +54,7 @@ class SuggestTeamJobTest < ActiveJob::TestCase
   test "auto-regenerates the docx when a document was already generated without the team" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     proposal.generated_documents.attach(
       io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
       metadata: { kind: "tecnica", version: 1, description: "Emissão Inicial" }

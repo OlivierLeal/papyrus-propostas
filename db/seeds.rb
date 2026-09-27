@@ -79,12 +79,12 @@ end
 #
 # always_included: true só em Charlene, Ricardo e Pedro (Diretoria/Coordenação) — entram em toda
 # proposta independente do tipo de estudo (ver Proposal#ensure_always_included_lines!). Os demais
-# variam conforme o que o ET pedir; a IA decide horas reais vs. 0 pra cada um (ver
-# Proposal#suggestion_prompt), restrita ao menu de study_templates abaixo.
+# variam conforme o que o ET pedir: a IA escolhe quem entra, o entregável e o esforço de cada um
+# a partir deste cadastro (ver Proposal#team_suggestion_prompt).
 #
 # `specialties` (2026-09, corrigido a partir de Equipe.docx trazido pela Papyrus — relato do
 # consultor: "a habilitação/registro tá incompleto" nas propostas geradas) tem dupla função: é o
-# texto que alimenta o menu da IA (`roster_suggestion_prompt`, "cargo + especialidades") E é o
+# texto que alimenta o menu da IA (`team_suggestion_prompt`, "cargo + especialidades") E é o
 # que entra na coluna HABILITAÇÃO/REGISTRO da tabela EQUIPE TÉCNICA do `.docx`
 # (`Proposal#team_rows_for_docx`, "specialties — registration"). Antes tinha só uma etiqueta curta
 # de área de atuação ("Fauna geral", "Segurança do trabalho") — o Equipe.docx real da Papyrus tem
@@ -164,46 +164,4 @@ end
     professional.active = true
   end
   professional.save!
-end
-
-# Menu inicial de equipe para EIA-RIMA (o tipo de estudo mais completo, e o que a própria lista da
-# Papyrus descreve — meio físico + flora + fauna por grupo + socioeconomia + arqueologia). Os
-# outros study_types (RAP, Relatório Técnico, PEA, EMI) ficam SEM template por enquanto: qual
-# subconjunto desta equipe atende cada um é uma decisão de prática da Papyrus que não dá pra
-# adivinhar aqui — sem isso, a IA simplesmente não tem esses profissionais no menu pra sugerir
-# nesses tipos de estudo, até alguém completar via Configurações > Profissionais/Templates.
-# man_hours_default/field_days_default em 0 pelo mesmo motivo das taxas: nenhum número real
-# de HH/diárias foi informado, e 0 é o placeholder que já é o default da coluna.
-if (eia_rima = StudyType.find_by(code: "eia_rima"))
-  [
-    { professional: "Charlene Luz", deliverable: "Direção de Negócios" },
-    { professional: "Ricardo Hortélio", deliverable: "Direção Técnica" },
-    { professional: "Sara Marçal", deliverable: "Direção Regional — Região Sul" },
-    { professional: "Pedro Skinner", deliverable: "Coordenação e Gestão do Projeto" },
-    { professional: "Francisco Reis", deliverable: "Diagnóstico de Fauna — Geral" },
-    { professional: "Yuri Alves Bezerra", deliverable: "Segurança do Trabalho" },
-    { professional: "Antônio Molina", deliverable: "Assessoria Ambiental Estratégica" },
-    { professional: "Melissa Oliveira", deliverable: "Revisão e Formatação" },
-    { professional: "Rodrigo Moate", deliverable: "Geoprocessamento e Cartografia" },
-    { professional: "Elizabeth Seydel", deliverable: "Geoprocessamento e Cartografia" },
-    { professional: "Carolene Marchant", deliverable: "Apoio Administrativo" },
-    { professional: "Wlisses Batista", deliverable: "Diagnóstico de Meio Físico" },
-    { professional: "Máida Cynthia", deliverable: "Diagnóstico de Flora" },
-    { professional: "Enée G. Pereira", deliverable: "Diagnóstico de Fauna — Quiróptero e Mastofauna" },
-    { professional: "Ícaro Menezes", deliverable: "Diagnóstico de Fauna — Avifauna" },
-    { professional: "Igor Silva Andrade", deliverable: "Diagnóstico de Fauna — Herpetofauna" },
-    { professional: "João Loyola", deliverable: "Diagnóstico Socioeconômico" },
-    { professional: "George Lima", deliverable: "Apoio ao Diagnóstico Socioeconômico" },
-    { professional: "Felipe Salles", deliverable: "Diagnóstico de Arqueologia" },
-    { professional: "Pedro Andrade", deliverable: "Análise Jurídica" },
-    { professional: "Camila Barreto Coelho de Andrade", deliverable: "Análise Urbanística" },
-    { professional: "Caio Almeida", deliverable: "Apoio de Arquitetura" },
-    { professional: "Maria Nogueira", deliverable: "Apoio ao Diagnóstico de Fauna" }
-  ].each do |attrs|
-    professional = Professional.find_by!(name: attrs[:professional])
-    StudyTemplate.find_or_create_by!(study_type: eia_rima, professional: professional, deliverable_name: attrs[:deliverable]) do |template|
-      template.man_hours_default = 0
-      template.field_days_default = 0
-    end
-  end
 end

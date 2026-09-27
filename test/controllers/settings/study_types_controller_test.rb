@@ -52,7 +52,7 @@ class Settings::StudyTypesControllerTest < ActionDispatch::IntegrationTest
     assert_equal "eia_rima", study_type.reload.code
   end
 
-  test "destroy removes a study type with no dependent study_templates" do
+  test "destroy removes a study type" do
     study_type = StudyType.create!(name: "Descartável", code: "descartavel")
 
     assert_difference "StudyType.count", -1 do

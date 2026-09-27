@@ -14,9 +14,3 @@ pt-BR:
         rate_daily: Valor da diária
         active: Ativo
         always_included: Sempre incluir na equipe
-      study_template:
-        study_type: Tipo de estudo
-        professional: Profissional
-        deliverable_name: Entregável
-        man_hours_default: Horas-homem
-        field_days_default: Diárias de campo

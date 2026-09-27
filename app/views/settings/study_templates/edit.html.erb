@@ -1,6 +1,0 @@
-<div class="p-8">
-  <%= render "settings/form_header", section: "Templates de Estudo", back_path: settings_study_templates_path,
-        title: "Editar template", subtitle: [ @study_template.professional&.name, @study_template.study_type&.name ].compact.join(" · ") %>
-
-  <%= render "form", study_template: @study_template %>
-</div>

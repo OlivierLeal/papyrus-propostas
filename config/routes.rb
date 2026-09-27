@@ -60,7 +60,6 @@ Rails.application.routes.draw do
     root to: "dashboard#index"
     resources :study_types, except: :show
     resources :professionals, except: :show
-    resources :study_templates, except: :show
   end
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 

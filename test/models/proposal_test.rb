@@ -18,75 +18,101 @@ class ProposalTest < ActiveSupport::TestCase
     assert_not proposal.valid?
   end
 
-  test "build_from_template! copies the default hours from study_templates" do
+  test "build_base_team! só coloca a equipe fixa (always_included), com o cargo como entregável e 0h" do
     proposal = @conversation.create_proposal!(status: "draft")
 
-    pricing = proposal.build_from_template!
+    pricing = proposal.build_base_team!
 
-    coordenacao = pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral")
-    fauna = pricing.proposal_professionals.find_by(deliverable_name: "Diagnóstico de fauna e flora")
-
-    assert_equal 40, coordenacao.man_hours
-    assert_equal 0, coordenacao.field_days
-    assert_equal 30, fauna.man_hours
-    assert_equal 48, fauna.field_days
-    assert pricing.total_value.positive?
+    assert_equal [ professionals(:diretora) ], pricing.proposal_professionals.map(&:professional)
+    line = pricing.proposal_professionals.sole
+    assert_equal "Diretora de Negócios", line.deliverable_name
+    assert_equal 0, line.man_hours
+    assert_equal 0, line.field_days
   end
 
-  test "build_with_ai_suggested_team! only accepts lines matching the study_templates menu" do
+  # Sem study_templates (2026-09): a IA monta a equipe direto do cadastro de profissionais, em
+  # qualquer tipo de estudo — escolhe quem entra, o entregável e o esforço (HH + diárias).
+  test "build_with_ai_suggested_team! monta a equipe a partir do cadastro de profissionais" do
     proposal = @conversation.create_proposal!(status: "draft")
-
     ai_response = {
       linhas: [
         { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 },
-        { professional_id: 999_999, deliverable_name: "Profissional inventado", man_hours: 100, field_days: 100 }
+        { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 6 }
       ],
       documentos_separados: false
     }.to_json
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    # 2, não 1: a diretora (always_included) entra sozinha via ensure_always_included_lines!,
-    # mesmo não estando nas linhas que a IA sugeriu.
-    assert_equal 2, pricing.proposal_professionals.count
-    assert_equal 60, pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").man_hours
+    biologa = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
+    assert_equal "Diagnóstico de Fauna e Flora", biologa.deliverable_name
+    assert_equal 40, biologa.man_hours
+    assert_equal 6, biologa.field_days
+    assert_equal 60, pricing.proposal_professionals.find_by(professional: professionals(:coordenador)).man_hours
+    # + a diretora (always_included), que entra sozinha mesmo sem linha da IA.
+    assert_equal 3, pricing.proposal_professionals.count
+    assert pricing.total_value.positive?
     assert_equal "combined", proposal.reload.document_split
+  end
+
+  test "build_with_ai_suggested_team! lista a equipe fixa e o quadro completo no prompt" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    prompt = nil
+    original = @conversation.method(:ask_internally)
+    @conversation.define_singleton_method(:ask_internally) { |text, **opts| prompt = text; original.call(text, **opts) }
+    proposal.conversation = @conversation
+
+    stub_ai_complete({ linhas: [], documentos_separados: false }.to_json) { proposal.build_with_ai_suggested_team! }
+
+    assert_includes prompt, "EQUIPE FIXA"
+    assert_includes prompt, professionals(:diretora).name
+    assert_includes prompt, professionals(:biologa).name
+    assert_includes prompt, professionals(:biologa).specialties
+    assert_not_includes prompt, professionals(:inativo).name
+    assert_includes prompt, "EIA-RIMA"
   end
 
   # A linha fora do cadastro continua fora da precificação, mas para de sumir em silêncio: ou
   # falta cadastro, ou a IA inventou, e as duas coisas são informação para o consultor.
-  test "build_with_ai_suggested_team! sinaliza a linha que ficou fora do cadastro" do
+  test "build_with_ai_suggested_team! descarta e sinaliza profissional inexistente ou inativo" do
     proposal = @conversation.create_proposal!(status: "draft")
-
     ai_response = {
       linhas: [
-        { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 },
-        { professional_id: 999_999, deliverable_name: "Arqueólogo sênior", man_hours: 100, field_days: 100 }
+        { professional_id: 999_999, deliverable_name: "Arqueólogo sênior", man_hours: 100, field_days: 10 },
+        { professional_id: professionals(:inativo).id, deliverable_name: "Meio Físico", man_hours: 10, field_days: 0 }
       ],
       documentos_separados: false
     }.to_json
 
-    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    flag = @conversation.project_findings.find_by(nature: "sugestao")
-    assert_includes flag.value, "fora do cadastro"
-    assert_includes flag.value, "Arqueólogo sênior"
-    assert_equal "sistema", flag.source_kind
+    assert_not pricing.proposal_professionals.exists?(professional: professionals(:inativo))
+    flags = @conversation.project_findings.where(nature: "sugestao").pluck(:value)
+    assert_equal 2, flags.size
+    assert flags.any? { |value| value.include?("Arqueólogo sênior") && value.include?("fora do cadastro") }
+    assert_equal "sistema", @conversation.project_findings.find_by(nature: "sugestao").source_kind
+  end
+
+  test "build_with_ai_suggested_team! ignora linha duplicada (mesmo profissional e entregável)" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    line = { professional_id: professionals(:biologa).id, deliverable_name: "Fauna", man_hours: 10, field_days: 1 }
+    ai_response = { linhas: [ line, line.merge(deliverable_name: " fauna ") ], documentos_separados: false }.to_json
+
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    assert_equal 1, pricing.proposal_professionals.where(professional: professionals(:biologa)).count
   end
 
   test "build_with_ai_suggested_team! sets document_split to separated when the AI flags it" do
     proposal = @conversation.create_proposal!(status: "draft")
 
-    ai_response = { linhas: [], documentos_separados: true }.to_json
-
-    stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+    stub_ai_complete({ linhas: [], documentos_separados: true }.to_json) { proposal.build_with_ai_suggested_team! }
 
     assert_equal "separated", proposal.reload.document_split
   end
 
-  test "build_with_ai_suggested_team! includes an always_included professional even with all-zero default hours and no AI line for them" do
+  test "build_with_ai_suggested_team! inclui a equipe fixa mesmo quando a IA não sugere linha pra ela" do
     proposal = @conversation.create_proposal!(status: "draft")
-
     ai_response = {
       linhas: [ { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 } ],
       documentos_separados: false
@@ -95,166 +121,107 @@ class ProposalTest < ActiveSupport::TestCase
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
     diretora_line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
-    assert diretora_line.present?
     assert_equal 0, diretora_line.man_hours
     assert_equal 0, diretora_line.field_days
   end
 
-  test "build_with_ai_suggested_team! keeps the AI's real hours for an always_included professional instead of overwriting with the zero default" do
+  test "build_with_ai_suggested_team! usa o esforço e o entregável que a IA sugeriu para a equipe fixa" do
     proposal = @conversation.create_proposal!(status: "draft")
-
     ai_response = {
-      linhas: [ { professional_id: professionals(:diretora).id, deliverable_name: "Direção de Negócios", man_hours: 15, field_days: 0 } ],
+      linhas: [ { professional_id: professionals(:diretora).id, deliverable_name: "Direção de Negócios", man_hours: 15, field_days: 1 } ],
       documentos_separados: false
     }.to_json
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    assert_equal 1, pricing.proposal_professionals.where(professional: professionals(:diretora)).count
-    assert_equal 15, pricing.proposal_professionals.find_by(professional: professionals(:diretora)).man_hours
+    line = pricing.proposal_professionals.sole
+    assert_equal "Direção de Negócios", line.deliverable_name
+    assert_equal 15, line.man_hours
+    assert_equal 1, line.field_days
   end
 
-  # BUG achado comparando uma proposta EMI gerada pelo sistema com a PTC real aprovada pela
-  # Papyrus: nem Charlene nem Ricardo apareciam. Causa: study_type sem NENHUM study_template
-  # cadastrado (RAP, Relatório Técnico, PEA, EMI, hoje — ver CLAUDE.md seção 11.1) fazia
-  # build_with_ai_suggested_team! retornar cedo (templates.empty?), sem chamar
-  # ensure_always_included_lines! nunca.
-  test "build_with_ai_suggested_team! includes always_included professionals even when the study_type has no study_templates at all" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
+  test "build_with_ai_suggested_team! funciona sem nenhum tipo de estudo (acompanhamento)" do
+    conversation = Conversation.create!(user: users(:one), client_name: "Acompanhamento", status: "reviewing")
     proposal = conversation.create_proposal!(status: "draft")
-
-    pricing = stub_ai_complete({ linhas: [], documentos_separados: false }.to_json) { proposal.build_with_ai_suggested_team! }
-
-    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora))
-  end
-
-  # Tipo de estudo SEM study_templates: a IA passa a mapear o time a partir do cadastro completo
-  # de profissionais (cargo/especialidades) em vez de a proposta sair só com a Diretoria — pedido
-  # da Papyrus ("cadastrar um template por tipo de estudo é difícil").
-  test "build_with_ai_suggested_team! sem study_templates mapeia a equipe a partir do cadastro completo" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
-    proposal = conversation.create_proposal!(status: "draft")
-
     ai_response = {
-      linhas: [
-        { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 },
-        { professional_id: professionals(:inativo).id, deliverable_name: "Meio Físico", man_hours: 10, field_days: 0 }
-      ],
-      documentos_separados: true
+      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Monitoramento de fauna", man_hours: 20, field_days: 4 } ],
+      documentos_separados: false
     }.to_json
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    linha = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
-    assert_equal "Diagnóstico de Fauna e Flora", linha.deliverable_name
-    assert_equal 40, linha.man_hours
-    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora)), "a Diretoria continua entrando sozinha"
-    assert_not pricing.proposal_professionals.exists?(professional: professionals(:inativo)), "profissional inativo não entra"
-    assert_equal "separated", proposal.reload.document_split
-    assert_includes conversation.project_findings.where(nature: "sugestao").last.value, "fora do cadastro"
+    assert pricing.proposal_professionals.exists?(professional: professionals(:biologa))
+    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora))
+  end
+
+  test "build_with_ai_suggested_team! cai na equipe base quando a resposta não é JSON" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    pricing = stub_ai_complete("isso não é json") { proposal.build_with_ai_suggested_team! }
+
+    assert_equal [ professionals(:diretora) ], pricing.proposal_professionals.map(&:professional)
+  end
+
+  test "build_with_ai_suggested_team! cai na equipe base quando a chamada de IA levanta" do
+    proposal = @conversation.create_proposal!(status: "draft")
+
+    pricing = stub_ai_error { proposal.build_with_ai_suggested_team! }
+
+    assert_equal [ professionals(:diretora) ], pricing.proposal_professionals.map(&:professional)
   end
 
   # Achado em produção: GenerateProposalDocumentTool sempre chama ensure_proposal!(ai_suggestions:
-  # false) — gerar a proposta direto pelo chat, sem passar pela Tela de Precificação, deixava a
-  # equipe pra sempre só com Diretoria/Coordenação pra qualquer tipo de estudo sem study_templates
-  # (a maioria). suggest_team_if_missing! (via SuggestTeamJob, em background) cobre esse buraco.
-  test "suggest_team_if_missing! fills the team from the roster when only always_included lines exist" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
-    proposal = conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+  # false) — gerar a proposta direto pelo chat deixava a equipe só com Diretoria/Coordenação a 0h.
+  # suggest_team_if_missing! (via SuggestTeamJob, em background) completa a equipe.
+  test "suggest_team_if_missing! completa a equipe e reaproveita a linha-placeholder da equipe fixa" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_base_team!
     ai_response = {
-      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 24 } ],
+      linhas: [
+        { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna e Flora", man_hours: 40, field_days: 6 },
+        { professional_id: professionals(:diretora).id, deliverable_name: "Direção de Negócios", man_hours: 8, field_days: 0 }
+      ],
       documentos_separados: true
     }.to_json
 
     stub_ai_complete(ai_response) { proposal.suggest_team_if_missing! }
 
     pricing = proposal.project_pricing.reload
-    linha = pricing.proposal_professionals.find_by(professional: professionals(:biologa))
-    assert_equal 40, linha.man_hours
-    assert pricing.proposal_professionals.exists?(professional: professionals(:diretora)), "a Diretoria (já presente) continua lá"
+    assert_equal 40, pricing.proposal_professionals.find_by(professional: professionals(:biologa)).man_hours
+    diretora = pricing.proposal_professionals.where(professional: professionals(:diretora))
+    assert_equal 1, diretora.count, "substitui o placeholder em vez de duplicar a diretora"
+    assert_equal [ "Direção de Negócios", 8 ], [ diretora.sole.deliverable_name, diretora.sole.man_hours ]
     assert_equal "separated", proposal.reload.document_split
   end
 
-  test "suggest_team_if_missing! does nothing when a non-always_included line already exists" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
-    proposal = conversation.create_proposal!(status: "draft")
-    pricing = proposal.build_from_template!
+  test "suggest_team_if_missing! não faz nada quando já existe linha além da equipe fixa" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    pricing = proposal.build_base_team!
     pricing.proposal_professionals.create!(professional: professionals(:biologa), deliverable_name: "Ajustado à mão", man_hours: 10, field_days: 0)
 
     assert_no_ai_calls { proposal.suggest_team_if_missing! }
   end
 
-  test "suggest_team_if_missing! does nothing for a study type that has study_templates (eia_rima)" do
+  test "suggest_team_if_missing! não faz nada quando o consultor já deu horas à equipe fixa" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    pricing = proposal.build_base_team!
+    pricing.proposal_professionals.sole.update!(man_hours: 5)
 
     assert_no_ai_calls { proposal.suggest_team_if_missing! }
   end
 
   test "suggest_team_if_missing! leaves the team untouched when the AI reply isn't valid JSON" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
-    proposal = conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal = @conversation.create_proposal!(status: "draft")
+    proposal.build_base_team!
 
     stub_ai_complete("isso não é json") { proposal.suggest_team_if_missing! }
 
-    pricing = proposal.project_pricing.reload
-    assert_not pricing.proposal_professionals.joins(:professional).where(professionals: { always_included: false }).exists?
-  end
-
-  test "build_from_template! includes always_included professionals even when the study_type has no study_templates at all" do
-    conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
-    proposal = conversation.create_proposal!(status: "draft")
-
-    pricing = proposal.build_from_template!
-
-    line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
-    assert line.present?
-    assert_equal "Diretora de Negócios", line.deliverable_name # role do professional, sem template pra saber o entregável
-    assert_equal 0, line.man_hours
-    assert_equal 0, line.field_days
-  end
-
-  test "build_from_template! includes an always_included professional even when their own template defaults to zero hours" do
-    proposal = @conversation.create_proposal!(status: "draft")
-
-    pricing = proposal.build_from_template!
-
-    diretora_line = pricing.proposal_professionals.find_by(professional: professionals(:diretora))
-    assert diretora_line.present?
-  end
-
-  test "build_with_ai_suggested_team! falls back to the template when the AI reply is not valid JSON" do
-    proposal = @conversation.create_proposal!(status: "draft")
-
-    pricing = stub_ai_complete("isso não é json") { proposal.build_with_ai_suggested_team! }
-
-    # 3 templates no menu (coordenação, fauna/flora, direção da diretora fixa).
-    assert_equal 3, pricing.proposal_professionals.count
-  end
-
-  test "build_with_ai_suggested_team! strips markdown fences before parsing" do
-    proposal = @conversation.create_proposal!(status: "draft")
-    ai_response = "```json\n" + { linhas: [], documentos_separados: false }.to_json + "\n```"
-
-    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
-
-    # Nenhuma linha válida vinda da IA (vazio) cai no fallback do template (3 templates no menu).
-    assert_equal 3, pricing.proposal_professionals.count
-  end
-
-  test "build_with_ai_suggested_team! falls back to the template when the AI call itself raises" do
-    proposal = @conversation.create_proposal!(status: "draft")
-
-    pricing = stub_ai_error { proposal.build_with_ai_suggested_team! }
-
-    assert_equal 3, pricing.proposal_professionals.count
+    assert_equal [ professionals(:diretora) ], proposal.project_pricing.reload.proposal_professionals.map(&:professional)
   end
 
   test "build_with_ai_suggested_schedule! persists servico items in the order suggested, grouped by phase" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = {
       cronograma_servico: [
         { fase: "Mobilização", atividade: "Assinatura do Contrato", periodo_inicio: 1, duracao: 1, marco: false },
@@ -277,7 +244,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! only fills cronograma_implantacao when the AI provides it" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = {
       cronograma_servico: [],
       cronograma_implantacao: [
@@ -294,7 +261,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! skips an incomplete line instead of raising" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = {
       cronograma_servico: [
         { fase: "", atividade: "Sem fase", periodo_inicio: 1, duracao: 1, marco: false },
@@ -310,7 +277,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! leaves the proposal without a schedule when the AI reply is not valid JSON, without raising" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
 
     stub_ai_complete("isso não é json") { proposal.build_with_ai_suggested_schedule! }
 
@@ -319,7 +286,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! does not raise and leaves no schedule when the AI call itself errors out" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
 
     stub_ai_error { proposal.build_with_ai_suggested_schedule! }
 
@@ -328,7 +295,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! never sets the start dates — those are always the consultant's" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = { cronograma_servico: [ { fase: "Mobilização", atividade: "X", periodo_inicio: 1, duracao: 1, marco: false } ] }.to_json
 
     stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
@@ -339,7 +306,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! stores the elected infographic marcos, ordered and capped at 6" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = {
       cronograma_servico: [ { fase: "Mobilização", atividade: "X", periodo_inicio: 1, duracao: 1, marco: false } ],
       marcos_infografico: [
@@ -367,7 +334,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "build_with_ai_suggested_schedule! leaves schedule_key_points empty when the AI omits marcos_infografico" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     ai_response = { cronograma_servico: [ { fase: "Mobilização", atividade: "X", periodo_inicio: 1, duracao: 1, marco: false } ] }.to_json
 
     stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_schedule! }
@@ -380,7 +347,7 @@ class ProposalTest < ActiveSupport::TestCase
   # schedule_items, nunca escreve. regenerate_schedule! é o único caminho que de fato reconstrói.
   test "regenerate_schedule! replaces the existing schedule instead of appending to it" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     pricing = proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Antigo", activity_name: "Fase de 12 meses",
       start_period: 1, duration_periods: 52, position: 0)
@@ -400,7 +367,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "regenerate_schedule! also replaces schedule_key_points, not just the items" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     pricing = proposal.project_pricing
     pricing.update!(schedule_key_points: [ { "nome" => "Marco antigo", "periodo" => 20 } ])
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Antigo", activity_name: "Fase de 12 meses",
@@ -418,7 +385,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "regenerate_schedule! leaves the previous schedule untouched when the AI reply isn't valid JSON" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     pricing = proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Antigo", activity_name: "Fase de 12 meses",
       start_period: 1, duration_periods: 52, position: 0)
@@ -430,7 +397,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "elect_schedule_key_points! picks the marcos from an already-built servico schedule, without touching the items" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     pricing = proposal.project_pricing
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Assinatura", start_period: 1, duration_periods: 1, position: 0)
     pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Protocolo", activity_name: "Protocolo no órgão", start_period: 8, duration_periods: 1, milestone: true, position: 1)
@@ -447,7 +414,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "elect_schedule_key_points! is a no-op when there is no servico schedule" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
 
     stub_ai_complete({ marcos_infografico: [ { nome: "X", periodo: 1 } ] }.to_json) { proposal.elect_schedule_key_points! }
 
@@ -456,7 +423,7 @@ class ProposalTest < ActiveSupport::TestCase
 
   test "default_schedule_key_points: seleciona deterministicamente até 6 marcos cronológicos" do
     proposal = @conversation.create_proposal!(status: "draft")
-    proposal.build_from_template!
+    proposal.build_base_team!
     pricing = proposal.project_pricing
 
     # Cria 8 itens com fases e marcos misturados

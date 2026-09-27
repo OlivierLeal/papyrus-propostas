@@ -1,5 +1,4 @@
 class StudyType < ApplicationRecord
-  has_many :study_templates, dependent: :destroy
   # Uma conversa pode ter N tipos de estudo (2026-09, ver conversation_study_types) —
   # restrict_with_error continua na tabela de junção: não dá pra apagar um tipo em uso em
   # NENHUMA proposta, mesma garantia de sempre.

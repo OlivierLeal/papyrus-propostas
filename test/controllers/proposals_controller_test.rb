@@ -60,8 +60,8 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
   end
 
   # 2026-09: zero tipos de estudo é um estado válido (proposta de acompanhamento) — deixou de
-  # bloquear "Avançar para Precificação" (CLAUDE.md seção 13). A equipe cai no roster livre
-  # (sem menu cadastrado), então precisa da IA pra sugerir — mesmo caminho de "sem study_templates".
+  # bloquear "Avançar para Precificação" (CLAUDE.md seção 13). A IA monta a equipe do cadastro
+  # de profissionais do mesmo jeito.
   test "create succeeds even when no study type was identified yet — proposta de acompanhamento" do
     reviewing = conversations(:reviewing_conversation)
     reviewing.study_types.clear

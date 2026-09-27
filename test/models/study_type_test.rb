@@ -33,8 +33,4 @@ class StudyTypeTest < ActiveSupport::TestCase
     assert_nil StudyType.match_ai_value("eai")
     assert_nil StudyType.match_ai_value("")
   end
-
-  test "has many study_templates" do
-    assert_includes study_types(:eia_rima).study_templates, study_templates(:coordenacao_eia_rima)
-  end
 end

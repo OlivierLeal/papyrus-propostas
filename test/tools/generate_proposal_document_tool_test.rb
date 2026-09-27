@@ -965,9 +965,9 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   end
 
   # Achado em produção: gerar a proposta direto pelo chat (ensure_proposal!(ai_suggestions:
-  # false)) deixava a equipe pra sempre só com Diretoria/Coordenação, pra qualquer tipo de estudo
-  # sem study_templates — parecia "a IA não mapeou a equipe". Ver Proposal#suggest_team_if_missing!.
-  test "enqueues SuggestTeamJob when the team only has always_included lines and there's no study_templates" do
+  # false)) deixava a equipe pra sempre só com Diretoria/Coordenação a 0h — parecia "a IA não
+  # mapeou a equipe". Ver Proposal#suggest_team_if_missing!.
+  test "enqueues SuggestTeamJob when the team only has the fixed members at 0h" do
     @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
       activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
     @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all

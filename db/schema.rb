@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -581,19 +581,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
-  create_table "study_templates", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "deliverable_name", null: false
-    t.decimal "field_days_default", precision: 8, scale: 2, default: "0.0", null: false
-    t.decimal "man_hours_default", precision: 8, scale: 2, default: "0.0", null: false
-    t.bigint "professional_id", null: false
-    t.bigint "study_type_id", null: false
-    t.datetime "updated_at", null: false
-    t.index ["professional_id"], name: "index_study_templates_on_professional_id"
-    t.index ["study_type_id", "professional_id", "deliverable_name"], name: "index_study_templates_on_type_professional_deliverable", unique: true
-    t.index ["study_type_id"], name: "index_study_templates_on_study_type_id"
-  end
-
   create_table "study_types", force: :cascade do |t|
     t.string "code", null: false
     t.datetime "created_at", null: false
@@ -669,7 +656,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
   add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
-  add_foreign_key "study_templates", "professionals"
-  add_foreign_key "study_templates", "study_types"
   add_foreign_key "tool_calls", "messages"
 end

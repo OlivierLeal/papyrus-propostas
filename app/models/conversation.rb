@@ -376,10 +376,9 @@ class Conversation < ApplicationRecord
   # 32/33/34: "tool_use ids were found without tool_result blocks", e o turno inteiro falhava
   # depois, "toolResult blocks... exceeds toolUse blocks", sem o consultor ver a resposta da IA
   # nem o arquivo gerado aparecer no chat, mesmo quando o .docx saía certo por trás). Com
-  # ai_suggestions: false, a equipe vem do fallback determinístico de sempre
-  # (`build_from_template!`, sem IA, mesmo caminho que já era usado quando a sugestão falhava) e
-  # o cronograma fica de fora — GenerateProposalDocumentTool#ensure_schedule_suggested! (chamado
-  # logo depois) enfileira a sugestão de cronograma em background sozinho. Quem chama pelo
+  # ai_suggestions: false, a equipe nasce mínima (`build_base_team!`, só Diretoria/Coordenação,
+  # sem IA) e o cronograma fica de fora — GenerateProposalDocumentTool (chamado logo depois)
+  # enfileira a sugestão de equipe e de cronograma em background sozinho. Quem chama pelo
   # controller (`ProposalsController`, botão "Avançar para Precificação", fora de qualquer
   # `complete()` em andamento) continua com o padrão `true` — ali é seguro, e o consultor espera
   # ver a equipe já sugerida pela IA ao abrir a Tela de Precificação.
@@ -401,7 +400,7 @@ class Conversation < ApplicationRecord
       new_proposal.build_with_ai_suggested_team!
       new_proposal.build_with_ai_suggested_schedule!
     else
-      new_proposal.build_from_template!
+      new_proposal.build_base_team!
     end
     # Só Ruby + HTTP (Logistics::DestinationResolver/MapboxDirections), nunca IA — sem o problema
     # de reentrância de #complete que faz equipe/cronograma precisarem de rescue próprio/job em

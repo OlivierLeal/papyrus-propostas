@@ -181,87 +181,70 @@ class Proposal < ApplicationRecord
     past_rows << [ curr_rev_num, curr_desc, Date.current.strftime("%d/%m/%Y") ]
   end
 
-  # Pede pra IA sugerir horas por profissional/entregável com base em tudo que já foi
-  # extraído do ET, do TR (quando houver) e dos documentos complementares desta conversa
-  # (CLAUDE.md seção 5).
-  # A sugestão é restrita ao "menu" de profissionais/entregáveis do study_templates —
-  # a IA nunca pode inventar um profissional ou entregável que não exista no sistema.
-  # Se a IA falhar ou não sugerir nada válido, cai no template padrão como segurança.
+  # A IA monta a equipe a partir do CADASTRO COMPLETO de profissionais ativos (cargo +
+  # habilitação), cruzando com tudo que já foi extraído do ET, do TR (quando houver) e dos
+  # complementares desta conversa (CLAUDE.md seção 5). Não existe mais "menu" por tipo de estudo
+  # (study_templates saiu em 2026-09 — a Papyrus não ia manter esse cadastro): a IA escolhe QUEM
+  # entra, O QUE cada um entrega e o esforço (HH + diárias), inclusive da Diretoria/Coordenação.
+  # Continua restrita a professional_id real e ativo — nunca inventa gente.
+  # Falha/resposta vazia cai em build_base_team! (só Diretoria/Coordenação, 0h).
   def build_with_ai_suggested_team!
-    templates = study_templates_menu
     pricing = create_project_pricing!
-
-    if templates.empty?
-      # Sem menu de horas cadastrado pro(s) tipo(s) de estudo desta conversa (só eia_rima tem
-      # hoje) — ou sem NENHUM tipo de estudo selecionado (proposta de acompanhamento) — a IA
-      # mapeia o time a partir do CADASTRO COMPLETO de profissionais (cargo + especialidades) contra o
-      # escopo desta conversa — pedido da Papyrus, "cadastrar um template por tipo de estudo é
-      # difícil". Continua restrito a professional_id real e ativo (a IA nunca inventa gente);
-      # como não há menu de entregável aqui, é a IA quem nomeia o entregável de cada linha.
-      # Falha/resposta vazia cai no rescue -> build_from_template! (só Diretoria/Coordenação),
-      # exatamente o que já saía antes desta mudança.
-      suggestion = fetch_ai_roster_suggestion
-      apply_roster_lines!(pricing, Array(suggestion["linhas"]))
-      ensure_always_included_lines!(pricing, templates)
-      update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
-      return finalize!(pricing)
-    end
-
-    suggestion = fetch_ai_suggestion(templates)
-    apply_lines!(pricing, Array(suggestion["linhas"]), templates)
-    apply_lines!(pricing, template_fallback_lines(templates), templates) if pricing.proposal_professionals.none?
-    ensure_always_included_lines!(pricing, templates)
+    suggestion = fetch_ai_team_suggestion
+    apply_team_lines!(pricing, Array(suggestion["linhas"]))
+    ensure_always_included_lines!(pricing)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
 
     finalize!(pricing)
   rescue StandardError => e
     Rails.logger.error("build_with_ai_suggested_team! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
     project_pricing&.destroy
-    build_from_template!
+    build_base_team!
   end
 
-  # Copia o template padrão direto, sem envolver a IA — usado como fallback de segurança.
-  def build_from_template!
-    templates = study_templates_menu
+  # Equipe mínima, sem IA: só os `always_included` (Diretoria/Coordenação) com 0h. Fallback de
+  # segurança e o que `Conversation#ensure_proposal!(ai_suggestions: false)` usa de dentro de
+  # tool call (IA síncrona ali reentraria `Conversation#complete`) — o resto da equipe vem depois,
+  # em background, por `suggest_team_if_missing!` (SuggestTeamJob).
+  def build_base_team!
     pricing = create_project_pricing!
-    apply_lines!(pricing, template_fallback_lines(templates), templates)
-    ensure_always_included_lines!(pricing, templates)
+    ensure_always_included_lines!(pricing)
     finalize!(pricing)
   end
 
-  # Preenche a equipe com a sugestão da IA quando a proposta ainda só tem os `always_included`
-  # (Diretoria/Coordenação) — o estado que `build_from_template!` deixa sozinho pra qualquer tipo
-  # de estudo SEM `study_templates` cadastrado (a maioria — só `eia_rima` tem hoje). Achado em
-  # produção: `GenerateProposalDocumentTool#execute` sempre chama `ensure_proposal!(ai_suggestions:
-  # false)` (nunca a IA síncrono, por reentrância — ver o comentário de `ensure_proposal!` em
-  # conversation.rb), então gerar a proposta direto pelo chat, sem passar pela Tela de
-  # Precificação (que usa `ai_suggestions: true`), deixava a equipe SEMPRE vazia — só Diretoria/
-  # Coordenação a 0h — pra qualquer estudo sem template, e o consultor via isso como "a equipe não
-  # foi mapeada".
+  # Completa a equipe com a sugestão da IA quando a proposta ainda só tem os `always_included`
+  # sem esforço nenhum — o estado que `build_base_team!` deixa. Achado em produção: gerar a
+  # proposta direto pelo chat (`GenerateProposalDocumentTool` → `ensure_proposal!(ai_suggestions:
+  # false)`) sem passar pela Tela de Precificação deixava a equipe só com Diretoria/Coordenação a
+  # 0h, e o consultor via isso como "a equipe não foi mapeada".
   #
-  # Idempotente e seguro: só age quando NENHUMA linha além dos `always_included` existe ainda —
-  # nunca reescreve o que a IA já sugeriu antes, nem o que o consultor ajustou na Tela de
-  # Precificação. Estudo COM `study_templates` (eia_rima) nunca entra aqui: `build_from_template!`
-  # já deixa as linhas reais do template (horas padrão, não vazio) — não é o buraco que isto
-  # cobre.
-  #
-  # Roda em BACKGROUND (SuggestTeamJob), mesmo motivo de sempre: esta lógica é acionada de dentro
-  # da tool call de `generate_proposal_document`, e uma chamada de IA síncrona ali reentraria
-  # `Conversation#complete`/`#ask_internally` (ver `regenerate_schedule!`/CLAUDE.md seção 8).
+  # Idempotente e seguro: não age se já existe qualquer linha além dos fixos, nem se o consultor
+  # já deu horas/diárias a um fixo — nunca reescreve o que a IA sugeriu antes nem o que o
+  # consultor ajustou. Roda em BACKGROUND (SuggestTeamJob), nunca síncrono dentro da tool call.
   def suggest_team_if_missing!
     pricing = project_pricing
     return unless pricing
-    return if study_templates_menu.present?
-    return if pricing.proposal_professionals.joins(:professional).where(professionals: { always_included: false }).exists?
+    return unless team_untouched?(pricing)
 
-    suggestion = fetch_ai_roster_suggestion
+    suggestion = fetch_ai_team_suggestion
     return if suggestion.blank?
 
-    apply_roster_lines!(pricing, Array(suggestion["linhas"]))
+    apply_team_lines!(pricing, Array(suggestion["linhas"]))
+    ensure_always_included_lines!(pricing)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
     pricing.recalculate!
   rescue StandardError => e
     Rails.logger.error("suggest_team_if_missing! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
+  end
+
+  # Equipe no estado de `build_base_team!`: só os fixos, todos sem esforço. Usado por
+  # GenerateProposalDocumentTool#ensure_team_background_work! pra decidir se enfileira
+  # SuggestTeamJob, e pelo próprio `suggest_team_if_missing!`.
+  def team_untouched?(pricing = project_pricing)
+    return false unless pricing
+
+    lines = pricing.proposal_professionals.includes(:professional).to_a
+    lines.all? { |line| line.professional.always_included && line.man_hours.zero? && line.field_days.zero? }
   end
 
   # Mesmo mecanismo de `with_schedule_lock`, namespace PRÓPRIO (classid diferente) — serializa
@@ -307,7 +290,7 @@ class Proposal < ApplicationRecord
   # Sugere fases/atividades do cronograma a partir do que já foi extraído do ET/TR nesta
   # conversa (CLAUDE.md seção 8). Diferente da equipe técnica, não existe "menu" de fases por
   # tipo de estudo — é conteúdo livre, então não passa por catálogo/apply_lines!, só parse +
-  # persistência direta. Chamado depois de build_with_ai_suggested_team!/build_from_template!
+  # persistência direta. Chamado depois de build_with_ai_suggested_team!/build_base_team!
   # (precisa de project_pricing já criado).
   #
   # A IA nunca sugere a DATA de início (schedule_*_start_date) — isso é sempre o consultor quem
@@ -445,14 +428,6 @@ class Proposal < ApplicationRecord
     end
   end
 
-  # Usado por GenerateProposalDocumentTool#ensure_team_background_work! pra decidir se vale
-  # enfileirar SuggestTeamJob — só quando NÃO há study_templates cadastrado pro(s) tipo(s) de
-  # estudo desta conversa (eia_rima já sai de build_from_template! com linhas reais, não com o
-  # "buraco" que SuggestTeamJob cobre).
-  def study_templates_menu_empty?
-    study_templates_menu.empty?
-  end
-
   private
     def standard_filename_base(kind)
       partes = [ conversation.client_name, ato_licenciamento, nome_projeto ]
@@ -553,35 +528,12 @@ class Proposal < ApplicationRecord
       pricing
     end
 
-    # Menu de horas pra sugestão de equipe (CLAUDE.md seção 5/13) — união dos study_templates de
-    # TODOS os tipos de estudo desta conversa (2026-09; antes era só `conversation.study_type.
-    # study_templates`, 1 tipo só). Dedup por [professional_id, deliverable_name]: se dois
-    # estudos oferecerem a MESMA linha de menu (mesmo profissional entregando a mesma coisa), ela
-    # entra uma vez só, não duplicada — sem rastrear de qual estudo veio (mesmo princípio já
-    # usado pros always_included). Zero estudos, ou só estudos sem template cadastrado (ex.:
-    # "Acompanhamento"), devolve [] — cai no mesmo caminho "roster livre" de sempre.
-    def study_templates_menu
-      conversation.study_types.flat_map { |study_type| study_type.study_templates.includes(:professional).to_a }
-        .uniq { |template| [ template.professional_id, template.deliverable_name ] }
-    end
-
-    # "o tipo de estudo "EIA-RIMA"" / "os tipos de estudo "EIA-RIMA" e "Relatório Técnico"" — usado
-    # só quando `study_templates_menu` NÃO está vazio (suggestion_prompt), então há sempre ao
-    # menos 1 tipo selecionado aqui.
-    def study_types_menu_label
+    # "Tipo(s) de estudo identificado(s)" pro prompt de equipe — contexto, não restrição.
+    def study_types_context
       names = conversation.study_types.order(:name).pluck(:name)
-      names.size > 1 ? "os tipos de estudo #{names.map { |n| "\"#{n}\"" }.join(' e ')}" : "o tipo de estudo \"#{names.first}\""
-    end
+      return "Nenhum tipo de estudo específico foi associado (proposta de acompanhamento/assessoria)." if names.empty?
 
-    # Frase de abertura do roster_suggestion_prompt (caminho "sem menu cadastrado") — cobre os 3
-    # jeitos de chegar aqui: zero tipos de estudo (acompanhamento), 1 tipo sem study_templates, ou
-    # vários tipos, nenhum deles com study_templates.
-    def study_types_without_menu_sentence
-      names = conversation.study_types.order(:name).pluck(:name)
-      return "Esta proposta não tem um tipo de estudo específico associado (é uma proposta de acompanhamento/assessoria) —" if names.empty?
-      return "O tipo de estudo \"#{names.first}\" não tem um modelo de equipe pré-cadastrado —" if names.size == 1
-
-      "Os tipos de estudo #{names.map { |n| "\"#{n}\"" }.join(' e ')} não têm um modelo de equipe pré-cadastrado —"
+      "Tipo(s) de estudo desta proposta: #{names.join(', ')}."
     end
 
     # SETOR derivado (sem cadastro novo): Diretoria = always_included com "diretor" no cargo;
@@ -597,92 +549,48 @@ class Proposal < ApplicationRecord
       { diretoria: "Diretoria", gestao: "Gestão", execucao: "Execução" }.fetch(docx_team_sector(professional))
     end
 
-    def fetch_ai_suggestion(templates)
-      conversation.ask_internally(suggestion_prompt(templates), hide_response: true)
+    # Registra a busca no acervo quando há algo indexado (mesmo padrão de
+    # fetch_ai_schedule_suggestion) — a IA pode ver como a Papyrus montou a equipe em projetos
+    # parecidos antes de sugerir.
+    def fetch_ai_team_suggestion
+      conversation.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
+      conversation.ask_internally(team_suggestion_prompt, hide_response: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
       AiJsonResponse.parse(response.content) || {}
     end
 
-    def suggestion_prompt(templates)
-      menu = templates.map do |t|
-        "- professional_id: #{t.professional_id} | #{t.professional.name} (#{t.professional.role}) | " \
-        "entregável: \"#{t.deliverable_name}\" | padrão: #{t.man_hours_default} HH, #{t.field_days_default} diária(s)"
-      end.join("\n")
-
-      <<~TEXT
-        Você é um assistente que sugere a composição de equipe para uma proposta de consultoria
-        ambiental, com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, e
-        documentos complementares, incluindo propostas anteriores semelhantes, se houver).
-
-        Profissionais e entregáveis DISPONÍVEIS para #{study_types_menu_label}
-        (não sugira nada fora desta lista — nunca invente professional_id ou entregável novo):
-        #{menu}
-
-        Para CADA item da lista acima, sugira o esforço necessário para este projeto específico,
-        considerando a complexidade, os diagnósticos exigidos e as demais informações já extraídas
-        nesta conversa, em duas quantidades:
-        #{EFFORT_UNITS_GUIDE}
-        Se um item não for necessário para este projeto, sugira 0 nas duas.
-
-        Além disso, releia o ET e o TR (quando houver) e diga se algum deles exige que a proposta
-        técnica e a proposta comercial sejam apresentadas como documentos/envelopes SEPARADOS
-        (comum em licitação pública) — se nenhum falar nada sobre isso, considere que NÃO exige
-        (documento único).
-
-        Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
-        neste formato:
-
-        {
-          "linhas": [
-            { "professional_id": 12, "deliverable_name": "Coordenação geral", "man_hours": 30, "field_days": 0 }
-          ],
-          "documentos_separados": false,
-          "justificativa_documentos_separados": "..."
-        }
-      TEXT
-    end
-
-    def fetch_ai_roster_suggestion
-      conversation.ask_internally(roster_suggestion_prompt, hide_response: true)
-      response = conversation.messages.where(role: "assistant").order(:created_at).last
-      AiJsonResponse.parse(response.content) || {}
-    end
-
-    # Usado quando o tipo de estudo NÃO tem study_templates: o "menu" passa a ser o cadastro
-    # inteiro de profissionais (menos os always_included, que o sistema junta sozinho depois).
-    # A IA escolhe QUEM e o QUE cada um faz nesta proposta a partir do cargo/especialidades;
-    # o nome do entregável é livre (não há catálogo de entregável por tipo de estudo).
-    def roster_suggestion_prompt
-      menu = Professional.active.where(always_included: false).order(:name).map do |professional|
+    def team_suggestion_prompt
+      describe = lambda do |professional|
         "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
-        "especialidades: #{professional.specialties.presence || '—'}"
-      end.join("\n")
+        "habilitação: #{professional.specialties.presence || '—'}"
+      end
+      active = Professional.active.order(:name).to_a
+      fixed, roster = active.partition(&:always_included)
 
       <<~TEXT
-        Você é um assistente que monta a composição de equipe para uma proposta de consultoria
-        ambiental, com base em tudo que já foi analisado nesta conversa (ET, TR quando houver,
-        documentos complementares e propostas anteriores semelhantes, se houver).
+        Você monta a composição de equipe de uma proposta de consultoria ambiental da Papyrus,
+        com base em tudo que já foi analisado nesta conversa (ET, TR quando houver, documentos
+        complementares e propostas anteriores semelhantes, se houver). #{study_types_context}
+        Se a ferramenta search_historical_archive estiver disponível, use-a pra ver como a Papyrus
+        dimensionou a equipe em projetos parecidos — referência, não cópia.
 
-        #{study_types_without_menu_sentence} então o menu abaixo é o QUADRO COMPLETO de
-        profissionais da Papyrus. Para
-        cada necessidade real deste projeto (diagnósticos exigidos, geoprocessamento/cartografia,
-        estudos temáticos, análise jurídica, arqueologia, etc.), escolha o profissional cujo
-        cargo/especialidades melhor atendem e diga o que ele entrega nesta proposta.
+        EQUIPE FIXA (entra em toda proposta — inclua uma linha para CADA um, com o papel e o
+        esforço dele neste projeto):
+        #{fixed.map(&describe).join("\n").presence || "(nenhum)"}
 
-        Profissionais disponíveis (não invente professional_id — use só os desta lista; a
-        Diretoria e a Coordenação são adicionadas automaticamente pelo sistema, não precisa
-        incluí-las):
-        #{menu}
+        QUADRO DE PROFISSIONAIS (escolha só quem o escopo realmente exige — diagnósticos,
+        geoprocessamento/cartografia, estudos temáticos, análise jurídica, arqueologia etc.):
+        #{roster.map(&describe).join("\n").presence || "(nenhum)"}
 
         Regras:
-        - Só inclua um profissional se o escopo desta proposta realmente exigir a atuação dele.
-        - "deliverable_name" é o entregável/frente de trabalho dele NESTA proposta (ex.:
-          "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Análise Jurídica").
-        - Sugira o esforço necessário para este projeto em duas quantidades:
-          #{EFFORT_UNITS_GUIDE}
-          Se não tiver base para estimar, use 0 nas duas (o consultor ajusta na Tela de
-          Precificação), mas ainda assim inclua a linha.
+        - Use só professional_id das listas acima — nunca invente.
+        - "deliverable_name" é o entregável/frente de trabalho da pessoa NESTA proposta (ex.:
+          "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Coordenação Geral").
         - Um mesmo profissional pode ter mais de uma linha se entregar frentes distintas.
+        - Esforço em duas quantidades:
+          #{EFFORT_UNITS_GUIDE}
+          Estime pelo porte e complexidade do escopo. Se realmente não houver base, use 0 (o
+          consultor ajusta na Tela de Precificação), mas ainda assim inclua a linha.
 
         Diga também se o ET ou o TR exige que a proposta técnica e a comercial sejam apresentadas
         como documentos/envelopes SEPARADOS (comum em licitação) — se nenhum falar nada, considere
@@ -831,117 +739,67 @@ class Proposal < ApplicationRecord
       end.sort_by { |marco| marco["periodo"] }.first(6)
     end
 
-    # Versão sem catálogo de entregável (tipo de estudo sem study_templates): valida só que o
-    # professional_id é de um profissional ativo e real; o deliverable_name é o que a IA nomeou.
-    def apply_roster_lines!(pricing, lines)
-      valid = Professional.active.where(always_included: false).index_by(&:id)
+    # Valida cada linha contra o cadastro (professional_id ativo e real; entregável não vazio) e
+    # descarta duplicata (mesmo profissional + mesmo entregável). Linha de um profissional FIXO
+    # reaproveita a linha-placeholder dele (papel como entregável, 0h — deixada por
+    # build_base_team!) em vez de criar outra ao lado.
+    def apply_team_lines!(pricing, lines)
+      valid = Professional.active.index_by(&:id)
+      seen = pricing.proposal_professionals.pluck(:professional_id, :deliverable_name)
+        .map { |id, name| [ id, name.to_s.strip.downcase ] }.to_set
 
       lines.each do |line|
         professional = valid[line["professional_id"].to_i]
         deliverable = line["deliverable_name"].to_s.strip
-        next flag_out_of_catalog(line, reason: :roster) if professional.nil? || deliverable.blank?
+        next flag_out_of_catalog(line) if professional.nil? || deliverable.blank?
 
-        man_hours = line["man_hours"].to_f
-        field_days = line["field_days"].to_f
+        key = [ professional.id, deliverable.downcase ]
+        next if seen.include?(key)
 
-        pricing.proposal_professionals.create!(
-          professional: professional, deliverable_name: deliverable,
-          man_hours: man_hours, field_days: field_days
-        )
-      end
-    end
+        seen << key
+        attrs = { deliverable_name: deliverable, man_hours: effort(line["man_hours"]), field_days: effort(line["field_days"]) }
+        placeholder = professional.always_included && pricing.proposal_professionals
+          .find_by(professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0)
 
-    def apply_lines!(pricing, lines, templates)
-      valid_templates = templates.index_by { |t| [ t.professional_id, t.deliverable_name.to_s.strip.downcase ] }
-
-      lines.each do |line|
-        key = [ line["professional_id"].to_i, line["deliverable_name"].to_s.strip.downcase ]
-        template = valid_templates[key]
-        # A regra determinística continua: linha fora do cadastro NÃO entra na precificação. O que
-        # mudou é que ela para de sumir em silêncio — a IA ter sugerido um profissional ou
-        # entregável que não existe é informação para o consultor (ou falta cadastro, ou a IA
-        # inventou), não um detalhe de implementação.
-        next flag_out_of_catalog(line) unless template
-
-        man_hours = line["man_hours"].to_f
-        field_days = line["field_days"].to_f
-        next if man_hours.zero? && field_days.zero?
-
-        pricing.proposal_professionals.create!(
-          professional: template.professional,
-          deliverable_name: template.deliverable_name,
-          man_hours: man_hours,
-          field_days: field_days
-        )
-      end
-    end
-
-    # Profissionais fixos (professionals.always_included — Diretoria/Coordenação da Papyrus)
-    # entram em TODA proposta, com as horas padrão do template como ponto de partida. apply_lines!
-    # pula linha com 0h nos dois campos (ver acima) e a IA pode simplesmente não sugerir a linha
-    # — nenhum dos dois casos pode fazer um fixo sumir da equipe, então a garantia é do sistema,
-    # não da sugestão da IA. O consultor ainda ajusta as horas depois, na Tela de Precificação.
-    #
-    # NÃO itera só sobre `templates`: um study_type sem NENHUM study_template cadastrado (RAP,
-    # Relatório Técnico, PEA, EMI, hoje — ver CLAUDE.md seção 11.1) tem `templates` vazio, e antes
-    # disso fazia o fixo sumir também nesses casos — achado comparando uma proposta EMI gerada
-    # pelo sistema com a PTC real aprovada pela Papyrus (nem Charlene/Ricardo apareciam). Por isso
-    # a fonte da verdade aqui é `Professional.always_included`, com o "role" como deliverable_name
-    # quando não há template pro study_type dessa proposta pra saber o nome do entregável.
-    def ensure_always_included_lines!(pricing, templates)
-      present = pricing.proposal_professionals.pluck(:professional_id, :deliverable_name).to_set
-      templates_by_professional = templates.group_by(&:professional_id)
-
-      Professional.active.always_included.find_each do |professional|
-        professional_templates = templates_by_professional[professional.id]
-
-        if professional_templates.present?
-          professional_templates.each do |template|
-            next if present.include?([ template.professional_id, template.deliverable_name ])
-
-            pricing.proposal_professionals.create!(
-              professional: template.professional,
-              deliverable_name: template.deliverable_name,
-              man_hours: template.man_hours_default,
-              field_days: template.field_days_default
-            )
-          end
+        if placeholder
+          placeholder.update!(attrs)
         else
-          deliverable_name = professional.role
-          next if present.include?([ professional.id, deliverable_name ])
-
-          pricing.proposal_professionals.create!(
-            professional: professional, deliverable_name: deliverable_name, man_hours: 0, field_days: 0
-          )
+          pricing.proposal_professionals.create!(attrs.merge(professional: professional))
         end
       end
     end
 
-    def flag_out_of_catalog(line, reason: :template)
+    def effort(value)
+      [ value.to_f, 0 ].max
+    end
+
+    # Profissionais fixos (professionals.always_included — Diretoria/Coordenação da Papyrus)
+    # entram em TODA proposta: a IA pode não sugerir a linha de um deles, e isso não pode fazer
+    # um fixo sumir da equipe — a garantia é do sistema, não da sugestão. Sem sugestão, entra com
+    # o cargo como entregável e 0h; o consultor ajusta na Tela de Precificação.
+    def ensure_always_included_lines!(pricing)
+      present = pricing.proposal_professionals.distinct.pluck(:professional_id).to_set
+
+      Professional.active.always_included.find_each do |professional|
+        next if present.include?(professional.id)
+
+        pricing.proposal_professionals.create!(
+          professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0
+        )
+      end
+    end
+
+    def flag_out_of_catalog(line)
       professional = Professional.find_by(id: line["professional_id"])
       descricao = [ professional&.name || "profissional ##{line['professional_id']}",
                     line["deliverable_name"].presence ].compact_blank.join(" — ")
-      motivo = reason == :roster ?
-        "A IA sugeriu este profissional para a equipe, mas o professional_id não existe ou está inativo no cadastro. Não entrou na precificação." :
-        "A IA sugeriu esta linha para a equipe, mas ela não existe nos modelos de horas cadastrados para o tipo de estudo. Não entrou na precificação."
 
       conversation.project_findings.create!(
         field: "outro", nature: "sugestao", source_kind: "sistema",
         value: "sugestão de equipe fora do cadastro: #{descricao}",
-        excerpt: motivo
+        excerpt: "A IA sugeriu este profissional para a equipe, mas o professional_id não existe ou está inativo no cadastro (ou veio sem entregável). Não entrou na precificação."
       )
     rescue ActiveRecord::RecordInvalid => e
       Rails.logger.warn("[Proposal] não consegui registrar sugestão fora do cadastro: #{e.message}")
-    end
-
-    def template_fallback_lines(templates)
-      templates.map do |t|
-        {
-          "professional_id" => t.professional_id,
-          "deliverable_name" => t.deliverable_name,
-          "man_hours" => t.man_hours_default,
-          "field_days" => t.field_days_default
-        }
-      end
     end
 end

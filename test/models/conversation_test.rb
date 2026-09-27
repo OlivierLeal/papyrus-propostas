@@ -152,17 +152,16 @@ class ConversationTest < ActiveSupport::TestCase
   # GenerateProposalDocumentTool sempre chama com ai_suggestions: false — essa criação acontece
   # DENTRO de uma tool call (já dentro de um Conversation#complete em andamento em produção), e
   # pedir sugestão de equipe/cronograma à IA agora reentraria complete() (achado ao vivo,
-  # conversas 32/33/34 — ver o comentário no método). Equipe cai no fallback determinístico de
-  # sempre (build_from_template!), cronograma fica de fora (quem cuida disso em background é
-  # GenerateProposalDocumentTool#ensure_schedule_suggested!, não este método).
-  test "ensure_proposal!(ai_suggestions: false) never calls the AI — team comes from the template, schedule stays empty" do
+  # conversas 32/33/34 — ver o comentário no método). Equipe nasce mínima (build_base_team!),
+  # cronograma fica de fora (quem cuida dos dois em background é GenerateProposalDocumentTool).
+  test "ensure_proposal!(ai_suggestions: false) never calls the AI — base team only, schedule stays empty" do
     conversation = conversations(:reviewing_conversation)
 
     proposal = stub_ai_error { conversation.ensure_proposal!(ai_suggestions: false) }
 
     assert proposal.present?
     assert_equal "draft", proposal.status
-    assert proposal.project_pricing.proposal_professionals.any?, "equipe deveria vir do template padrão"
+    assert proposal.project_pricing.proposal_professionals.any?, "equipe fixa deveria entrar"
     assert_equal 0, proposal.project_pricing.schedule_items.count
   end
 

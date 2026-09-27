@@ -682,7 +682,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     end
 
     # 2026-09, pedido do consultor: antes só o ET/TR (na criação da proposta, ver
-    # Proposal#build_with_ai_suggested_team!/#build_from_template!) ou a tela de Precificação/
+    # Proposal#build_with_ai_suggested_team!/#build_base_team!) ou a tela de Precificação/
     # Aprovação (ProposalsController#document_split_params) decidiam o formato — pedir a mudança
     # no CHAT não tinha nenhum efeito. Aceita alguns sinônimos tolerantemente (a IA já recebe a
     # instrução de mandar "separado"/"combinado" na descrição do parâmetro, mas nada garante que
@@ -816,17 +816,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     end
 
     # Achado em produção: gerar a proposta direto pelo chat (`ensure_proposal!(ai_suggestions:
-    # false)`, ver Conversation) deixa a equipe só com Diretoria/Coordenação pra qualquer tipo de
-    # estudo sem study_templates cadastrado — parecia "a IA não mapeou a equipe". Enfileira
-    # SuggestTeamJob (nunca a IA síncrona aqui, mesmo motivo do cronograma — reentrância de
-    # Conversation#complete) só quando ainda não há NENHUMA linha além dos always_included.
+    # false)`, ver Conversation) deixa a equipe só com Diretoria/Coordenação a 0h — parecia "a IA
+    # não mapeou a equipe". Enfileira SuggestTeamJob (nunca a IA síncrona aqui, mesmo motivo do
+    # cronograma — reentrância de Conversation#complete) só enquanto a equipe estiver nesse estado
+    # (Proposal#team_untouched?).
     # Idempotente: nunca reescreve o que já foi sugerido ou ajustado. Devolve `:team` (ou nil),
     # pra #schedule_message avisar o consultor.
     def ensure_team_background_work!
       pricing = @proposal.project_pricing
       return nil unless pricing
-      return nil unless @proposal.study_templates_menu_empty?
-      return nil if pricing.proposal_professionals.joins(:professional).where(professionals: { always_included: false }).exists?
+      return nil unless @proposal.team_untouched?(pricing)
 
       SuggestTeamJob.perform_later(@proposal.id)
       :team

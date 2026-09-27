@@ -7,7 +7,7 @@ class ProposalProfessionalsControllerTest < ActionDispatch::IntegrationTest
     @pricing = proposals(:priced_proposal).project_pricing
   end
 
-  test "create adds a line outside the study_templates menu and recalculates the total" do
+  test "create adds a line added by hand and recalculates the total" do
     assert_difference "@pricing.proposal_professionals.count", 1 do
       post conversation_proposal_proposal_professionals_path(@conversation), params: {
         proposal_professional: {

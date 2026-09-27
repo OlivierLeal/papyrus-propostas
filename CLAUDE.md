@@ -172,7 +172,7 @@ pro consultor B ler a mensagem do consultor A.
 **Configuração (admin, não muda por proposta):**
 - `professionals` — name, role, rate_man_hour (valor da hora-homem), rate_daily (valor da diária), registration, specialties, active
 - `study_types` — name, code, description (EIA-RIMA, EMI, Relatório Técnico, PEA, RAP...)
-- `study_templates` — study_type_id, professional_id, deliverable_name, man_hours_default, field_days_default (HH/diárias padrão copiadas para `proposal_professionals` no início; a taxa vem sempre atualizada de `professionals`)
+- ~~`study_templates`~~ — **removida em 2026-09-27** (ver seção 5, item 1): a Papyrus não ia manter um menu de equipe por tipo de estudo; a IA monta a equipe direto de `professionals`.
 
 **Geoespacial:**
 - `geospatial_results` — conversation_id, area_ha, perimeter_km, municipalities (jsonb), mata_atlantica (bool), unidade_conservacao (bool), terra_indigena (bool), quilombo (bool), watershed, map_image_url, polygon (geometry, PostGIS)
@@ -185,11 +185,13 @@ Relacionamentos principais: `users` 1—N `conversations`; `conversations` 1—N
 
 Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística, sobreposições geoespaciais.
 
-1. **Composição da equipe**: ao avançar da revisão para a precificação (`Proposal#build_with_ai_suggested_team!`), a IA sugere horas por profissional/entregável com base em tudo que já foi extraído do ET, do TR (quando houver) e dos documentos complementares nesta conversa (ver `conversation.ask_internally`). Dois caminhos, conforme o tipo de estudo ter ou não `study_templates` cadastrados:
-   - **Com `study_templates` (hoje só `eia_rima`):** a sugestão é **restrita ao "menu"** de profissionais × entregáveis já cadastrados para o tipo de estudo — a IA nunca inventa um `professional_id` ou `deliverable_name` novo; qualquer linha que não bata exatamente (por id + nome normalizado) com uma linha do menu é descartada e vira achado `sugestao`. Falha/nenhuma linha válida cai no fallback determinístico `Proposal#build_from_template!`, que copia as horas padrão (`man_hours_default`/`field_days_default`) direto do template.
-   - **Sem `study_templates` (2026-09, pedido da Papyrus):** o "menu" passa a ser `Professional.active` inteiro (menos os `always_included`), com cargo + especialidades, e a IA escolhe QUEM entra e o QUE cada um entrega nesta proposta (`roster_suggestion_prompt`/`apply_roster_lines!`). Continua sem inventar gente (`professional_id` tem que ser de profissional real e ativo — id inválido vira achado `sugestao`), mas o `deliverable_name` é livre (não há catálogo de entregável por tipo de estudo fora do `eia_rima`). Falha/JSON inválido cai no mesmo `rescue` → `build_from_template!` (só Diretoria/Coordenação).
-   - Em ambos os casos os `always_included` (Diretoria/Coordenação) entram sozinhos via `ensure_always_included_lines!`, e o consultor ajusta tudo na Tela de Precificação.
-2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas escritório/campo, mais adição/remoção de linhas fora do menu sugerido (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
+1. **Composição da equipe — a IA mapeia sozinha a partir do cadastro de profissionais** (`Proposal#build_with_ai_suggested_team!`, `team_suggestion_prompt`/`apply_team_lines!`). **`study_templates` foi removido em 2026-09-27** (pedido do consultor: "conhecendo meu cliente, eles não vão usar o study_template") — antes, `eia_rima` tinha um "menu" fixo de profissional × entregável e os demais tipos caíam num mapeamento livre; agora é UM caminho só, pra qualquer tipo de estudo (ou nenhum — acompanhamento):
+   - O prompt manda `Professional.active` inteiro com cargo + habilitação (`specialties`), separado em **EQUIPE FIXA** (`always_included`, Diretoria/Coordenação — a IA tem que dar uma linha pra cada, com papel e esforço reais) e **QUADRO** (a IA escolhe só quem o escopo exige). Tipo(s) de estudo entram como contexto, não restrição. Quando há acervo indexado, registra `SearchHistoricalArchiveTool` pra IA ver como a Papyrus dimensionou equipes parecidas (mesmo padrão do cronograma).
+   - A IA escolhe QUEM, o ENTREGÁVEL (livre) e o ESFORÇO (HH + diárias, `EFFORT_UNITS_GUIDE`). `professional_id` inexistente/inativo ou entregável vazio é descartado e vira achado `sugestao`; linha duplicada (mesmo profissional + entregável, sem diferenciar caixa/espaço) é ignorada.
+   - Os fixos que a IA não citar entram sozinhos (`ensure_always_included_lines!`, cargo como entregável, 0h). Falha/JSON inválido → `build_base_team!` (só os fixos, 0h — era `build_from_template!`).
+   - Pelo chat (`ensure_proposal!(ai_suggestions: false)`, sem IA síncrona por reentrância) a proposta nasce com `build_base_team!` e `SuggestTeamJob` completa em background enquanto `Proposal#team_untouched?` (só fixos, todos sem HH nem diária). Linha da IA pra um fixo SUBSTITUI a linha-placeholder dele (cargo, 0h) em vez de duplicar. Idempotente: qualquer linha fora dos fixos, ou esforço dado a um fixo, trava a sugestão.
+   - O consultor ajusta tudo na Tela de Precificação.
+2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas-homem/Diárias, mais adição/remoção de linhas (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
 3. **Cálculo** (`ProjectPricing#recalculate!` / `ProposalProfessional#recalculate_subtotal`):
    - `C1` = horas-homem × valor da hora-homem
    - `C2` = diárias × valor da diária
@@ -277,8 +279,7 @@ Substituiu tanto as duas taxas quanto o antigo campo único "Horas" (`hours_sync
 removido). Cadastro do profissional: `rate_man_hour` (valor da hora-homem) e `rate_daily` (valor
 da diária). Proposta/template: `man_hours`/`field_days` (e `*_default`) — HH de trabalho técnico e
 DIÁRIAS de campo (contagem de dias, nunca horas). Tela de Precificação com dois campos por linha
-("Horas-homem"/"Diárias"). Os dois prompts de equipe da IA (`suggestion_prompt`/
-`roster_suggestion_prompt`) explicam as unidades via `Proposal::EFFORT_UNITS_GUIDE` e pedem as
+("Horas-homem"/"Diárias"). O prompt de equipe da IA (`team_suggestion_prompt`) explica as unidades via `Proposal::EFFORT_UNITS_GUIDE` e pedem as
 chaves `man_hours`/`field_days`. `field_professionals_count` (logística) conta quem tem
 `field_days > 0`. Migração dos dados (`SwitchToManHoursAndDailyRates`): taxas renomeadas sem
 mudar valor; horas de escritório → HH direto; horas de campo → diárias (÷ 8, meia diária pra
@@ -1611,7 +1612,7 @@ A Papyrus trouxe um estudo propondo uma arquitetura de "motor de composição de
 
 O que é valioso mas depende de pré-requisitos que ainda não existem, nesta ordem:
 
-1. ~~Motor de precificação determinístico (seção 5)~~ — **implementado**: `Proposal`/`ProjectPricing`/`ProposalProfessional`, com sugestão de equipe pela IA restrita ao menu de `study_templates` e Tela de Precificação editável.
+1. ~~Motor de precificação determinístico (seção 5)~~ — **implementado**: `Proposal`/`ProjectPricing`/`ProposalProfessional`, com sugestão de equipe pela IA a partir do cadastro de profissionais e Tela de Precificação editável.
 2. Retomada do módulo geoespacial (KMZ/PostGIS), hoje pausado — **parcial (2026-09): só a
    camada `ibge_municipalities`**. Das 6 camadas de referência listadas na seção 3 (Mata
    Atlântica, UCs, TIs, quilombos, bacias continuam de fora, mesmo status de antes), só município
