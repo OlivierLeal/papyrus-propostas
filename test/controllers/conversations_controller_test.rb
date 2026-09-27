@@ -20,6 +20,27 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_select "input[name=?][value=?]", "q", "Serra Verde"
   end
 
+  # 2026-09, pedido do consultor: "quanto aquela geração de proposta custou ao total" — um valor
+  # pequeno no card, só quando dá pra calcular (ver Conversation#ai_cost_usd).
+  test "index shows the AI cost badge on a conversation that has priced messages" do
+    conversation = conversations(:reviewing_conversation)
+    model = Model.create!(model_id: "test-priced-model-controller", provider: "bedrock", name: "Test Priced Model",
+      pricing: { text_tokens: { standard: { input_per_million: 3.0, output_per_million: 15.0 } } })
+    conversation.messages.create!(role: "assistant", content: "resposta", model: model, input_tokens: 1_000_000, output_tokens: 0)
+
+    get conversations_path
+
+    assert_response :success
+    assert_match "US$", response.body
+  end
+
+  test "index shows no cost badge when nothing has priced messages" do
+    get conversations_path
+
+    assert_response :success
+    assert_no_match "US$", response.body
+  end
+
   test "index shows a specific empty-state message when the search matches nothing" do
     get conversations_path, params: { q: "nome que não existe de jeito nenhum" }
 

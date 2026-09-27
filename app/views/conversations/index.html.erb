@@ -58,8 +58,13 @@
 
               <span class="badge badge-ghost w-fit"><%= conversation.study_types_label %></span>
 
-              <div class="text-xs text-base-content/40">
-                <%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %>
+              <div class="flex items-center justify-between gap-2 text-xs text-base-content/40">
+                <span><%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %></span>
+                <% if (cost = conversation.ai_cost_usd) %>
+                  <span title="Custo estimado de IA nesta conversa">
+                    ≈ <%= number_to_currency(cost, unit: "US$", separator: ",", delimiter: ".") %>
+                  </span>
+                <% end %>
               </div>
             </div>
           <% end %>

@@ -19,6 +19,27 @@ class ConversationTest < ActiveSupport::TestCase
     assert_not conversation.valid?
   end
 
+  test "ai_cost_usd sums the cost of every message with pricing, in USD" do
+    conversation = conversations(:reviewing_conversation)
+    model = Model.create!(model_id: "test-priced-model", provider: "bedrock", name: "Test Priced Model",
+      pricing: { text_tokens: { standard: { input_per_million: 3.0, output_per_million: 15.0 } } })
+
+    conversation.messages.create!(role: "assistant", content: "resposta 1", model: model, input_tokens: 1_000_000, output_tokens: 0)
+    conversation.messages.create!(role: "assistant", content: "resposta 2", model: model, input_tokens: 0, output_tokens: 200_000)
+
+    # 1_000_000 tokens de input a $3/milhão + 200_000 tokens de output a $15/milhão = $3 + $3 = $6
+    assert_in_delta 6.0, conversation.reload.ai_cost_usd, 0.001
+  end
+
+  test "ai_cost_usd is nil when no model has pricing registered, instead of pretending it's free" do
+    conversation = conversations(:reviewing_conversation)
+    model = Model.create!(model_id: "test-unpriced-model", provider: "bedrock", name: "Test Unpriced Model")
+
+    conversation.messages.create!(role: "assistant", content: "resposta", model: model, input_tokens: 1_000, output_tokens: 500)
+
+    assert_nil conversation.reload.ai_cost_usd
+  end
+
   test "status_label translates the status to Portuguese" do
     conversation = conversations(:reviewing_conversation)
     assert_equal "Em revisão", conversation.status_label
@@ -156,6 +177,48 @@ class ConversationTest < ActiveSupport::TestCase
     system_messages = conversation.messages.where(role: "system")
     assert_equal 2, system_messages.count
     assert system_messages.all?(&:internal?)
+  end
+
+  # 2026-09, otimização de custo: marca o prompt de sistema (SYSTEM_INSTRUCTIONS +
+  # PROPOSAL_CHECKLIST_INSTRUCTIONS) como cacheável pro Bedrock, pra não pagar ~3.800 tokens de
+  # novo em toda chamada de IA desta conversa (ver Conversation#mark_system_instructions_cacheable!).
+  test "apply_system_instructions! marks only the last system message as cacheable, without losing the text" do
+    conversation = conversations(:processing_conversation)
+    conversation.save!
+
+    conversation.apply_system_instructions!
+
+    system_messages = conversation.messages.where(role: "system").order(:created_at, :id).to_a
+    first_message, last_message = system_messages
+
+    assert_nil first_message.content_raw
+    assert_equal Conversation::SYSTEM_INSTRUCTIONS, first_message.content
+
+    assert_equal Conversation::PROPOSAL_CHECKLIST_INSTRUCTIONS, last_message.content # texto original preservado
+    assert_equal(
+      [ { "text" => Conversation::PROPOSAL_CHECKLIST_INSTRUCTIONS }, { "cachePoint" => { "type" => "default" } } ],
+      last_message.content_raw
+    )
+  end
+
+  # A prova real de que isso funciona: reconstruir o chat (mesmo caminho que #to_llm usa em toda
+  # chamada de IA) e confirmar que o cachePoint sobrevive ao round-trip banco -> RubyLLM::Message,
+  # e que o texto das DUAS instruções continua chegando íntegro pro modelo.
+  test "the cache marker survives the round-trip through to_llm, and both instruction texts still reach the model" do
+    conversation = conversations(:processing_conversation)
+    conversation.save!
+    conversation.apply_system_instructions!
+
+    system_llm_messages = conversation.to_llm.messages.select { |msg| msg.role == :system }
+    assert_equal 2, system_llm_messages.count
+
+    last_content = system_llm_messages.last.content
+    assert_instance_of RubyLLM::Content::Raw, last_content
+    assert_equal(
+      [ { "text" => Conversation::PROPOSAL_CHECKLIST_INSTRUCTIONS }, { "cachePoint" => { "type" => "default" } } ],
+      last_content.value
+    )
+    assert_equal Conversation::SYSTEM_INSTRUCTIONS, system_llm_messages.first.content
   end
 
   test "ask_internally hides the instruction but keeps the reply visible by default" do

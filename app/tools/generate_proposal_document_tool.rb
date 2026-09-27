@@ -1,12 +1,16 @@
 # Ferramenta que a IA chama quando o consultor pede pra gerar a Proposta Técnica e/ou Comercial.
-# Só o TEXTO (prosa) vem da IA — preço, equipe, formato do documento (único ou separado) vêm
-# direto do banco (ProjectPricing/ProposalProfessional), nunca da IA. Ver CLAUDE.md seção 8/9.
+# Só o TEXTO (prosa) vem da IA — preço e equipe vêm direto do banco (ProjectPricing/
+# ProposalProfessional), nunca da IA. Ver CLAUDE.md seção 8/9. O formato do documento (único ou
+# separado) também vem do banco (`Proposal#document_split`) na maioria das vezes — decidido
+# sozinho ao ler o ET/TR na criação da proposta, ou trocado manualmente na Tela de Precificação/
+# Aprovação — mas a IA pode mudá-lo a partir de um pedido EXPLÍCITO no chat via `formato_documento`
+# (2026-09, ver param abaixo); fora desse pedido explícito, ela nunca decide isso sozinha.
 #
-# A proposta técnica pode ser gerada antes da precificação estar aprovada (proposal.status ==
-# "draft") — a equipe/horas (do template padrão ou já sugeridas pela IA) já bastam pro texto
-# técnico, que não mostra valores. A comercial (ou o documento combinado) exige status "priced"/
-# "approved" (Tela de Precificação confirmada pelo consultor), porque mostra números que ainda não
-# foram revisados. Ver #execute.
+# A proposta comercial/combinada sai sempre que pedida, em qualquer status (2026-09, pedido do
+# consultor — antes exigia "priced"/"approved", obrigando um ciclo "gera sem preço → aprova →
+# pede de novo" só pra ver o documento completo). Continua sem bloquear NADA por causa disso —
+# só avisa (#price_review_warning) quando o status ainda é "draft", porque BDI/taxas podem estar
+# nos defaults (equipe/horas do template padrão ou já sugeridas pela IA). Ver #execute.
 #
 # Recebe `conversation:`, não `proposal:` — a Proposal pode nem existir ainda (o consultor nunca
 # clicou em "Avançar para Precificação"). Achado na prática: exigir isso antes de QUALQUER geração,
@@ -24,16 +28,21 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     Gera o(s) arquivo(s) .docx da proposta preenchidos, usando o texto que você escrever pra
     cada seção (baseado no ET, no TR quando houver, nos documentos complementares e em propostas anteriores
     semelhantes já analisados nesta conversa) e os dados de preço/equipe que já existem no
-    sistema. Enquanto a proposta ainda está em "draft" (preço não aprovado na Tela de
-    Precificação), esta ferramenta só gera a proposta_tecnica.docx — sem tabela de preço nem
-    cronograma de desembolso, que ainda não foram revisados pelo consultor; a comercial (ou o
-    documento combinado) só fica disponível depois que o status virar "priced"/"approved". Só
-    chame depois de confirmar que não falta nenhuma informação que bloqueia a proposta (ver
+    sistema. Gera a versão COMPLETA (comercial, ou o documento combinado) sempre que pedido, mesmo
+    com o preço ainda em "draft" — nesse caso a mensagem de retorno avisa que o preço ainda não
+    foi revisado na Tela de Precificação, pra você repassar ao consultor. Só chame depois de
+    confirmar que não falta nenhuma informação que bloqueia a proposta (ver
     passo a passo interno). Nomes que você não tiver certeza, escreva "A confirmar" em vez de
     inventar. CNPJ é diferente (pedido da Charlene, 2026-09): sem certeza do número, mande
     cnpj_cliente como string vazia (nunca "A confirmar", "[confidencial]" nem qualquer texto de
     preenchimento) — o campo sai em branco no documento, sem inventar nem sinalizar nada no
     lugar do número.
+
+    Por padrão gera técnica+comercial juntas (documento combinado) ou, se o formato já estiver
+    marcado como separado, os dois arquivos (técnica e comercial). Use somente_tecnica ou
+    somente_comercial só quando o consultor pedir EXPLICITAMENTE um dos dois lados sozinho — nunca
+    os dois parâmetros juntos. Use formato_documento só quando o consultor pedir, pelo CHAT, pra
+    mudar entre documento único e documentos separados dali pra frente.
 
     NUNCA escreva códigos de citação "[F12]" em nenhum parâmetro de texto desta ferramenta —
     esse formato só existe pra virar link no CHAT (bloco [ACHADOS DESTA PROPOSTA]), não tem
@@ -189,6 +198,31 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
+  param :somente_tecnica, type: "boolean", required: false,
+    desc: "true SOMENTE quando o consultor pede EXPLICITAMENTE só a parte técnica (ex.: \"gera só a técnica " \
+          "por enquanto\", \"ainda não quero mostrar preço\"). Por padrão (sem este parâmetro, ou false) a " \
+          "ferramenta gera o documento COMPLETO (comercial, ou o combinado técnica+comercial) sempre — mesmo " \
+          "com o preço ainda em \"draft\" (nesse caso a mensagem de retorno avisa que o preço não foi revisado, " \
+          "repasse esse aviso ao consultor). Não marque true só porque o status ainda é \"draft\" — isso não é " \
+          "mais motivo pra restringir, só o pedido explícito do consultor é. Nunca marque junto com " \
+          "somente_comercial — são mutuamente exclusivos."
+
+  param :somente_comercial, type: "boolean", required: false,
+    desc: "true SOMENTE quando o consultor pede EXPLICITAMENTE só a parte comercial (ex.: \"manda só a " \
+          "comercial\", \"preciso só do documento de preço agora\"). Por padrão a ferramenta gera o documento " \
+          "completo — este parâmetro nunca é o padrão, só o pedido explícito do consultor liga ele. Nunca " \
+          "marque junto com somente_tecnica — são mutuamente exclusivos."
+
+  param :formato_documento, required: false,
+    desc: "Só quando o consultor pedir EXPLICITAMENTE, no CHAT, pra mudar o formato do documento (ex.: " \
+          "\"separa em dois arquivos daqui pra frente\", \"pode juntar tudo num só\", \"não precisa mais " \
+          "separar técnica e comercial\"). Valores aceitos: \"separado\" (a partir de agora toda geração sai " \
+          "em 2 arquivos, técnica e comercial) ou \"combinado\" (a partir de agora sai 1 arquivo só, com tudo " \
+          "junto). A mudança fica valendo pras PRÓXIMAS gerações também, não só nesta. NÃO envie este " \
+          "parâmetro só porque o ET/TR pede documentos separados — isso já é decidido sozinho ao criar a " \
+          "proposta (lendo o ET/TR), sem precisar de nada seu; use isto só quando for o CONSULTOR pedindo a " \
+          "mudança pelo chat, depois da proposta já criada."
+
   param :obrigacoes_contratante_adicionais, type: "array", required: false,
     desc: "Obrigações EXTRAS da CONTRATANTE (o cliente) além das já fixas no modelo (acesso à área, fornecer " \
           "documentos, pagar taxas do órgão, etc. — não repita essas). Um item por linha, só o que o ET ou o TR " \
@@ -247,6 +281,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     @proposal = @conversation.proposal || @conversation.ensure_proposal!(ai_suggestions: false)
     return { error: blocked_reason }.to_json if @proposal.nil?
 
+    if somente_tecnica?(args) && somente_comercial?(args)
+      return { error: "somente_tecnica e somente_comercial são mutuamente exclusivos — escolha um." }.to_json
+    end
+
+    # 2026-09, pedido do consultor: antes só o ET/TR (na criação da proposta) ou a tela decidiam
+    # se o documento sai combinado ou separado — pedir a mudança no CHAT não tinha efeito nenhum.
+    apply_document_split_override!(args[:formato_documento])
+
     # Guarda o ÚLTIMO conjunto de parâmetros de conteúdo desta geração — usado por
     # .replay_pending_regeneration! pra remontar o .docx sozinho, sem IA, quando o cronograma/
     # equipe (sugeridos em background) terminam DEPOIS que este documento já saiu (ver abaixo).
@@ -272,12 +314,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS]
     export_ms_project = export_ms_project?(args)
 
-    # Em draft (preço ainda não aprovado na Tela de Precificação), só a parte técnica pode sair —
-    # a comercial mostra valores que ainda não foram revisados/aprovados pelo consultor. A equipe
-    # sugerida pela IA já existe nesse ponto (Proposal#build_with_ai_suggested_team!), então o
-    # texto técnico (que cita líder/segurança do trabalho) já tem o que precisa. O cronograma
-    # (seção 9, sempre técnica) sai igual em qualquer status — não é dado de preço.
-    if @proposal.status == "draft"
+    # 2026-09, pedido do consultor: a comercial/combinado sai sempre que pedido, mesmo com o
+    # preço ainda em "draft" (antes só saía a técnica-sozinha até o preço ser revisado/aprovado
+    # na Tela de Precificação — isso obrigava um ciclo "gera sem preço → aprova preço → pede de
+    # novo" só pra ver o documento completo). Continua sem bloquear NADA — só avisa
+    # (#price_review_warning) quando o status ainda é "draft", porque BDI/taxas podem estar nos
+    # defaults (inclusive profissionais com rate_office/rate_field ainda em 0,00, ver CLAUDE.md
+    # seção 5) e o valor impresso pode não refletir o que a Papyrus vai cobrar de verdade.
+    if somente_tecnica?(args)
       technical_filename = @proposal.docx_filename("tecnica")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
@@ -287,9 +331,22 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{technical_filename} — só a parte técnica, sem " \
-          "valores. A proposta comercial fica disponível depois que o preço for revisado e aprovado na Tela de " \
-          "Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
+        message: "Gerado o arquivo #{technical_filename} — só a parte técnica, a pedido do consultor. " \
+          "Peça \"gerar completo\"/\"com a comercial\" quando quiser o documento inteiro." \
+          "#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
+    elsif somente_comercial?(args)
+      commercial_filename = @proposal.docx_filename("comercial")
+      files = filler.fill_split(
+        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
+        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("comercial") }
+      )
+      attach!(files[:commercial], commercial_filename, "comercial", description)
+      failed_schedule_types = []
+      schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
+      { success: true, version: @proposal.version, filenames: [ commercial_filename, *schedule_filenames ],
+        message: "Gerado o arquivo #{commercial_filename} — só a parte comercial, a pedido do consultor. " \
+          "Peça \"gerar completo\"/\"com a técnica\" quando quiser o documento inteiro.#{price_review_warning}" \
+          "#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica")
       commercial_filename = @proposal.docx_filename("comercial")
@@ -304,7 +361,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
+          "disponíveis na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined")
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
@@ -312,7 +369,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types, team_background_task: team_background_task)}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -333,6 +390,15 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       "Não dá pra criar a proposta agora: os documentos ainda estão sendo processados " \
       "(situação atual: #{@conversation.status_label}). Avise o consultor e tente de novo quando " \
       "o processamento terminar."
+    end
+
+    # 2026-09: a comercial/combinado não fica mais bloqueada por status — este aviso é o que
+    # substitui a antiga trava, repassado na mensagem de retorno pra IA passar ao consultor.
+    def price_review_warning
+      return "" unless @proposal.status == "draft"
+
+      " ⚠️ O preço ainda não foi revisado na Tela de Precificação (status \"draft\") — confira " \
+      "BDI, taxas e equipe antes de enviar este documento ao cliente."
     end
 
     # Item de lista opcional no modelo (7.1/7.2 — ver ProposalDocxFiller#fill_simple_placeholders!)
@@ -602,6 +668,37 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # A tabela do cronograma dentro do próprio .docx nunca depende disto — sai sempre.
     def export_ms_project?(args)
       ActiveModel::Type::Boolean.new.cast(args[:exportar_cronograma_ms_project]) == true
+    end
+
+    # 2026-09: substitui o antigo gate por status ("draft" = só técnica). Agora é só o pedido
+    # EXPLÍCITO do consultor (ver descrição do parâmetro) — nunca inferido do status da proposta.
+    def somente_tecnica?(args)
+      ActiveModel::Type::Boolean.new.cast(args[:somente_tecnica]) == true
+    end
+
+    # 2026-09: espelho de #somente_tecnica? — mesmo princípio (pedido explícito, nunca inferido).
+    def somente_comercial?(args)
+      ActiveModel::Type::Boolean.new.cast(args[:somente_comercial]) == true
+    end
+
+    # 2026-09, pedido do consultor: antes só o ET/TR (na criação da proposta, ver
+    # Proposal#build_with_ai_suggested_team!/#build_from_template!) ou a tela de Precificação/
+    # Aprovação (ProposalsController#document_split_params) decidiam o formato — pedir a mudança
+    # no CHAT não tinha nenhum efeito. Aceita alguns sinônimos tolerantemente (a IA já recebe a
+    # instrução de mandar "separado"/"combinado" na descrição do parâmetro, mas nada garante que
+    # ela sempre obedece à risca). Valor não reconhecido (ou parâmetro ausente) não muda nada —
+    # nunca levanta erro por causa disso, só ignora silenciosamente.
+    DOCUMENT_SPLIT_CHAT_VALUES = {
+      "separado" => "separated", "separada" => "separated", "separados" => "separated", "separate" => "separated",
+      "combinado" => "combined", "combinada" => "combined", "combinados" => "combined", "único" => "combined",
+      "unico" => "combined", "junto" => "combined", "juntos" => "combined", "unificado" => "combined"
+    }.freeze
+
+    def apply_document_split_override!(formato_documento)
+      return if formato_documento.blank?
+
+      mapped = DOCUMENT_SPLIT_CHAT_VALUES[formato_documento.to_s.strip.downcase]
+      @proposal.update!(document_split: mapped) if mapped
     end
 
     # MSPDI (XML do MS Project) por tipo de cronograma presente — ver ScheduleMspdiExporter/

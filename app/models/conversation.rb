@@ -188,38 +188,43 @@ class Conversation < ApplicationRecord
     13. Enviar para Sara ou Charlene revisar — acontece depois de gerado o rascunho, é lembrete pro
         consultor, nunca bloqueia a geração.
 
-    A proposta técnica e a comercial têm bloqueios DIFERENTES — a ferramenta generate_proposal_
-    document já sabe disso sozinha (olha o status da proposta, sempre visível no [ESTADO ATUAL DA
-    PROPOSTA] mais abaixo no histórico), mas você precisa saber pra decidir SE chama a ferramenta
-    e o que dizer ao consultor:
+    A proposta técnica e a comercial NÃO têm mais bloqueios diferentes por STATUS (2026-09,
+    pedido do consultor: "quando pedir pra gerar, ele já pensar na parte comercial") — a
+    ferramenta generate_proposal_document gera o documento COMPLETO (comercial, ou o combinado
+    técnica+comercial) por padrão, mesmo com a proposta ainda em "draft" (preço não revisado); ela
+    mesma avisa na mensagem de retorno quando isso acontece, pra você repassar ao consultor.
+    "Draft" deixou de ser motivo pra você recusar chamar a ferramenta ou pra restringir o que ela
+    gera — só o pedido EXPLÍCITO do consultor faz isso (ver `somente_tecnica` abaixo).
 
-    - Se o pedido for só a proposta TÉCNICA (ou o consultor não especificar e a proposta ainda
-      estiver com status "draft"): verifique só os itens 3, 5, 6 e 11 — e mesmo esses, só bloqueiam
-      de verdade se forem IMPOSSÍVEIS de resolver com o que você já tem (ex.: item 3 bloqueia só se
-      não houver ET nenhum anexado — a AUSÊNCIA de TR nunca bloqueia, ele é opcional; item 5 bloqueia só se você não souber nem dizer se o órgão é
-      estadual ou federal). Os itens 7, 8 e 10 (dias de campo, orçamento externo, planilha de preço)
-      são coisa de PRECIFICAÇÃO — não bloqueiam a técnica, nem pergunte isso pro consultor nesse
-      caso. DETALHE regulatório incerto (data exata de perímetro urbano, percentual de vegetação a
-      manter, necessidade de inventário florestal, documentação geológica pendente, etc.) TAMBÉM
-      NÃO bloqueia — escreva a condicionante no texto da seção cabível cobrindo os cenários
-      possíveis, ou como "A confirmar com o cliente" (mesma regra que já vale pra nome/CNPJ
-      incerto), e gere a proposta assim mesmo. O consultor prefere um rascunho pra revisar e
-      ajustar no chat depois a ficar esperando um menu de opções antes de ver qualquer coisa —
-      não pergunte "Opção A/B/C", só gere. Se 3, 5, 6 e 11 estiverem minimamente resolvidos, chame a
-      ferramenta — com a proposta em "draft" ela gera só a proposta_tecnica.docx sozinha.
-    - Se o pedido for a proposta COMERCIAL ou o documento completo (ou "a proposta" sem
-      qualificar, quando o status já não é mais "draft"): verifique também os itens 7, 8 e 10 —
-      "verificar" aqui é só CONFERIR/LEMBRAR o consultor deles (ex.: "ainda não há custo externo
-      de fauna lançado, considere lançar antes de aprovar o preço"), exatamente como já vale pra
-      técnica: eles NUNCA bloqueiam a geração do documento nem fazem você recusar chamar a
-      ferramenta. Equipe com 0h ou logística zerada não impedem o "priced"/"approved" de gerar o
-      lado comercial — o preço sai calculado com o que já existe (mesmo que 0), e o consultor
-      ajusta na Tela de Precificação depois, revisando o que saiu. O ÚNICO bloqueio real deste
-      lado é o STATUS da proposta: a ferramenta só gera o lado comercial se o status já for
-      "priced" ou "approved" — se o [ESTADO ATUAL DA PROPOSTA] mostrar "draft" ou "pricing", NÃO
-      chame a ferramenta: diga ao consultor que a Tela de Precificação precisa ser revisada e
-      confirmada antes (não peça os valores um por um pelo chat — quem ajusta isso é o consultor
-      naquela tela).
+    Verifique os itens 3, 5, 6 e 11 antes de chamar a ferramenta, em QUALQUER pedido — e mesmo
+    esses só bloqueiam de verdade se forem IMPOSSÍVEIS de resolver com o que você já tem (ex.:
+    item 3 bloqueia só se não houver ET nenhum anexado — a AUSÊNCIA de TR nunca bloqueia, ele é
+    opcional; item 5 bloqueia só se você não souber nem dizer se o órgão é estadual ou federal).
+    Os itens 7, 8 e 10 (dias de campo, orçamento externo, planilha de preço) são coisa de
+    PRECIFICAÇÃO — "verificar" aqui é só CONFERIR/LEMBRAR o consultor deles (ex.: "ainda não há
+    custo externo de fauna lançado, considere lançar antes de aprovar o preço"), NUNCA bloqueiam a
+    geração nem fazem você recusar chamar a ferramenta, em nenhum dos dois lados. Equipe com 0h ou
+    logística zerada também não bloqueiam — o preço sai calculado com o que já existe (mesmo que
+    0), e o consultor ajusta na Tela de Precificação depois. DETALHE regulatório incerto (data
+    exata de perímetro urbano, percentual de vegetação a manter, necessidade de inventário
+    florestal, documentação geológica pendente, etc.) TAMBÉM não bloqueia — escreva a
+    condicionante no texto da seção cabível cobrindo os cenários possíveis, ou como "A confirmar
+    com o cliente" (mesma regra que já vale pra nome/CNPJ incerto), e gere a proposta assim mesmo.
+    O consultor prefere um rascunho pra revisar e ajustar no chat depois a ficar esperando um menu
+    de opções antes de ver qualquer coisa — não pergunte "Opção A/B/C", só gere. Se 3, 5, 6 e 11
+    estiverem minimamente resolvidos, chame a ferramenta.
+
+    Só marque `somente_tecnica: true` quando o consultor pedir EXPLICITAMENTE só a parte técnica
+    (ex.: "gera só a técnica por enquanto", "ainda não quero mostrar preço") — nunca por conta
+    própria, nunca só porque o status é "draft". Só marque `somente_comercial: true` quando pedir
+    EXPLICITAMENTE só a parte comercial (ex.: "manda só a comercial", "só o documento de preço") —
+    mesma regra, nunca os dois juntos. Sem nenhum dos dois, sempre gera o documento completo.
+
+    `formato_documento` (2026-09) é só pra quando o consultor pede, PELO CHAT, pra trocar entre
+    documento único e documentos separados dali pra frente (ex.: "separa em dois arquivos",
+    "pode juntar tudo num só"). NÃO use isso só porque o ET/TR pede documentos separados — isso já
+    é decidido sozinho ao criar a proposta, lendo o ET/TR; sem esse pedido explícito do consultor
+    no chat, nunca envie este parâmetro.
 
     Os itens 1, 2, 4, 9 e 13 são administrativos e internos da Papyrus (pasta na rede, controle de
     propostas, e-mail ao cliente, NDA de prestador, revisão com Sara/Charlene) — apenas lembre o
@@ -276,15 +281,29 @@ class Conversation < ApplicationRecord
     study_types.map(&:name).sort.join(", ").presence || "Tipo de estudo: aguardando identificação da IA"
   end
 
+  # Custo de IA acumulado NESTA conversa inteira (ET/TR, todos os turnos de chat, sugestões de
+  # equipe/cronograma em background) — soma de `Message#cost` (nativo do ruby_llm, ver CLAUDE.md
+  # seção 5 "IA nunca faz conta de dinheiro": isto é só leitura do que a própria gem já calcula a
+  # partir de tokens × pricing de `models`, nunca um cálculo próprio). Sempre em USD — a gem não
+  # faz conversão de câmbio, e o projeto não tem uma fonte de câmbio própria; exibir como "US$",
+  # nunca fingir R$. `nil` quando falta preço cadastrado pra algum modelo/token usado (ex.:
+  # `bin/rails ruby_llm:load_models` não rodou nesta base ainda) — mostrar "—" nesse caso, nunca
+  # 0,00, que sugeriria "gratuito" em vez de "não sei calcular".
+  def ai_cost_usd
+    cost.total
+  end
+
   # Busca na tela de Propostas por cliente, código (ex.: "PTC26098") ou ano — um campo só, porque
   # o código já embute o ano (ver Proposal#docx_numero_proposta) e a maioria digita só um dos três
   # de cada vez. Filtra em Ruby, não em SQL: código não é coluna nenhuma, é calculado a partir de
   # created_at + id, então não dá pra fazer WHERE nele — aceitável na escala deste app (poucos
   # usuários, sem paginação ainda). `includes(:proposal)` no chamador evita N+1 ao calcular o
   # código de cada conversa.
+  # `messages: :model` entra pro card de custo de IA na Tela de Propostas (#ai_cost_usd) não
+  # disparar N+1 — cada Message#cost lê a `model_association` (pricing) pra calcular o valor.
   def self.search(query)
     normalized = query.to_s.strip.downcase
-    return order(created_at: :desc).includes(:user, :study_types, :proposal) if normalized.blank?
+    return order(created_at: :desc).includes(:user, :study_types, :proposal, messages: :model) if normalized.blank?
 
     # Acha os ids em duas passadas: a 1ª só decide quem bate (com o mínimo de includes pra
     # calcular o código sem N+1), a 2ª carrega o que a tela realmente precisa — SÓ para os ids que
@@ -293,7 +312,7 @@ class Conversation < ApplicationRecord
     ids = includes(:proposal).select { |conversation| conversation.matches_search?(normalized) }.map(&:id)
     return none if ids.empty?
 
-    where(id: ids).order(created_at: :desc).includes(:user, :study_types, :proposal)
+    where(id: ids).order(created_at: :desc).includes(:user, :study_types, :proposal, messages: :model)
   end
 
   def matches_search?(normalized_query)
@@ -397,6 +416,63 @@ class Conversation < ApplicationRecord
     with_instructions(SYSTEM_INSTRUCTIONS)
     with_instructions(PROPOSAL_CHECKLIST_INSTRUCTIONS, append: true)
     messages.where(role: "system").find_each { |message| message.update!(internal: true) }
+    mark_system_instructions_cacheable!
+  end
+
+  # 2026-09, otimização de custo: SYSTEM_INSTRUCTIONS + PROPOSAL_CHECKLIST_INSTRUCTIONS somados dão
+  # ~3.800 tokens, e são reenviados INTEIROS em TODA chamada de IA desta conversa — não só o turno
+  # de chat: `ask_internally` (ProcessEtJob, ProcessTrJob, SuggestTeamJob, SuggestScheduleJob,
+  # ElectScheduleKeyPointsJob, RegenerateScheduleJob, GenerateSummaryJob, ProcessLegalNormsJob...)
+  # e `complete_with_lock` sempre passam por `ChatMethods#to_llm`, que reconstrói o chat inteiro DO
+  # ZERO a partir do banco a cada chamada (`@chat.reset_messages!` + replay de toda `messages_
+  # association`) — o prompt de sistema nunca é "lembrado" de uma chamada pra outra, é sempre
+  # reprocessado. Uma única proposta gera de 4 a mais chamadas em sequência (turno principal +
+  # equipe + cronograma + marcos do infográfico, seção 8), cada uma pagando os ~3.800 tokens de
+  # novo — sem contar todo o resto da vida da conversa (chat, ET/TR, buscas legais).
+  #
+  # Marca a ÚLTIMA mensagem "system" (a que fecha PROPOSAL_CHECKLIST_INSTRUCTIONS) com um
+  # `cachePoint` do Bedrock Converse API — tudo ANTES desse marcador no array `system` do request
+  # (as duas mensagens juntas, `order_messages_for_llm` sempre concatena todo `role: "system"`
+  # primeiro) fica cacheado do lado da AWS por alguns minutos: chamadas seguintes da MESMA
+  # conversa dentro desse intervalo pagam ~10% do preço normal por esses tokens em vez de 100%
+  # (a MapboxDirections dos preços de cache é da própria AWS, não deste código — só estamos
+  # marcando o que É cacheável, nunca calculando o desconto, mesmo princípio de "IA/infra nunca
+  # calcula preço" da seção 1, aplicado aqui a custo de infraestrutura em vez de preço ao cliente).
+  #
+  # Só UM cachePoint, sempre no mesmo lugar fixo (fim do prompt de sistema, que nunca muda depois
+  # de criado — ver comentário de PROPOSAL_CHECKLIST_INSTRUCTIONS/item 12 sobre isso não ser
+  # recalculado). Deliberadamente NÃO se estende esse marcador pro resto do histórico (que cresce
+  # a cada turno) — o Converse API tem um limite baixo de cache points por request (poucas
+  # unidades), e um marcador por mensagem estouraria esse limite em qualquer conversa
+  # moderadamente longa (a conversa de teste usada nesta sessão já tem 59 mensagens). Cache do
+  # meio do histórico fica pra uma rodada futura, com mais cuidado nesse limite.
+  #
+  # NUNCA passar um `RubyLLM::Content::Raw` direto pra `with_instructions`: `ChatMethods#
+  # persist_system_instruction` grava a instrução direto na coluna `content` (texto puro, via
+  # `create!(role: :system, content: instructions)`), sem passar por `prepare_content_for_storage`
+  # — um objeto ali viraria a STRING da inspeção do objeto Ruby ("#<RubyLLM::Content::Raw...>"),
+  # persistida como se fosse o prompt de verdade. Por isso a mensagem nasce normal (texto puro,
+  # via `with_instructions` como sempre) e só DEPOIS de já existir é que `content_raw` é setado à
+  # mão — `Message#extract_content` prioriza `content_raw` sobre `content` quando presente (ver
+  # ruby_llm/active_record/message_methods.rb), então toda leitura futura (`to_llm`) passa a usar
+  # o array com o cachePoint, sem precisar tocar em mais nada.
+  def mark_system_instructions_cacheable!
+    last_system_message = messages.where(role: "system").order(:created_at, :id).last
+    return unless last_system_message
+
+    last_system_message.update!(
+      content_raw: [ { text: last_system_message.content }, { cachePoint: { type: "default" } } ]
+    )
+
+    # `with_instructions` (chamado logo acima, ver apply_system_instructions!) já carregou/cacheou
+    # a associação `messages` no processo do REQUEST que cria a conversa (ChatMethods#to_llm faz
+    # `messages_association.to_a`) — sem resetar, um `#to_llm` chamado NO MESMO objeto Ruby (ex.:
+    # um teste, ou um chamador futuro que não recarrega a conversa do banco) reusaria essa cópia em
+    # memória, de ANTES deste `update!`, e o cachePoint pareceria não ter feito efeito nenhum. Todo
+    # chamador real (ask_internally/complete_with_lock rodando num job/request separado) já parte
+    # de um `Conversation.find` fresco e nunca sofreria isso — este reset é só pra não depender
+    # dessa garantia implícita.
+    messages.reset
   end
 
   PROPOSAL_STATE_MARKER = "[ESTADO ATUAL DA PROPOSTA]".freeze

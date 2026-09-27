@@ -38,31 +38,122 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     Conversation.define_method(:complete, @original_complete_method)
   end
 
-  test "generates only the technical docx when the proposal is still a draft (pricing not approved yet)" do
+  # 2026-09, pedido do consultor: a comercial/combinado sai sempre que pedido, mesmo em "draft"
+  # (antes só saía a técnica-sozinha até o preço ser revisado/aprovado). Continua sem bloquear
+  # nada — só avisa na mensagem de retorno.
+  test "generates the full combined docx even when the proposal is still a draft, with a price-review warning" do
     @proposal.update!(status: "draft", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
     result = JSON.parse(tool.execute(**@args))
 
     assert result["success"]
-    assert_equal [ @proposal.docx_filename("tecnica") ], result["filenames"]
+    assert_equal [ @proposal.docx_filename("combined") ], result["filenames"]
     assert_equal 1, @proposal.generated_documents.count
     document = @proposal.generated_documents.first
-    assert_equal @proposal.docx_filename("tecnica"), document.filename.to_s
-    assert_equal "tecnica", document.blob.metadata["kind"]
+    assert_equal @proposal.docx_filename("combined"), document.filename.to_s
+    assert_equal "combined", document.blob.metadata["kind"]
+    assert_includes result["message"], "preço ainda não foi revisado"
 
     xml = document_xml(document)
     assert_includes xml, "Obter a Licença Prévia junto ao INEMA." # texto técnico preenchido normalmente
-    assert_not_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO" # seção comercial não existe nesse arquivo
+    assert_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO" # seção comercial sai igual, mesmo em draft
   end
 
-  test "still refuses nothing and always increments version, even across the draft -> priced transition" do
+  test "does not warn about price review once the proposal is priced/approved" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args))
+
+    assert_not_includes result["message"], "preço ainda não foi revisado"
+  end
+
+  # 2026-09: única forma que sobrou de gerar só a técnica — pedido explícito via parâmetro, nunca
+  # inferido do status. Testa nos dois status pra confirmar que independe deles.
+  test "generates only the technical docx when somente_tecnica is explicitly requested, regardless of status" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, somente_tecnica: true))
+
+    assert result["success"]
+    assert_equal [ @proposal.docx_filename("tecnica") ], result["filenames"]
+    document = @proposal.generated_documents.first
+    assert_equal "tecnica", document.blob.metadata["kind"]
+
+    xml = document_xml(document)
+    assert_not_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
+  end
+
+  # 2026-09: espelho do teste acima — a única forma de gerar só a comercial é o pedido explícito.
+  test "generates only the commercial docx when somente_comercial is explicitly requested" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, somente_comercial: true))
+
+    assert result["success"]
+    assert_equal [ @proposal.docx_filename("comercial") ], result["filenames"]
+    document = @proposal.generated_documents.first
+    assert_equal "comercial", document.blob.metadata["kind"]
+
+    xml = document_xml(document)
+    assert_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
+    assert_not_includes xml, "Obter a Licença Prévia junto ao INEMA." # texto técnico não entra
+  end
+
+  test "somente_tecnica and somente_comercial together return an error instead of a document" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, somente_tecnica: true, somente_comercial: true))
+
+    assert result["error"].present?
+    assert_equal 0, @proposal.generated_documents.count
+  end
+
+  # 2026-09, pedido do consultor: antes só o ET/TR (na criação) ou a tela mudavam o formato do
+  # documento — pedir "separa em dois arquivos" pelo CHAT não tinha efeito nenhum.
+  test "formato_documento lets the consultant switch to separated documents from the chat" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, formato_documento: "separado"))
+
+    assert result["success"]
+    assert_equal "separated", @proposal.reload.document_split
+    assert_equal [ @proposal.docx_filename("tecnica"), @proposal.docx_filename("comercial") ], result["filenames"]
+  end
+
+  test "formato_documento switches back to combined and the change persists for the next generation" do
+    @proposal.update!(status: "priced", document_split: "separated")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args, formato_documento: "combinado")
+    assert_equal "combined", @proposal.reload.document_split
+
+    result = JSON.parse(tool.execute(**@args)) # próxima geração, sem o parâmetro — continua combinado
+
+    assert_equal [ @proposal.docx_filename("combined") ], result["filenames"]
+  end
+
+  test "an unrecognized formato_documento value is ignored instead of raising" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, formato_documento: "não sei"))
+
+    assert result["success"]
+    assert_equal "combined", @proposal.reload.document_split
+  end
+
+  test "still refuses nothing and always increments version, across the draft -> priced transition" do
     @proposal.update!(status: "draft", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
-    tool.execute(**@args) # versão 1, só técnica
+    tool.execute(**@args) # versão 1
 
     @proposal.update!(status: "priced")
-    result = JSON.parse(tool.execute(**@args)) # versão 2, documento completo
+    result = JSON.parse(tool.execute(**@args)) # versão 2
 
     assert result["success"]
     assert_equal 2, result["version"]
