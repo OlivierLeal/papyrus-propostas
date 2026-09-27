@@ -1,3 +1,6 @@
+<% if tool_step?(message) %>
+  <%= render "shared/tool_activity", message: message %>
+<% else %>
 <% is_user = message.role == "user" %>
 <% parsed_content = message.content.present? ? (JSON.parse(message.content) rescue nil) : nil %>
 <% animate = local_assigns.fetch(:animate, false) %>
@@ -123,3 +126,4 @@
     <span class="text-[0.7rem] text-base-content/40 px-1"><%= message.created_at.strftime("%d/%m/%Y %H:%M") %></span>
   </div>
 </div>
+<% end %>

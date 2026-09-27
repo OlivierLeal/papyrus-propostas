@@ -82,6 +82,46 @@ module ApplicationHelper
     "schedule_mspdi_implantacao" => "MS Project · Implantação"
   }.freeze
 
+  # Passo da IA que só chamou ferramenta, sem escrever texto (2026-09-27, relato do consultor:
+  # bolhas "(sem conteúdo)" no chat). O ruby_llm grava esse passo como uma mensagem assistant
+  # vazia com as tool_calls; a resposta de verdade vem na mensagem seguinte. Em vez de uma bolha
+  # vazia, o chat mostra uma linha discreta do que a IA fez — o consultor vê que a resposta se
+  # apoiou numa consulta.
+  TOOL_ACTIVITY_LABELS = {
+    "search_historical_archive" => "Consultou o acervo histórico",
+    "search_legal_norms" => "Pesquisou normas no CAL",
+    "search_legal_norms_archive" => "Consultou normas já estudadas",
+    "web_search" => "Pesquisou na internet",
+    "generate_proposal_document" => "Gerou o documento da proposta",
+    "add_external_cost" => "Lançou um custo externo",
+    "insert_schedule_section" => "Inseriu o cronograma no documento",
+    "remember_for_future_proposals" => "Propôs guardar uma memória",
+    "learn_from_revised_proposal" => "Leu a versão revisada da proposta"
+  }.freeze
+
+  def tool_step?(message)
+    message.role == "assistant" && message.content.blank? && !message.attachments.attached? && tool_call_names(message).any?
+  end
+
+  def tool_activity_label(message)
+    tool_call_names(message).tally.map do |name, count|
+      label = TOOL_ACTIVITY_LABELS.fetch(name) { "Usou a ferramenta #{name.humanize(capitalize: false)}" }
+      count > 1 ? "#{label} (#{count}×)" : label
+    end.join(" · ")
+  end
+
+  # Consulta direta (não a associação): só roda pra mensagem assistant VAZIA, que é rara — sem
+  # pré-carregar tool_calls em todo o chat nem cair no N+1 do Bullet.
+  def tool_call_names(message)
+    @tool_call_names ||= {}
+    @tool_call_names[[ message.class.name, message.id ]] ||=
+      if message.is_a?(GeneralMessage)
+        GeneralToolCall.where(general_message_id: message.id).order(:id).pluck(:name)
+      else
+        ToolCall.where(message_id: message.id).order(:id).pluck(:name)
+      end
+  end
+
   # Selo colorido da etapa da proposta (Conversation#status). "Processando" ganha um ponto
   # pulsando — é a única etapa em que o sistema está trabalhando sozinho.
   def conversation_status_badge(conversation, extra_class: nil)

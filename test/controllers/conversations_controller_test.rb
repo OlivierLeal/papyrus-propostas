@@ -298,6 +298,21 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
   # por usuário, ver comentário em MessagesController#create) — a bolha de quem mandou tem que
   # trazer o NOME de quem escreveu, não "Você" genérico, senão um consultor B vendo o painel do
   # consultor A leria a mensagem de A como se fosse dele mesmo.
+  # 2026-09-27, relato do consultor: bolhas "(sem conteúdo)" no chat. Eram passos em que a IA só
+  # chamou ferramenta, sem texto — agora viram uma linha do que ela fez.
+  test "show troca o passo da IA que só chamou ferramenta por uma linha de atividade" do
+    conversation = conversations(:reviewing_conversation)
+    step = conversation.messages.create!(role: "assistant", content: nil)
+    2.times { |i| step.tool_calls.create!(tool_call_id: "call_#{i}", name: "search_historical_archive", arguments: {}) }
+    conversation.messages.create!(role: "assistant", content: "Resposta final com base no acervo.")
+
+    get conversation_path(conversation)
+
+    assert_match "Consultou o acervo histórico (2×)", response.body
+    assert_match "Resposta final com base no acervo.", response.body
+    assert_no_match "(sem conteúdo)", response.body
+  end
+
   test "show labels each message with the name of whoever actually sent it, not always 'Você'" do
     conversation = conversations(:reviewing_conversation)
     conversation.messages.create!(role: "user", content: "Mensagem da consultora Um", internal: false, user: users(:one))

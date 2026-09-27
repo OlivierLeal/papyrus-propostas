@@ -164,6 +164,16 @@ pro consultor B ler a mensagem do consultor A.
   a proposta do consultor A, a mensagem de A aparece com "Consultora Um" (nome de A), e a de B
   aparece como "Você".
 
+**Bolha "(sem conteúdo)" no chat = passo em que a IA só chamou ferramenta (2026-09-27, relato do
+consultor).** O ruby_llm grava cada volta de ferramenta como uma mensagem `assistant` SEM texto, com
+as `tool_calls` (a resposta de verdade vem na mensagem seguinte). O resultado da ferramenta
+(`role: "tool"`) já era escondido (`hide_tool_result!`), mas essa mensagem de CHAMADA não era, e
+virava bolha vazia. Nos dois chats, `ApplicationHelper#tool_step?` detecta o caso e o partial
+desenha `shared/_tool_activity` ("Consultou o acervo histórico (2×) · Pesquisou normas no CAL"),
+traduzindo o nome da ferramenta por `TOOL_ACTIVITY_LABELS`. Ferramenta nova sem rótulo cai num texto
+genérico. Os nomes são lidos por consulta direta (`tool_call_names`), não pela associação: só roda
+pra mensagem vazia, sem pré-carregar em todo o chat nem cair no N+1 do Bullet.
+
 **Proposta e precificação (implementado):**
 - `proposals` — conversation_id, content_json, pdf_url, version, status (`draft`/`priced`/`approved`)
 - `project_pricings` — proposal_id, bdi, tax_multiplier, distance_km, logistics_days, rental_per_day, meal_per_day, fuel_total, external_costs (jsonb, `[{description, value}]`), payment_schedule (jsonb, default 30/60/5/5), total_value. Os parâmetros de logística (aluguel, alimentação, combustível) são campos diretos aqui — **não existe mais uma tabela `logistics_configs`** (removida; ver seção 5).
