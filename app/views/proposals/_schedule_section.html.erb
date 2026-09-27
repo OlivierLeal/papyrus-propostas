@@ -1,89 +1,84 @@
 <%# Grade de um tipo de cronograma (fase/atividade/período) — ver ScheduleItem. `form` é o form
-    principal da Tela de Precificação (a data de início entra junto no mesmo submit); adicionar e
-    remover linha usam mini-forms próprios, mesmo padrão da grade de Equipe/Custos externos.
+    principal (#pricing-form): data de início e edição das linhas vão no mesmo submit. Adicionar
+    usa campos ligados ao #add-schedule-<tipo> (fora do form principal) pelo atributo `form=`;
+    remover é link com turbo_method — nada de form aninhado.
     locals: form, pricing, conversation, schedule_type, editable %>
 <% items = pricing.schedule_items.for_type(schedule_type) %>
 <% period_label = ScheduleItem::PERIOD_UNIT_LABELS.fetch(schedule_type) %>
 <% start_date_attr = schedule_type == "servico" ? :schedule_papyrus_start_date : :schedule_empreendimento_start_date %>
+<% add_form_id = "add-schedule-#{schedule_type}" %>
 
-<div class="mt-6 pt-6 border-t border-base-300">
-  <div class="flex flex-wrap items-end justify-between gap-3 mb-3">
-    <h3 class="font-semibold text-base-content text-sm"><%= ScheduleItem::SCHEDULE_TYPE_LABELS.fetch(schedule_type) %></h3>
-    <div class="form-control">
-      <div class="label"><span class="label-text text-xs">Data de início</span></div>
-      <%= form.date_field start_date_attr, disabled: !editable, class: "input input-bordered input-sm" %>
+<div class="border-t border-base-300 mt-4">
+  <div class="flex flex-wrap items-end justify-between gap-3 px-6 pt-4 pb-3">
+    <div>
+      <h3 class="text-sm font-semibold text-base-content"><%= ScheduleItem::SCHEDULE_TYPE_LABELS.fetch(schedule_type) %></h3>
+      <p class="text-xs text-base-content/50"><%= pluralize(items.size, "item", plural: "itens") %> · em <%= period_label.downcase %>s</p>
     </div>
+    <fieldset class="fieldset p-0">
+      <legend class="fieldset-legend pt-0 text-xs">Data de início</legend>
+      <%= form.date_field start_date_attr, disabled: !editable, class: "input input-sm w-44" %>
+    </fieldset>
   </div>
 
   <div class="overflow-x-auto">
     <table class="table table-sm">
       <thead>
-        <tr>
-          <th>Fase</th>
-          <th>Atividade</th>
-          <th class="text-right"><%= period_label %> início</th>
-          <th class="text-right">Duração (<%= period_label.downcase %>s)</th>
-          <th class="text-center">Marco</th>
-          <th></th>
+        <tr class="bg-base-200/60 text-xs uppercase tracking-wide text-base-content/50">
+          <th class="font-semibold pl-6">Fase</th>
+          <th class="font-semibold">Atividade</th>
+          <th class="font-semibold text-right"><%= period_label %> início</th>
+          <th class="font-semibold text-right">Duração</th>
+          <th class="font-semibold text-center">Marco</th>
+          <th class="w-1 pr-6"></th>
         </tr>
       </thead>
       <tbody>
         <%= form.fields_for :schedule_items, items do |si_form| %>
           <% line = si_form.object %>
-          <tr>
-            <td>
+          <tr class="hover:bg-base-200/30">
+            <td class="pl-6">
               <%= si_form.hidden_field :id %>
-              <%= si_form.text_field :phase_name, disabled: !editable, class: "input input-bordered input-sm w-32" %>
+              <%= si_form.text_field :phase_name, disabled: !editable, class: "input input-sm w-40" %>
             </td>
-            <td><%= si_form.text_field :activity_name, disabled: !editable, class: "input input-bordered input-sm w-56" %></td>
-            <td class="text-right"><%= si_form.number_field :start_period, min: 1, disabled: !editable, class: "input input-bordered input-sm w-20 text-right" %></td>
-            <td class="text-right"><%= si_form.number_field :duration_periods, min: 1, disabled: !editable, class: "input input-bordered input-sm w-20 text-right" %></td>
-            <td class="text-center"><%= si_form.check_box :milestone, disabled: !editable %></td>
-            <td class="text-right">
+            <td><%= si_form.text_field :activity_name, disabled: !editable, class: "input input-sm w-full min-w-56" %></td>
+            <td class="text-right"><%= si_form.number_field :start_period, min: 1, disabled: !editable, class: "input input-sm w-20 text-right" %></td>
+            <td class="text-right"><%= si_form.number_field :duration_periods, min: 1, disabled: !editable, class: "input input-sm w-20 text-right" %></td>
+            <td class="text-center"><%= si_form.check_box :milestone, disabled: !editable, class: "checkbox checkbox-sm" %></td>
+            <td class="text-right pr-6">
               <% if editable %>
-                <%= button_to conversation_proposal_schedule_item_path(conversation, line), method: :delete,
-                      class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover linha",
-                      form: { data: { turbo_confirm: "Remover #{line.activity_name}?" } } do %>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                    <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                  </svg>
+                <%= link_to conversation_proposal_schedule_item_path(conversation, line),
+                      class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover item",
+                      data: { turbo_method: :delete, turbo_confirm: "Remover #{line.activity_name}?" } do %>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
                 <% end %>
               <% end %>
             </td>
           </tr>
         <% end %>
         <% if items.none? %>
-          <tr><td colspan="6" class="text-center text-base-content/50 py-3 text-sm">Nenhum item ainda.</td></tr>
+          <tr><td colspan="6" class="text-center text-base-content/50 py-4 text-sm">Nenhum item ainda.</td></tr>
         <% end %>
       </tbody>
+      <% if editable %>
+        <tfoot>
+          <tr class="bg-base-200/30">
+            <td class="pl-6">
+              <%= hidden_field_tag "schedule_item[schedule_type]", schedule_type, form: add_form_id, id: nil %>
+              <%= text_field_tag "schedule_item[phase_name]", nil, form: add_form_id, id: "#{add_form_id}-phase", placeholder: "Nova fase", class: "input input-sm w-40" %>
+            </td>
+            <td><%= text_field_tag "schedule_item[activity_name]", nil, form: add_form_id, id: "#{add_form_id}-activity", placeholder: "Nova atividade", required: true, class: "input input-sm w-full min-w-56" %></td>
+            <td class="text-right"><%= number_field_tag "schedule_item[start_period]", 1, form: add_form_id, id: "#{add_form_id}-start", min: 1, class: "input input-sm w-20 text-right" %></td>
+            <td class="text-right"><%= number_field_tag "schedule_item[duration_periods]", 1, form: add_form_id, id: "#{add_form_id}-duration", min: 1, class: "input input-sm w-20 text-right" %></td>
+            <td class="text-center">
+              <%= hidden_field_tag "schedule_item[milestone]", "0", form: add_form_id, id: nil %>
+              <%= check_box_tag "schedule_item[milestone]", "1", false, form: add_form_id, class: "checkbox checkbox-sm", id: "#{add_form_id}-milestone" %>
+            </td>
+            <td class="text-right pr-6">
+              <button type="submit" form="<%= add_form_id %>" class="btn btn-outline btn-xs whitespace-nowrap">Adicionar</button>
+            </td>
+          </tr>
+        </tfoot>
+      <% end %>
     </table>
   </div>
-
-  <% if editable %>
-    <%= form_with url: conversation_proposal_schedule_items_path(conversation), scope: :schedule_item,
-          class: "flex flex-wrap items-end gap-2 mt-3" do |add_form| %>
-      <%= add_form.hidden_field :schedule_type, value: schedule_type %>
-      <div class="form-control">
-        <div class="label"><span class="label-text text-xs">Fase</span></div>
-        <%= add_form.text_field :phase_name, class: "input input-bordered input-sm w-32" %>
-      </div>
-      <div class="form-control">
-        <div class="label"><span class="label-text text-xs">Atividade</span></div>
-        <%= add_form.text_field :activity_name, class: "input input-bordered input-sm w-56" %>
-      </div>
-      <div class="form-control">
-        <div class="label"><span class="label-text text-xs"><%= period_label %> início</span></div>
-        <%= add_form.number_field :start_period, min: 1, value: 1, class: "input input-bordered input-sm w-20" %>
-      </div>
-      <div class="form-control">
-        <div class="label"><span class="label-text text-xs">Duração</span></div>
-        <%= add_form.number_field :duration_periods, min: 1, value: 1, class: "input input-bordered input-sm w-20" %>
-      </div>
-      <label class="form-control">
-        <div class="label"><span class="label-text text-xs">Marco</span></div>
-        <%= add_form.check_box :milestone, class: "checkbox checkbox-sm mt-1.5" %>
-      </label>
-      <%= add_form.submit "Adicionar item", class: "btn btn-sm btn-outline" %>
-    <% end %>
-  <% end %>
 </div>

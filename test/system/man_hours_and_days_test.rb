@@ -14,13 +14,13 @@ class ManHoursAndDaysTest < ApplicationSystemTestCase
     visit conversation_proposal_path(@proposal.conversation)
 
     line = proposal_professionals(:coordenacao_line)
-    within("tr", text: line.deliverable_name) do
+    within("tr", text: line.professional.name) do
       find("input[name$='[man_hours]']").set("10")
       find("input[name$='[field_days]']").set("2")
     end
-    click_button "Recalcular preço"
+    click_button "Salvar e recalcular"
     # (10 × 250 + 2 × 350) × 1,20 × 1,25 = 4.800,00
-    within("tr", text: line.deliverable_name) { assert_text "R$ 4.800,00" }
+    within("tr", text: line.professional.name) { assert_text "R$ 4.800,00" }
 
     assert_equal 10.0, line.reload.man_hours
     assert_equal 2.0, line.field_days
@@ -35,8 +35,8 @@ class ManHoursAndDaysTest < ApplicationSystemTestCase
     fill_in "proposal_professional[deliverable_name]", with: "Diagnóstico extra"
     fill_in "proposal_professional[man_hours]", with: "22"
     fill_in "proposal_professional[field_days]", with: "3"
-    click_button "Adicionar linha"
-    assert_selector "td", text: "Diagnóstico extra" # espera o redirect/reload antes de consultar o banco
+    click_button "Adicionar à equipe"
+    assert_field with: "Diagnóstico extra" # espera o redirect/reload antes de consultar o banco
 
     line = @proposal.project_pricing.proposal_professionals.find_by!(deliverable_name: "Diagnóstico extra")
     assert_equal 22.0, line.man_hours

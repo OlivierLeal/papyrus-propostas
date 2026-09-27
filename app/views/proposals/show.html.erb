@@ -1,359 +1,80 @@
 <%
   pricing = @proposal.project_pricing
   editable = @proposal.status != "approved"
+  status_label, status_class = {
+    "draft" => [ "Rascunho", "badge-warning" ],
+    "priced" => [ "Precificado", "badge-info" ],
+    "approved" => [ "Aprovado", "badge-success" ]
+  }.fetch(@proposal.status, [ @proposal.status, "badge-ghost" ])
 %>
 
-<div class="p-2 mx-auto">
-  <div class="flex items-center gap-3 mb-6">
-    <%= link_to conversation_path(@conversation), class: "btn btn-ghost btn-sm btn-square", title: "Voltar" do %>
+<div class="p-4 lg:p-8">
+  <div class="flex flex-wrap items-start gap-3 mb-6">
+    <%= link_to conversation_path(@conversation), class: "btn btn-ghost btn-sm btn-square mt-1", title: "Voltar para a conversa" do %>
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
         <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
       </svg>
     <% end %>
-    <div>
-      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">
-        Precificação
-        <span class="text-base-content/50 font-normal"><%= @proposal.docx_numero_proposta %></span>
-      </h1>
-      <p class="text-sm text-base-content/60"><%= @conversation.client_name %> · <%= @conversation.study_types_label %></p>
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-2">
+        <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Precificação</h1>
+        <span class="badge badge-soft <%= status_class %>"><%= status_label %></span>
+      </div>
+      <p class="text-sm text-base-content/60 mt-0.5">
+        <span class="font-mono"><%= @proposal.docx_numero_proposta %></span> ·
+        <%= @conversation.client_name %> · <%= @conversation.study_types_label %>
+      </p>
     </div>
-    <span class="badge badge-soft ml-auto <%= @proposal.status == "approved" ? "badge-success" : "badge-warning" %>">
-      <%= { "draft" => "Rascunho", "priced" => "Precificado", "approved" => "Aprovado" }.fetch(@proposal.status, @proposal.status) %>
-    </span>
   </div>
 
-  <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, class: "flex flex-col gap-4" do |form| %>
-    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-      <h2 class="font-semibold text-base-content mb-4">Equipe, horas-homem e diárias</h2>
-
-      <div class="overflow-x-auto">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Profissional</th>
-              <th>Entregável</th>
-              <th class="text-right">Horas-homem</th>
-              <th class="text-right">Diárias</th>
-              <th class="text-right">Subtotal</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <%= form.fields_for :proposal_professionals do |pp_form| %>
-              <% line = pp_form.object %>
-              <tr>
-                <td class="text-base-content"><%= line.professional.name %></td>
-                <td class="text-base-content/70"><%= line.deliverable_name %></td>
-                <td class="text-right">
-                  <%= pp_form.hidden_field :id %>
-                  <%= pp_form.number_field :man_hours, step: 0.5, min: 0, disabled: !editable, autocomplete: "off",
-                        class: "input input-bordered input-sm w-24 text-right" %>
-                </td>
-                <td class="text-right">
-                  <%= pp_form.number_field :field_days, step: 0.5, min: 0, disabled: !editable, autocomplete: "off",
-                        class: "input input-bordered input-sm w-20 text-right" %>
-                </td>
-                <td class="text-right text-base-content/70"><%= number_to_currency(line.subtotal, unit: "R$", separator: ",", delimiter: ".") %></td>
-                <td class="text-right">
-                  <% if editable %>
-                    <%= button_to conversation_proposal_proposal_professional_path(@conversation, line), method: :delete,
-                          class: "btn btn-ghost btn-xs btn-square text-error",
-                          title: "Remover linha",
-                          form: { data: { turbo_confirm: "Remover #{line.deliverable_name}?" } } do %>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                      </svg>
-                    <% end %>
-                  <% end %>
-                </td>
-              </tr>
-            <% end %>
-            <% if pricing.proposal_professionals.none? %>
-              <tr><td colspan="6" class="text-center text-base-content/50 py-4">Nenhum profissional na equipe ainda.</td></tr>
-            <% end %>
-          </tbody>
-        </table>
-      </div>
-
-      <% if editable %>
-        <%# scope: obrigatório — sem ele os campos saem sem aninhar (name="deliverable_name" em
-            vez de "proposal_professional[deliverable_name]"), e ProposalProfessionalsController
-            #line_params (params.require(:proposal_professional)) levanta ParameterMissing.
-            wrap_parameters não resolve isso sozinho: Rails 8.1 desliga wrap_parameters_by_default
-            (só embrulha JSON quando configurado explicitamente), e este projeto não tem
-            config/initializers/wrap_parameters.rb — achado ao vivo simulando o POST real desta
-            tela. %>
-        <%= form_with url: conversation_proposal_proposal_professionals_path(@conversation), scope: :proposal_professional,
-              class: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-base-300" do |add_form| %>
-          <%# Busca em vez de <select> longo (2026-09, pedido do consultor — "algo mais esperto
-              pra puxar os funcionários"): filtro 100% client-side (catálogo pequeno, ~20-30
-              profissionais ativos), ver app/javascript/controllers/professional_picker_controller.js.
-              O <select> sumiu — quem o form realmente envia é o hidden_field abaixo, preenchido
-              pelo JS quando o consultor clica num resultado. %>
-          <div class="form-control relative"
-               data-controller="professional-picker"
-               data-professional-picker-professionals-value="<%= @professionals.map { |p| { id: p.id, name: p.name, role: p.role, specialties: p.specialties } }.to_json %>">
-            <div class="label"><span class="label-text text-xs">Profissional</span></div>
-            <input type="text" autocomplete="off" placeholder="Buscar por nome, cargo ou especialidade..."
-                   class="input input-bordered input-sm w-64"
-                   data-professional-picker-target="search"
-                   data-action="input->professional-picker#search keydown->professional-picker#submitOnEnter blur->professional-picker#blur">
-            <ul data-professional-picker-target="results"
-                class="hidden absolute z-10 top-full mt-1 w-72 max-h-56 overflow-y-auto bg-base-100 border border-base-300 rounded-field shadow-lg"></ul>
-            <span data-professional-picker-target="selectedBadge" class="text-xs text-base-content/50 mt-1"></span>
-            <%= add_form.hidden_field :professional_id, data: { professional_picker_target: "hiddenId" } %>
-          </div>
-          <div class="form-control">
-            <div class="label"><span class="label-text text-xs">Entregável</span></div>
-            <%= add_form.text_field :deliverable_name, class: "input input-bordered input-sm" %>
-          </div>
-          <div class="form-control">
-            <div class="label"><span class="label-text text-xs">Horas-homem</span></div>
-            <%= add_form.number_field :man_hours, value: 0, step: 0.5, min: 0, autocomplete: "off", class: "input input-bordered input-sm w-24" %>
-          </div>
-          <div class="form-control">
-            <div class="label"><span class="label-text text-xs">Diárias</span></div>
-            <%= add_form.number_field :field_days, value: 0, step: 0.5, min: 0, autocomplete: "off", class: "input input-bordered input-sm w-20" %>
-          </div>
-          <%= add_form.submit "Adicionar linha", class: "btn btn-sm btn-outline" %>
-        <% end %>
-      <% end %>
-    </div>
-
-    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="font-semibold text-base-content">Parâmetros</h2>
-        <% if editable %>
-          <%= button_to "Recalcular logística", suggest_logistics_conversation_proposal_path(@conversation), method: :post,
-                class: "btn btn-outline btn-sm" %>
-        <% end %>
-      </div>
-
-      <% if pricing.long_distance? %>
-        <div class="alert alert-warning mb-4 text-sm">
-          <span>
-            Distância (<%= pricing.distance_km %> km, ~<%= pricing.travel_hours %>h) sugere deslocamento
-            aéreo — combustível/aluguel de carro não foram calculados automaticamente. Lance passagem e
-            locação no destino em Custos Externos.
-          </span>
-        </div>
-      <% end %>
-
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">BDI</span></div>
-          <%= form.number_field :bdi, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Impostos (ADM)</span></div>
-          <%= form.number_field :tax_multiplier, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Distância (km)</span></div>
-          <%= form.number_field :distance_km, step: 1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Viagem (h, ida)</span></div>
-          <%= form.number_field :travel_hours, step: 0.1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Dias de campo</span></div>
-          <%= form.number_field :logistics_days, step: 1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Nº de veículos</span></div>
-          <%= form.number_field :vehicles_count, step: 1, min: 1, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Aluguel/veículo/dia (R$)</span></div>
-          <%= form.number_field :rental_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Alimentação/pessoa/dia (R$)</span></div>
-          <%= form.number_field :meal_per_person_per_day, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Hospedagem/pessoa/noite (R$)</span></div>
-          <%= form.number_field :lodging_per_person_per_night, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Preço do combustível (R$/l)</span></div>
-          <%= form.number_field :fuel_price_per_liter, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Consumo do veículo (km/l)</span></div>
-          <%= form.number_field :vehicle_consumption_km_per_liter, step: 0.1, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-        <div class="form-control">
-          <div class="label"><span class="label-text text-xs">Combustível total (R$)</span></div>
-          <%= form.number_field :fuel_total, step: 0.01, min: 0, disabled: !editable, class: "input input-bordered input-sm" %>
-        </div>
-      </div>
-      <p class="text-xs text-base-content/50 mt-2">
-        <%= pricing.field_professionals_count %> pessoa(s) em campo consideradas na hospedagem/alimentação.
-      </p>
-
-      <div class="mt-6">
-        <h3 class="font-semibold text-base-content text-sm mb-1">Cronograma de desembolso</h3>
-        <p class="text-xs text-base-content/50 mb-3">
-          A data de cada parcela vai para o Quadro 10-1 do documento. Parcela sem data sai em branco.
-        </p>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <% pricing.payment_schedule_amounts.each_with_index do |item, index| %>
-            <div class="flex items-center gap-3 px-3 py-2 rounded-field bg-base-200/40">
-              <div class="min-w-0 flex-1">
-                <span class="text-sm text-base-content truncate block"><%= item["label"] %> (<%= item["percentage"] %>%)</span>
-                <span class="text-xs text-base-content/60"><%= number_to_currency(item["amount"], unit: "R$", separator: ",", delimiter: ".") %></span>
-              </div>
-              <%= date_field_tag "project_pricing[payment_dates][]", item["date"], disabled: !editable,
-                    class: "input input-bordered input-sm w-40" %>
-            </div>
-          <% end %>
-        </div>
-      </div>
-
-      <div class="form-control mt-4 max-w-xs">
-        <div class="label"><span class="label-text text-xs">Formato do documento final</span></div>
-        <%= select_tag "proposal[document_split]",
-              options_for_select(
-                [ [ "Documento único (técnica + comercial)", "combined" ], [ "Técnica e comercial separadas", "separated" ] ],
-                @proposal.document_split
-              ),
-              disabled: !editable, class: "select select-bordered select-sm" %>
-      </div>
-
-      <% if editable %>
-        <%= form.submit "Recalcular preço", class: "btn btn-primary btn-sm mt-4" %>
-      <% end %>
-    </div>
-
-    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-      <h2 class="font-semibold text-base-content mb-1">Cronograma</h2>
-      <p class="text-xs text-base-content/50">
-        Sugerido pela IA a partir do ET/TR ao avançar pra precificação — ajuste aqui se precisar.
-        Sem cronograma nenhum (nem data de início), a página não sai no documento.
-      </p>
-
-      <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "servico", editable: editable %>
-      <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "implantacao", editable: editable %>
-    </div>
-  <% end %>
-
-  <%= render "external_costs_section", title: "Custos externos", empty_message: "Nenhum custo externo lançado.",
-        costs: pricing.other_external_costs, kind: nil, conversation: @conversation, editable: editable %>
-
-  <%# Serviços Terceirizados (2026-09, pedido do consultor): campo separado, 100% manual — nunca
-      preenchido pela IA (AddExternalCostTool não manda `kind`). O texto da proposta nunca revela
-      que um serviço é terceirizado (ver GenerateProposalDocumentTool#description) — este campo é
-      só pra precificação, o cliente nunca vê a palavra "terceirizado" no documento. %>
-  <%= render "external_costs_section", title: "Serviços terceirizados", empty_message: "Nenhum serviço terceirizado lançado.",
-        costs: pricing.outsourced_costs, kind: "terceirizado", conversation: @conversation, editable: editable %>
-
-  <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
-    <h2 class="font-semibold text-base-content mb-4">Resumo</h2>
-
-    <dl class="flex flex-col gap-2 text-sm">
-      <div class="flex justify-between">
-        <dt class="text-base-content/60">Equipe (profissionais)</dt>
-        <dd class="text-base-content"><%= number_to_currency(pricing.professionals_total, unit: "R$", separator: ",", delimiter: ".") %></dd>
-      </div>
-      <div class="flex justify-between">
-        <dt class="text-base-content/60">Logística</dt>
-        <dd class="text-base-content"><%= number_to_currency(pricing.logistics_total, unit: "R$", separator: ",", delimiter: ".") %></dd>
-      </div>
-      <div class="flex justify-between">
-        <dt class="text-base-content/60">Custos externos</dt>
-        <dd class="text-base-content"><%= number_to_currency(pricing.external_costs_total, unit: "R$", separator: ",", delimiter: ".") %></dd>
-      </div>
-      <div class="flex justify-between pt-2 border-t border-base-300 font-semibold text-base">
-        <dt class="text-base-content">Total</dt>
-        <dd class="text-base-content"><%= number_to_currency(pricing.total_value, unit: "R$", separator: ",", delimiter: ".") %></dd>
-      </div>
-    </dl>
-
-    <h3 class="font-semibold text-base-content text-sm mt-6 mb-2">Cronograma de desembolso</h3>
-    <ul class="flex flex-col gap-1 text-sm">
-      <% pricing.payment_schedule_amounts.each do |item| %>
-        <li class="flex justify-between">
-          <span class="text-base-content/60">
-            <%= item["label"] %> (<%= item["percentage"] %>%)<%= " · #{Date.parse(item["date"]).strftime("%d/%m/%Y")}" if item["date"].present? %>
-          </span>
-          <span class="text-base-content"><%= number_to_currency(item["amount"], unit: "R$", separator: ",", delimiter: ".") %></span>
-        </li>
-      <% end %>
-    </ul>
-
-    <% if editable %>
-      <%= button_to "Aprovar preço", approve_conversation_proposal_path(@conversation), method: :post,
-            class: "btn btn-success w-full mt-6",
-            form: { data: { turbo_confirm: "Aprovar o preço de #{number_to_currency(pricing.total_value, unit: 'R$', separator: ',', delimiter: '.')}? Isso conclui a proposta." } } %>
-    <% else %>
-      <div class="alert alert-success mt-6">
-        <span>Preço aprovado. Proposta concluída.</span>
-      </div>
+  <%# Formulários "satélite" (adicionar membro, item de cronograma, recalcular logística) ficam
+      FORA do form principal e vazios — os campos deles, desenhados dentro dos cards, se ligam a
+      eles pelo atributo HTML `form=`. Form dentro de form é HTML inválido: o navegador ignorava o
+      <form> interno e fechava o externo no primeiro </form>, e os campos iam pro formulário
+      errado (relato do consultor, 2026-09: "seleciono a pessoa e não consigo adicionar"). %>
+  <% if editable %>
+    <%= tag.form(id: "add-member-form", action: conversation_proposal_proposal_professionals_path(@conversation), method: "post", class: "hidden") { token_tag } %>
+    <%= tag.form(id: "suggest-logistics-form", action: suggest_logistics_conversation_proposal_path(@conversation), method: "post", class: "hidden") { token_tag } %>
+    <% ScheduleItem::SCHEDULE_TYPE_LABELS.each_key do |schedule_type| %>
+      <%= tag.form(id: "add-schedule-#{schedule_type}", action: conversation_proposal_schedule_items_path(@conversation), method: "post", class: "hidden") { token_tag } %>
     <% end %>
-  </div>
-
-  <% if @proposal.generated_documents.attached? %>
-    <% versions = @proposal.generated_documents.group_by { |d| d.blob.metadata["version"].to_i }.sort_by { |v, _| -v } %>
-    <% current_version, current_documents = versions.first %>
-    <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="font-semibold text-base-content">Documentos gerados</h2>
-        <span class="badge badge-soft badge-primary">Versão <%= current_version %> · atual</span>
-      </div>
-
-      <p class="text-sm text-base-content/60 mb-3">
-        <%= current_documents.first.blob.metadata["description"] %> ·
-        <%= current_documents.first.created_at.strftime("%d/%m/%Y %H:%M") %>
-      </p>
-
-      <ul class="flex flex-col gap-2">
-        <% current_documents.each do |document| %>
-          <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
-            <div class="flex items-center gap-2 min-w-0">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
-                <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
-              </svg>
-              <span class="truncate text-sm text-base-content"><%= document.filename %></span>
-              <% if (kind_label = document_kind_label(document)) %>
-                <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
-              <% end %>
-            </div>
-            <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
-          </li>
-        <% end %>
-      </ul>
-
-      <% if versions.size > 1 %>
-        <details class="mt-4">
-          <summary class="cursor-pointer text-sm text-base-content/60 hover:text-base-content">Histórico de versões anteriores (<%= versions.size - 1 %>)</summary>
-
-          <ul class="flex flex-col gap-3 mt-3">
-            <% versions[1..].each do |version, documents| %>
-              <li>
-                <p class="text-sm text-base-content/60 mb-1">
-                  Versão <%= version %> — <%= documents.first.blob.metadata["description"] %> ·
-                  <%= documents.first.created_at.strftime("%d/%m/%Y %H:%M") %>
-                </p>
-                <ul class="flex flex-col gap-2">
-                  <% documents.each do |document| %>
-                    <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
-                      <div class="flex items-center gap-2 min-w-0">
-                        <span class="truncate text-sm text-base-content"><%= document.filename %></span>
-                        <% if (kind_label = document_kind_label(document)) %>
-                          <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
-                        <% end %>
-                      </div>
-                      <%= link_to "Baixar", rails_blob_path(document, disposition: "attachment"), class: "btn btn-ghost btn-xs shrink-0" %>
-                    </li>
-                  <% end %>
-                </ul>
-              </li>
-            <% end %>
-          </ul>
-        </details>
-      <% end %>
-    </div>
   <% end %>
+
+  <div class="grid xl:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start">
+    <div class="flex flex-col gap-6 min-w-0">
+      <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, id: "pricing-form", class: "flex flex-col gap-6" do |form| %>
+        <%= render "team_section", form: form, pricing: pricing, editable: editable, conversation: @conversation, professionals: @professionals %>
+        <%= render "parameters_section", form: form, pricing: pricing, editable: editable %>
+        <%= render "payment_section", form: form, pricing: pricing, proposal: @proposal, editable: editable %>
+
+        <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+          <div class="px-6 pt-5">
+            <h2 class="font-semibold text-base-content">Cronograma</h2>
+            <p class="text-sm text-base-content/60 mt-0.5">
+              Sugerido pela IA a partir do ET/TR — ajuste aqui se precisar. Sem itens (ou sem data de início), a página não sai no documento.
+            </p>
+          </div>
+          <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "servico", editable: editable %>
+          <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "implantacao", editable: editable %>
+        </section>
+      <% end %>
+
+      <%= render "external_costs_section", title: "Custos externos",
+            description: "ARTs, taxas, locações, passagens e outros custos repassados.",
+            empty_message: "Nenhum custo externo lançado.",
+            costs: pricing.other_external_costs, kind: nil, conversation: @conversation, editable: editable %>
+
+      <%# Serviços Terceirizados (2026-09): 100% manual — a IA nunca marca nada como terceirizado,
+          e o texto da proposta nunca revela isso ao cliente (ver GenerateProposalDocumentTool). %>
+      <%= render "external_costs_section", title: "Serviços terceirizados",
+            description: "Uso interno — nunca aparece como terceirizado no documento do cliente.",
+            empty_message: "Nenhum serviço terceirizado lançado.",
+            costs: pricing.outsourced_costs, kind: "terceirizado", conversation: @conversation, editable: editable %>
+    </div>
+
+    <aside class="flex flex-col gap-6 xl:sticky xl:top-6">
+      <%= render "summary", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
+      <%= render "generated_documents", proposal: @proposal %>
+    </aside>
+  </div>
 </div>

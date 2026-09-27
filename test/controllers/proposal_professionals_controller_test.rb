@@ -41,4 +41,36 @@ class ProposalProfessionalsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to conversation_proposal_path(@conversation)
     assert_not_includes @pricing.reload.proposal_professionals, line
   end
+
+  test "destroy recusa remover a única linha de um profissional fixo" do
+    line = @pricing.proposal_professionals.create!(professional: professionals(:diretora), deliverable_name: "Direção", man_hours: 0, field_days: 0)
+
+    assert_no_difference "@pricing.proposal_professionals.count" do
+      delete conversation_proposal_proposal_professional_path(@conversation, line)
+    end
+
+    assert_redirected_to conversation_proposal_path(@conversation)
+    assert_match "equipe fixa", flash[:alert]
+  end
+
+  test "destroy permite remover linha extra de um fixo, mantendo a pessoa na equipe" do
+    @pricing.proposal_professionals.create!(professional: professionals(:diretora), deliverable_name: "Direção", man_hours: 0, field_days: 0)
+    extra = @pricing.proposal_professionals.create!(professional: professionals(:diretora), deliverable_name: "Revisão final", man_hours: 4, field_days: 0)
+
+    assert_difference "@pricing.proposal_professionals.count", -1 do
+      delete conversation_proposal_proposal_professional_path(@conversation, extra)
+    end
+    assert @pricing.proposal_professionals.exists?(professional: professionals(:diretora))
+  end
+
+  test "create e destroy recusam proposta aprovada" do
+    proposals(:priced_proposal).update!(status: "approved")
+
+    assert_no_difference "@pricing.proposal_professionals.count" do
+      post conversation_proposal_proposal_professionals_path(@conversation), params: {
+        proposal_professional: { professional_id: professionals(:biologa).id, deliverable_name: "X", man_hours: "1", field_days: "0" }
+      }
+      delete conversation_proposal_proposal_professional_path(@conversation, proposal_professionals(:coordenacao_line))
+    end
+  end
 end

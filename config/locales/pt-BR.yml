@@ -14,3 +14,8 @@ pt-BR:
         rate_daily: Valor da diária
         active: Ativo
         always_included: Sempre incluir na equipe
+      proposal_professional:
+        professional: Profissional
+        deliverable_name: Entregável
+        man_hours: Horas-homem
+        field_days: Diárias

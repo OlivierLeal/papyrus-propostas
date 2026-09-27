@@ -12,6 +12,36 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  # Proposta criada antes de o valor da hora-homem ser preenchido: o subtotal gravado ficava o
+  # antigo até alguém clicar em "Recalcular preço". Abrir a tela já corrige.
+  test "show recalcula subtotais que não batem mais com o valor atual do cadastro" do
+    professionals(:coordenador).update_columns(rate_man_hour: 300) # sem callback: simula o dado já desatualizado
+
+    get conversation_proposal_path(@conversation)
+
+    assert_equal 18_000, proposal_professionals(:coordenacao_line).reload.subtotal
+    assert_match "R$ 18.000,00", response.body
+    assert_match "R$ 300,00/h", response.body
+  end
+
+  test "show não recalcula proposta aprovada" do
+    @proposal.update!(status: "approved")
+    professionals(:coordenador).update_columns(rate_man_hour: 300)
+
+    get conversation_proposal_path(@conversation)
+
+    assert_equal 15_000, proposal_professionals(:coordenacao_line).reload.subtotal
+  end
+
+  test "show avisa quem da equipe está sem valor de hora-homem/diária" do
+    professionals(:biologa).update_columns(rate_man_hour: 0, rate_daily: 0)
+
+    get conversation_proposal_path(@conversation)
+
+    assert_match "sem valor de hora-homem/diária cadastrado", response.body
+    assert_match professionals(:biologa).name, response.body
+  end
+
   test "show renders the new logistics fields and the recalculate button" do
     get conversation_proposal_path(@conversation)
 

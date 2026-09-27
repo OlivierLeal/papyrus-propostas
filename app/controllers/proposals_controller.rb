@@ -4,6 +4,10 @@ class ProposalsController < ApplicationController
 
   def show
     @professionals = Professional.active.order(:name)
+    # Proposta criada antes de o valor da hora-homem/diária ser preenchido (ou alterado) em
+    # Configurações ficava com o subtotal antigo gravado — refaz a conta ao abrir. Aprovada não:
+    # preço aprovado fica congelado.
+    @proposal.project_pricing.recalculate! if editable? && @proposal.project_pricing.stale_subtotals?
     @proposal.project_pricing.proposal_professionals.includes(:professional).load
   end
 
@@ -120,7 +124,7 @@ class ProposalsController < ApplicationController
         :fuel_total, :fuel_price_per_liter, :vehicle_consumption_km_per_liter,
         :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
-        proposal_professionals_attributes: %i[ id man_hours field_days ],
+        proposal_professionals_attributes: %i[ id deliverable_name man_hours field_days ],
         schedule_items_attributes: %i[ id phase_name activity_name start_period duration_periods milestone ]
       )
     end

@@ -1,0 +1,50 @@
+<%# Resumo lateral + ações. Fica FORA do form principal: "Salvar e recalcular" se liga a ele pelo
+    atributo `form=`, e "Aprovar preço" (button_to) tem o próprio form. locals: pricing, proposal,
+    conversation, editable %>
+<section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+  <div class="px-6 pt-5 pb-4">
+    <p class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Total da proposta</p>
+    <p class="font-display text-3xl font-bold text-primary tabular-nums mt-1"><%= brl(pricing.total_value) %></p>
+  </div>
+
+  <dl class="border-t border-base-300 px-6 py-4 flex flex-col gap-2 text-sm">
+    <% outsourced = pricing.outsourced_costs.sum { |cost, _| cost["value"].to_f } %>
+    <% [ [ "Equipe", pricing.professionals_total ],
+         [ "Logística", pricing.logistics_total ],
+         [ "Custos externos", pricing.external_costs_total - outsourced ],
+         [ "Terceirizados", outsourced ] ].each do |label, value| %>
+      <div class="flex justify-between gap-3">
+        <dt class="text-base-content/60"><%= label %></dt>
+        <dd class="text-base-content tabular-nums"><%= brl(value) %></dd>
+      </div>
+    <% end %>
+  </dl>
+
+  <div class="border-t border-base-300 px-6 py-4">
+    <p class="text-xs uppercase tracking-wide text-base-content/50 font-semibold mb-2">Desembolso</p>
+    <ul class="flex flex-col gap-1.5 text-sm">
+      <% pricing.payment_schedule_amounts.each do |item| %>
+        <li class="flex justify-between gap-3">
+          <span class="text-base-content/60 min-w-0 truncate">
+            <%= item["label"] %> · <%= item["percentage"] %>%<%= " · #{Date.parse(item["date"]).strftime("%d/%m/%Y")}" if item["date"].present? %>
+          </span>
+          <span class="text-base-content tabular-nums shrink-0"><%= brl(item["amount"]) %></span>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+
+  <div class="border-t border-base-300 px-6 py-4 flex flex-col gap-2">
+    <% if editable %>
+      <button type="submit" form="pricing-form" class="btn btn-primary w-full">Salvar e recalcular</button>
+      <%= button_to "Aprovar preço", approve_conversation_proposal_path(conversation), method: :post,
+            class: "btn btn-success btn-outline w-full",
+            form: { data: { turbo_confirm: "Aprovar o preço de #{brl(pricing.total_value)}? Isso trava a precificação e conclui a proposta." } } %>
+      <p class="text-xs text-base-content/50 text-center">Salve antes de aprovar — alterações não salvas não entram.</p>
+    <% else %>
+      <div class="alert alert-success alert-soft text-sm">
+        <span>Preço aprovado. Proposta concluída.</span>
+      </div>
+    <% end %>
+  </div>
+</section>

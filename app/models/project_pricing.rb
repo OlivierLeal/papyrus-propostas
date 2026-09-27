@@ -40,11 +40,18 @@ class ProjectPricing < ApplicationRecord
   # + aluguel/veículo/dia × nº de veículos × dias + combustível (2026-09: hospedagem/alimentação
   # passam a ser POR PESSOA, aluguel continua por VEÍCULO — ver CLAUDE.md seção 5).
   def logistics_total
+    logistics_breakdown.values.sum
+  end
+
+  # Cada parcela do C4, pra Tela de Precificação mostrar de onde sai o total da logística.
+  def logistics_breakdown
     people = field_professionals_count
-    lodging = lodging_per_person_per_night * people * logistics_days
-    meals = meal_per_person_per_day * people * logistics_days
-    rental = rental_per_day * vehicles_count * logistics_days
-    lodging + meals + rental + fuel_total
+    {
+      lodging: lodging_per_person_per_night * people * logistics_days,
+      meals: meal_per_person_per_day * people * logistics_days,
+      rental: rental_per_day * vehicles_count * logistics_days,
+      fuel: fuel_total
+    }
   end
 
   # Nº de profissionais desta proposta que vão a campo (diárias > 0) — mínimo 1 pra nunca
@@ -117,6 +124,14 @@ class ProjectPricing < ApplicationRecord
     ActiveRecord::Base.transaction do
       lines.each(&:save!)
       update!(total_value: (lines.sum(&:subtotal) + logistics_total + external_costs_total).round(2))
+    end
+  end
+
+  # Algum subtotal gravado não bate mais com o valor atual de hora-homem/diária do cadastro
+  # (ex.: taxa preenchida em Configurações depois de a proposta existir).
+  def stale_subtotals?
+    proposal_professionals.includes(:professional).any? do |pp|
+      pp.subtotal != pp.expected_subtotal(bdi: bdi, tax_multiplier: tax_multiplier)
     end
   end
 

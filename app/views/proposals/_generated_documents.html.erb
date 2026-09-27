@@ -1,0 +1,51 @@
+<%# Documentos gerados (versão atual + histórico). locals: proposal %>
+<% if proposal.generated_documents.attached? %>
+  <% versions = proposal.generated_documents.group_by { |d| d.blob.metadata["version"].to_i }.sort_by { |v, _| -v } %>
+  <% current_version, current_documents = versions.first %>
+  <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+    <div class="flex items-center justify-between gap-2 px-6 pt-5 pb-3">
+      <h2 class="font-semibold text-base-content">Documentos</h2>
+      <span class="badge badge-soft badge-primary badge-sm">Versão <%= current_version %></span>
+    </div>
+    <p class="px-6 text-xs text-base-content/60 mb-3">
+      <%= current_documents.first.blob.metadata["description"] %> · <%= current_documents.first.created_at.strftime("%d/%m/%Y %H:%M") %>
+    </p>
+
+    <ul class="flex flex-col gap-2 px-6 pb-5">
+      <% current_documents.each do |document| %>
+        <li>
+          <%= link_to rails_blob_path(document, disposition: "attachment"),
+                class: "flex items-center gap-2 px-3 py-2 rounded-field bg-base-200/50 hover:bg-base-200 transition-colors" do %>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-primary shrink-0"><path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" /><path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" /></svg>
+            <span class="truncate text-sm text-base-content flex-1"><%= document.filename %></span>
+            <% if (kind_label = document_kind_label(document)) %>
+              <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
+            <% end %>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+
+    <% if versions.size > 1 %>
+      <details class="border-t border-base-300 px-6 py-3">
+        <summary class="cursor-pointer text-sm text-base-content/60 hover:text-base-content">Versões anteriores (<%= versions.size - 1 %>)</summary>
+        <ul class="flex flex-col gap-3 mt-3">
+          <% versions[1..].each do |version, documents| %>
+            <li>
+              <p class="text-xs text-base-content/60 mb-1">
+                Versão <%= version %> — <%= documents.first.blob.metadata["description"] %> · <%= documents.first.created_at.strftime("%d/%m/%Y %H:%M") %>
+              </p>
+              <ul class="flex flex-col gap-1">
+                <% documents.each do |document| %>
+                  <li>
+                    <%= link_to document.filename, rails_blob_path(document, disposition: "attachment"), class: "link link-hover text-sm truncate block" %>
+                  </li>
+                <% end %>
+              </ul>
+            </li>
+          <% end %>
+        </ul>
+      </details>
+    <% end %>
+  </section>
+<% end %>

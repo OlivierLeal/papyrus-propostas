@@ -1,0 +1,52 @@
+<%# Desembolso (datas por parcela) + formato do documento final. locals: form, pricing, proposal, editable %>
+<section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+  <div class="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-px bg-base-300 rounded-box overflow-hidden">
+    <div class="bg-base-100 p-6">
+      <h2 class="font-semibold text-base-content">Desembolso</h2>
+      <p class="text-sm text-base-content/60 mt-0.5 mb-4">A data de cada parcela é opcional — fica registrada aqui, o documento mostra só o percentual.</p>
+
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr class="text-xs uppercase tracking-wide text-base-content/50">
+              <th class="font-semibold">Parcela</th>
+              <th class="font-semibold text-right">%</th>
+              <th class="font-semibold text-right">Valor</th>
+              <th class="font-semibold">Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% pricing.payment_schedule_amounts.each do |item| %>
+              <tr>
+                <td class="text-base-content"><%= item["label"] %></td>
+                <td class="text-right tabular-nums text-base-content/70"><%= item["percentage"] %>%</td>
+                <td class="text-right tabular-nums font-medium whitespace-nowrap"><%= brl(item["amount"]) %></td>
+                <td>
+                  <%= date_field_tag "project_pricing[payment_dates][]", item["date"], disabled: !editable, class: "input input-sm w-40" %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="bg-base-100 p-6">
+      <h2 class="font-semibold text-base-content">Formato do documento</h2>
+      <p class="text-sm text-base-content/60 mt-0.5 mb-4">Licitações costumam exigir envelopes separados.</p>
+
+      <div class="flex flex-col gap-3">
+        <% [ [ "combined", "Documento único", "Técnica e comercial no mesmo arquivo (PTC)." ],
+             [ "separated", "Técnica e comercial separadas", "Dois arquivos (PT + PC)." ] ].each do |value, label, hint| %>
+          <label class="flex items-start gap-3 p-3 rounded-box border border-base-300 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5 <%= "opacity-60 pointer-events-none" unless editable %>">
+            <%= radio_button_tag "proposal[document_split]", value, proposal.document_split == value, disabled: !editable, class: "radio radio-primary radio-sm mt-0.5" %>
+            <span>
+              <span class="block text-sm font-medium text-base-content"><%= label %></span>
+              <span class="block text-xs text-base-content/60"><%= hint %></span>
+            </span>
+          </label>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</section>

@@ -285,6 +285,24 @@ chaves `man_hours`/`field_days`. `field_professionals_count` (logística) conta 
 mudar valor; horas de escritório → HH direto; horas de campo → diárias (÷ 8, meia diária pra
 cima), exceto quando campo == escritório (espelho do antigo campo único) → 0 diárias.
 
+**Tela de Precificação repaginada + bug de "não consigo adicionar na equipe" (2026-09-27).**
+Duas causas do bug: (1) a tela inteira era UM `<form>` de PATCH com outros forms dentro ("Adicionar
+linha", `button_to` de remover, mini-forms do cronograma) — form aninhado é HTML inválido, o
+navegador ignorava o `<form>` interno e fechava o externo no primeiro `</form>`, mandando campos
+pro formulário errado conforme a posição; (2) a busca de profissional escolhia no `click`, mas o
+`blur` do campo (já no `mousedown`) apagava a lista antes — clique humano "lento" nunca
+selecionava. Correção: forms satélite (`#add-member-form`, `#add-schedule-<tipo>`,
+`#suggest-logistics-form`) ficam vazios fora do `#pricing-form` e os campos se ligam pelo atributo
+HTML `form=`; remover vira `link_to` com `turbo_method: :delete`; a busca escolhe no `mousedown`
+com `preventDefault`, Enter nunca submete o preço, e o botão "Adicionar à equipe" só habilita com
+alguém escolhido. **Nunca voltar a aninhar form nesta tela.** Layout: partials `_team_section`
+(avatar, selo Fixo, entregável editável, totais), `_parameters_section` (Margens / Deslocamento /
+Campo + detalhamento `ProjectPricing#logistics_breakdown`), `_payment_section`, `_summary` (lateral
+fixa com total e ações), `_generated_documents`; helper `ProposalsHelper#brl`. **Equipe fixa não sai
+da equipe**: `ProposalProfessional#removable?` (fixo só pode perder linha EXTRA, a última fica),
+checado na view e em `ProposalProfessionalsController#destroy`, que também passou a recusar
+proposta aprovada (create e destroy).
+
 **"Serviços Terceirizados" — campo separado de Custos Externos, 100% manual (2026-09, pedido do
 consultor a partir de conversa com o time — "a parte terceirizada a gente coloca um campo
 específico... 100% responsabilidade dela inserir").** Mesmo armazenamento de sempre

@@ -1,49 +1,57 @@
-<%# Uma lista de custos externos (description/value) — usada duas vezes: "Custos Externos"
-    genéricos (ARTs, terceiros diversos) e "Serviços Terceirizados" (2026-09, pedido do
-    consultor: campo separado, 100% manual — a IA nunca marca nada como terceirizado, só entra
-    aqui pela tela). Mesmo armazenamento (ProjectPricing#external_costs), só filtrado por `kind`
-    — ver ProjectPricing#outsourced_costs/#other_external_costs.
-    locals: title, empty_message, costs (pares [item, índice] na lista COMPLETA), kind,
-    conversation, editable %>
-<div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6 mt-4">
-  <h2 class="font-semibold text-base-content mb-4"><%= title %></h2>
+<%# Uma lista de custos externos (description/value) — usada duas vezes: "Custos externos"
+    genéricos e "Serviços terceirizados" (100% manual). Mesmo armazenamento
+    (ProjectPricing#external_costs), filtrado por `kind` — ver #outsourced_costs/#other_external_costs.
+    Fica FORA do form principal (#pricing-form), então os forms daqui não aninham.
+    locals: title, description, empty_message, costs (pares [item, índice] na lista COMPLETA),
+    kind, conversation, editable %>
+<section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5 pb-4">
+    <div>
+      <h2 class="font-semibold text-base-content"><%= title %></h2>
+      <p class="text-sm text-base-content/60 mt-0.5"><%= description %></p>
+    </div>
+    <span class="text-sm font-semibold text-base-content tabular-nums"><%= brl(costs.sum { |cost, _| cost["value"].to_f }) %></span>
+  </div>
 
-  <ul class="flex flex-col gap-2 mb-4">
+  <ul class="border-t border-base-300 divide-y divide-base-300">
     <% costs.each do |cost, index| %>
-      <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-200/50">
-        <span class="text-sm text-base-content"><%= cost["description"] %></span>
-        <div class="flex items-center gap-3 shrink-0">
-          <span class="text-sm text-base-content/70"><%= number_to_currency(cost["value"], unit: "R$", separator: ",", delimiter: ".") %></span>
+      <li class="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-base-200/30">
+        <span class="text-sm text-base-content min-w-0 truncate"><%= cost["description"] %></span>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-sm text-base-content tabular-nums"><%= brl(cost["value"]) %></span>
           <% if editable %>
             <%= button_to remove_external_cost_conversation_proposal_path(conversation, index: index), method: :delete,
-                  class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover" do %>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-              </svg>
+                  class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover",
+                  form: { data: { turbo_confirm: "Remover #{cost["description"]}?" } } do %>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
             <% end %>
           <% end %>
         </div>
       </li>
     <% end %>
     <% if costs.empty? %>
-      <li class="text-center text-base-content/50 py-2 text-sm"><%= empty_message %></li>
+      <li class="text-center text-base-content/50 px-6 py-4 text-sm"><%= empty_message %></li>
     <% end %>
   </ul>
 
   <% if editable %>
-    <%= form_with url: add_external_cost_conversation_proposal_path(conversation), class: "flex flex-wrap items-end gap-2" do |cost_form| %>
+    <%= form_with url: add_external_cost_conversation_proposal_path(conversation),
+          class: "flex flex-wrap items-end gap-3 border-t border-base-300 bg-base-200/30 px-6 py-4 rounded-b-box" do |cost_form| %>
       <% if kind %>
         <%= cost_form.hidden_field :kind, value: kind %>
       <% end %>
-      <div class="form-control">
-        <div class="label"><span class="label-text text-xs">Descrição</span></div>
-        <%= cost_form.text_field :description, class: "input input-bordered input-sm" %>
-      </div>
-      <div class="form-control">
-        <div class="label"><span class="label-text text-xs">Valor (R$)</span></div>
-        <%= cost_form.number_field :value, step: 0.01, min: 0, class: "input input-bordered input-sm w-32" %>
-      </div>
+      <fieldset class="fieldset p-0 flex-1 min-w-48">
+        <legend class="fieldset-legend pt-0">Descrição</legend>
+        <%= cost_form.text_field :description, required: true, class: "input input-sm w-full", placeholder: kind ? "Ex.: Levantamento com drone" : "Ex.: ART" %>
+      </fieldset>
+      <fieldset class="fieldset p-0 w-40">
+        <legend class="fieldset-legend pt-0">Valor</legend>
+        <label class="input input-sm w-full">
+          <span class="text-base-content/40 text-xs">R$</span>
+          <%= cost_form.number_field :value, step: 0.01, min: 0.01, required: true, class: "grow text-right" %>
+        </label>
+      </fieldset>
       <%= cost_form.submit "Adicionar", class: "btn btn-sm btn-outline" %>
     <% end %>
   <% end %>
-</div>
+</section>
