@@ -21,7 +21,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
       2 => { rows: [ [ "Diretoria", "Diretora de Negócios", "Charlene Luz", "Engenheira. CREA 1." ],
                      [ "Execução", "Geoprocessamento e Cartografia", "Rodrigo Moate", "Geógrafo. CREA 2." ] ] },
       3 => { rows: [ [ "Renovação da Licença Prévia - RLP", "220.500,00" ] ], auto_number: true },
-      4 => { rows: [ [ "Assinatura do contrato", "40" ] ], auto_number: true }
+      4 => { rows: [ [ "Assinatura do contrato", "40%", "4.000,00" ] ], auto_number: true }
     }
   end
 
@@ -254,7 +254,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_equal "1", cells[0]
     assert_equal "Assinatura do contrato", cells[1]
-    assert_equal "40", cells[2]
+    assert_equal "40%", cells[2]
+    assert_equal "4.000,00", cells[3]
   end
 
   test "fill turns multi-paragraph placeholder text into separate justified paragraphs" do
@@ -637,7 +638,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     data_rows = doc.xpath("//w:tbl", NS)[5].xpath(".//w:tr", NS)[1..]
 
     assert_equal 1, data_rows.size
-    assert_equal [ "1", "Assinatura do contrato", "40" ], cell_texts(data_rows[0])
+    assert_equal [ "1", "Assinatura do contrato", "40%", "4.000,00" ], cell_texts(data_rows[0])
     assert_includes document_xml(bytes), "Mobilização"
   end
 
@@ -948,7 +949,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     doc = parsed_document(bytes)
 
     desembolso_table = doc.xpath("//w:tbl", NS)[4]
-    assert_equal [ "1", "Assinatura do contrato", "40" ],
+    assert_equal [ "1", "Assinatura do contrato", "40%", "4.000,00" ],
                  cell_texts(desembolso_table.xpath(".//w:tr", NS)[1])
   end
 end

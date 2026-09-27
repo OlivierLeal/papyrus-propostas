@@ -134,12 +134,13 @@ class Proposal < ApplicationRecord
     fallback.to_s.strip.presence || "Serviço"
   end
 
-  # Linhas do Quadro de Desembolso — marco e % do preço total, direto do payment_schedule. Só a
-  # porcentagem (2026-09, a pedido do consultor — o quadro deixou de trazer R$/DATA por parcela;
-  # essas datas continuam editáveis na Tela de Precificação, só não vão mais impressas aqui).
+  # Linhas do Quadro de Desembolso — [MARCO, %, VALOR R$]. O valor é calculado pelo sistema
+  # (ProjectPricing#payment_schedule_amounts, % do total), nunca pela IA. 2026-09-27: voltou a
+  # coluna de valor (pedido do consultor, "o desembolso tem que ser calculado"); a data de cada
+  # parcela continua só na Tela de Precificação.
   def docx_payment_schedule_rows
-    project_pricing.payment_schedule.map do |item|
-      [ item["label"], format_percentage(item["percentage"]) ]
+    project_pricing.payment_schedule_amounts.map do |item|
+      [ item["label"], "#{format_percentage(item['percentage'])}%", format_currency(item["amount"]) ]
     end
   end
 
@@ -503,8 +504,7 @@ class Proposal < ApplicationRecord
       ActionController::Base.helpers.number_to_currency(value, unit: "", separator: ",", delimiter: ".").strip
     end
 
-    # "40" quando o percentual for inteiro, "37,5" (vírgula, padrão PT-BR) quando não — nunca o
-    # "%" no texto da célula, a coluna já se chama "% DO ITEM".
+    # "40" quando o percentual for inteiro, "37,5" (vírgula, padrão PT-BR) quando não.
     def format_percentage(value)
       numero = value.to_f
       return numero.to_i.to_s if (numero % 1).zero?

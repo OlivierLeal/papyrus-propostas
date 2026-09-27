@@ -1,41 +1,57 @@
-<%# Desembolso (datas por parcela) + formato do documento final. locals: form, pricing, proposal, editable %>
+<%# Desembolso (parcelas editáveis) + formato do documento final. locals: form, pricing, proposal, editable %>
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
-  <div class="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-px bg-base-300 rounded-box overflow-hidden">
-    <div class="bg-base-100 p-6">
-      <h2 class="font-semibold text-base-content">Desembolso</h2>
-      <p class="text-sm text-base-content/60 mt-0.5 mb-4">A data de cada parcela é opcional — fica registrada aqui, o documento mostra só o percentual.</p>
+  <div class="flex flex-col gap-px bg-base-300 rounded-box overflow-hidden">
+    <%# Parcelas editáveis (2026-09-27): marco, % e data; valor calculado a partir do total. Linha
+        sem marco é descartada no servidor (ProjectPricing#payment_schedule_items=). %>
 
-      <div class="overflow-x-auto">
+    <div class="bg-base-100 p-6" data-controller="payment-schedule" data-payment-schedule-total-value="<%= pricing.total_value.to_f %>">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="font-semibold text-base-content">Desembolso</h2>
+          <p class="text-sm text-base-content/60 mt-0.5">Valor de cada parcela = % × total da proposta. A data é opcional e não vai para o documento.</p>
+        </div>
+        <span class="text-sm text-base-content/60">Soma: <strong data-payment-schedule-target="sum" class="tabular-nums"><%= pricing.payment_percentage_total.to_s("F").sub(/\.0\z/, "") %>%</strong></span>
+      </div>
+
+      <div role="alert" class="alert alert-error alert-soft text-sm mt-3 py-2" data-payment-schedule-target="warning" hidden>
+        <span>Os percentuais precisam somar 100% para salvar.</span>
+      </div>
+
+      <div class="overflow-x-auto mt-3">
         <table class="table table-sm">
           <thead>
             <tr class="text-xs uppercase tracking-wide text-base-content/50">
-              <th class="font-semibold">Parcela</th>
-              <th class="font-semibold text-right">%</th>
+              <th class="font-semibold">Marco</th>
+              <th class="font-semibold">%</th>
               <th class="font-semibold text-right">Valor</th>
               <th class="font-semibold">Data</th>
+              <th></th>
             </tr>
           </thead>
-          <tbody>
-            <% pricing.payment_schedule_amounts.each do |item| %>
-              <tr>
-                <td class="text-base-content"><%= item["label"] %></td>
-                <td class="text-right tabular-nums text-base-content/70"><%= item["percentage"] %>%</td>
-                <td class="text-right tabular-nums font-medium whitespace-nowrap"><%= brl(item["amount"]) %></td>
-                <td>
-                  <%= date_field_tag "project_pricing[payment_dates][]", item["date"], disabled: !editable, class: "input input-sm w-40" %>
-                </td>
-              </tr>
+          <tbody data-payment-schedule-target="body">
+            <% pricing.payment_schedule_amounts.each_with_index do |item, index| %>
+              <%= render "payment_row", index: index, item: item, amount: item["amount"], editable: editable %>
             <% end %>
           </tbody>
         </table>
       </div>
+
+      <% if editable %>
+        <template data-payment-schedule-target="template">
+          <%= render "payment_row", index: "NEW_INDEX", item: { "label" => "", "percentage" => 0 }, amount: 0, editable: editable %>
+        </template>
+        <button type="button" class="btn btn-ghost btn-sm text-primary mt-2" data-action="payment-schedule#add">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
+          Adicionar parcela
+        </button>
+      <% end %>
     </div>
 
     <div class="bg-base-100 p-6">
       <h2 class="font-semibold text-base-content">Formato do documento</h2>
       <p class="text-sm text-base-content/60 mt-0.5 mb-4">Licitações costumam exigir envelopes separados.</p>
 
-      <div class="flex flex-col gap-3">
+      <div class="grid sm:grid-cols-2 gap-3">
         <% [ [ "combined", "Documento único", "Técnica e comercial no mesmo arquivo (PTC)." ],
              [ "separated", "Técnica e comercial separadas", "Dois arquivos (PT + PC)." ] ].each do |value, label, hint| %>
           <label class="flex items-start gap-3 p-3 rounded-box border border-base-300 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5 <%= "opacity-60 pointer-events-none" unless editable %>">

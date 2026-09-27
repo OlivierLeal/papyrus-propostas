@@ -197,6 +197,40 @@ class ProjectPricingTest < ActiveSupport::TestCase
 
   # A data de cada parcela mora dentro do payment_schedule (jsonb), junto do marco e do
   # percentual — não é coluna nova.
+  test "payment_schedule_amounts: a última parcela absorve o arredondamento e a soma bate com o total" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.update!(payment_schedule: [ { "label" => "A", "percentage" => 33.33 }, { "label" => "B", "percentage" => 33.33 }, { "label" => "C", "percentage" => 33.34 } ])
+    pricing.update_columns(total_value: 1000.01)
+
+    amounts = pricing.payment_schedule_amounts.map { |item| item["amount"] }
+
+    assert_equal 1000.01.to_d, amounts.sum.to_d.round(2)
+  end
+
+  test "payment_schedule_items= substitui as parcelas, descarta linha sem marco e aceita vírgula" do
+    pricing = project_pricings(:priced_pricing)
+
+    pricing.payment_schedule_items = {
+      "0" => { "label" => "Assinatura", "percentage" => "40", "date" => "2026-10-01" },
+      "1" => { "label" => "", "percentage" => "10", "date" => "" },
+      "2" => { "label" => "Relatório", "percentage" => "37,5", "date" => "" },
+      "3" => { "label" => "Final", "percentage" => "22.5", "date" => "" }
+    }
+
+    assert pricing.save
+    assert_equal [ { "label" => "Assinatura", "percentage" => 40, "date" => "2026-10-01" },
+                   { "label" => "Relatório", "percentage" => 37.5 },
+                   { "label" => "Final", "percentage" => 22.5 } ], pricing.reload.payment_schedule
+  end
+
+  test "não salva desembolso que não soma 100%" do
+    pricing = project_pricings(:priced_pricing)
+    pricing.payment_schedule_items = [ { "label" => "Assinatura", "percentage" => "50" } ]
+
+    assert_not pricing.save
+    assert_match "100%", pricing.errors[:payment_schedule].first
+  end
+
   test "payment_dates= stores one date per instalment, in order, keeping the rest of the schedule" do
     pricing = project_pricings(:priced_pricing)
 

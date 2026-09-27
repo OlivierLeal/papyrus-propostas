@@ -469,21 +469,25 @@ class ProposalTest < ActiveSupport::TestCase
                  proposal.docx_total_price
   end
 
-  # 2026-09: o quadro deixou de trazer R$/DATA por parcela (voltou o quadro de Preço com o
-  # total — ver #docx_price_rows) — a data continua editável na Tela de Precificação, só não é
-  # mais impressa aqui.
-  test "docx_payment_schedule_rows carries the milestone and the percentage of the total" do
-    rows = proposals(:priced_proposal).docx_payment_schedule_rows
+  # 2026-09-27: o quadro de desembolso voltou a trazer o valor de cada parcela, calculado pelo
+  # sistema (% × total) — pedido do consultor, "o desembolso tem que ser calculado".
+  test "docx_payment_schedule_rows traz marco, percentual e valor calculado de cada parcela" do
+    proposal = proposals(:priced_proposal)
+    proposal.project_pricing.update_columns(total_value: 10_000)
+
+    rows = proposal.docx_payment_schedule_rows
 
     assert_equal 4, rows.size
-    assert_equal [ "Assinatura do contrato", "30" ], rows.first
+    assert_equal [ "Assinatura do contrato", "30%", "3.000,00" ], rows.first
+    assert_equal [ "Emissão da licença", "5%", "500,00" ], rows.last
   end
 
   test "docx_payment_schedule_rows formats a non-integer percentage with a comma" do
     proposal = proposals(:priced_proposal)
-    proposal.project_pricing.update!(payment_schedule: [ { "label" => "Assinatura", "percentage" => 37.5 } ])
+    proposal.project_pricing.update!(payment_schedule: [ { "label" => "Assinatura", "percentage" => 37.5 }, { "label" => "Final", "percentage" => 62.5 } ])
+    proposal.project_pricing.update_columns(total_value: 1000)
 
-    assert_equal [ [ "Assinatura", "37,5" ] ], proposal.docx_payment_schedule_rows
+    assert_equal [ "Assinatura", "37,5%", "375,00" ], proposal.docx_payment_schedule_rows.first
   end
 
   test "docx_price_rows: 1 linha só, com o nome do serviço e o preço total formatado" do

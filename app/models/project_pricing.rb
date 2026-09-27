@@ -8,6 +8,8 @@ class ProjectPricing < ApplicationRecord
   has_many :schedule_items, -> { order(:position) }, dependent: :destroy
   accepts_nested_attributes_for :schedule_items, update_only: true
 
+  validate :payment_schedule_sums_to_100, if: :will_save_change_to_payment_schedule?
+
   validates :bdi, :tax_multiplier, presence: true, numericality: { greater_than: 0 }
   validates :distance_km, :rental_per_day, :meal_per_person_per_day, :fuel_total,
             :fuel_price_per_liter, :vehicle_consumption_km_per_liter, :lodging_per_person_per_night,
@@ -135,9 +137,33 @@ class ProjectPricing < ApplicationRecord
     end
   end
 
+  # Valor de cada parcela. A última absorve a diferença de arredondamento, pra soma das parcelas
+  # bater centavo a centavo com o total quando os percentuais fecham 100%.
   def payment_schedule_amounts
-    payment_schedule.map do |item|
-      item.merge("amount" => (total_value * item["percentage"].to_f / 100).round(2))
+    amounts = payment_schedule.map { |item| (total_value * item["percentage"].to_f / 100).round(2) }
+    if amounts.any? && payment_percentage_total == 100
+      amounts[-1] = (total_value - amounts[0..-2].sum).round(2)
+    end
+
+    payment_schedule.each_with_index.map { |item, index| item.merge("amount" => amounts[index]) }
+  end
+
+  def payment_percentage_total
+    payment_schedule.sum { |item| item["percentage"].to_d }
+  end
+
+  # Parcelas editadas na Tela de Precificação (2026-09: adicionar/remover/renomear/mudar %).
+  # Recebe o array vindo do form (label/percentage/date por parcela, na ordem da tela); linha sem
+  # marco é descartada — é como "remover" funciona sem precisar de rota própria.
+  def payment_schedule_items=(items)
+    items = items.respond_to?(:values) && !items.is_a?(Array) ? items.values : Array(items)
+    self.payment_schedule = items.filter_map do |item|
+      item = item.to_h.stringify_keys
+      label = item["label"].to_s.strip
+      next if label.blank?
+
+      percentage = item["percentage"].to_s.tr(",", ".").to_d
+      { "label" => label, "percentage" => (percentage % 1).zero? ? percentage.to_i : percentage.to_f, "date" => item["date"].presence }.compact
     end
   end
 
@@ -156,6 +182,12 @@ class ProjectPricing < ApplicationRecord
   end
 
   private
+    def payment_schedule_sums_to_100
+      return if payment_schedule.empty? || payment_percentage_total == 100
+
+      errors.add(:payment_schedule, "precisa somar 100% (soma atual: #{payment_percentage_total.to_s('F').sub(/\.0\z/, '').tr('.', ',')}%)")
+    end
+
     def suggested_vehicles_count
       (field_professionals_count / PASSENGERS_PER_VEHICLE.to_f).ceil
     end

@@ -1,0 +1,26 @@
+<%# Uma parcela do desembolso editável. locals: index, item, amount, editable %>
+<tr data-payment-schedule-target="row">
+  <td class="min-w-48">
+    <%= text_field_tag "project_pricing[payment_schedule_items][#{index}][label]", item["label"], disabled: !editable,
+          id: nil, placeholder: "Ex.: Entrega do relatório", class: "input input-sm w-full" %>
+  </td>
+  <td class="w-28">
+    <label class="input input-sm w-24">
+      <%= number_field_tag "project_pricing[payment_schedule_items][#{index}][percentage]", item["percentage"], disabled: !editable,
+            id: nil, step: 0.01, min: 0, max: 100, class: "grow text-right",
+            data: { payment_schedule_target: "percentage", action: "input->payment-schedule#recalculate" } %>
+      <span class="text-base-content/40 text-xs">%</span>
+    </label>
+  </td>
+  <td class="text-right tabular-nums font-medium whitespace-nowrap" data-payment-schedule-target="amount"><%= brl(amount) %></td>
+  <td>
+    <%= date_field_tag "project_pricing[payment_schedule_items][#{index}][date]", item["date"], disabled: !editable, id: nil, class: "input input-sm w-40" %>
+  </td>
+  <td class="w-1">
+    <% if editable %>
+      <button type="button" class="btn btn-ghost btn-xs btn-square text-error" title="Remover parcela" data-action="payment-schedule#remove">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
+      </button>
+    <% end %>
+  </td>
+</tr>

@@ -581,7 +581,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # 1 = produtos, 2 = equipe técnica (linhas de proposal_professionals, ver Proposal#team_rows_
     # for_docx — virou dinâmica em 2026-09), 3 = preço (Quadro N-1, N° | SERVIÇO | PREÇO R$,
     # reintroduzido em 2026-09 — ver Proposal#docx_price_rows), 4 = desembolso (Quadro N-2,
-    # N° | MARCO | % DO ITEM).
+    # N° | MARCO | % | VALOR R$).
     # Mudaram na revisão de 2026-08 do modelo, quando o quadro de preço por linha deixou de
     # existir, e de novo em 2026-09, quando voltou (agora com 1 linha só, o total).
 

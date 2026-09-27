@@ -42,6 +42,26 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match professionals(:biologa).name, response.body
   end
 
+  test "update salva as parcelas editadas do desembolso" do
+    patch conversation_proposal_path(@conversation), params: {
+      project_pricing: { bdi: "1.20", tax_multiplier: "1.25",
+                         payment_schedule_items: { "0" => { label: "Assinatura", percentage: "50", date: "" },
+                                                   "1" => { label: "Entrega", percentage: "50", date: "2026-12-01" } } }
+    }
+
+    assert_redirected_to conversation_proposal_path(@conversation)
+    assert_equal [ "Assinatura", "Entrega" ], @proposal.project_pricing.reload.payment_schedule.map { |item| item["label"] }
+  end
+
+  test "update recusa desembolso que não soma 100% e avisa" do
+    patch conversation_proposal_path(@conversation), params: {
+      project_pricing: { payment_schedule_items: { "0" => { label: "Assinatura", percentage: "70", date: "" } } }
+    }
+
+    assert_match "100%", flash[:alert]
+    assert_equal 4, @proposal.project_pricing.reload.payment_schedule.size
+  end
+
   test "show renders the new logistics fields and the recalculate button" do
     get conversation_proposal_path(@conversation)
 

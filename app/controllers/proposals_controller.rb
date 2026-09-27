@@ -124,6 +124,7 @@ class ProposalsController < ApplicationController
         :fuel_total, :fuel_price_per_liter, :vehicle_consumption_km_per_liter,
         :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
+        payment_schedule_items: %i[ label percentage date ],
         proposal_professionals_attributes: %i[ id deliverable_name man_hours field_days ],
         schedule_items_attributes: %i[ id phase_name activity_name start_period duration_periods milestone ]
       )

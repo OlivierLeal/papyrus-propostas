@@ -464,6 +464,28 @@ continua existindo e editável na Tela de Precificação, só não vai mais impr
   capítulo "ITENS NÃO PREVISTOS" que empurra a numeração em 1 nesta versão do modelo; virou
   "13-1"/"13-2" pouco depois, com o capítulo fixo "EXIGÊNCIAS SMS" logo abaixo).
 
+**Desembolso calculado e editável + espaçamento da seção PREÇO (2026-09-27, pedido do consultor
+com print do documento: "tá bem feia nessa parte. o cronograma de desembolso tem que ser calculado
+e ser possível adicionar").**
+- **Quadro de Desembolso voltou a ter valor:** `N° | MARCO | % | VALOR R$` (a coluna `% DO ITEM`
+  foi dividida em duas no modelo, larguras 1400+2302 somando os 3402 originais).
+  `Proposal#docx_payment_schedule_rows` devolve `[marco, "30%", "2.221,12"]`, valor sempre do
+  sistema (`ProjectPricing#payment_schedule_amounts`), nunca da IA. A ÚLTIMA parcela absorve a
+  diferença de arredondamento, então a soma bate centavo a centavo com o total quando os %
+  fecham 100%.
+- **Parcelas editáveis na Tela de Precificação:** adicionar, remover, renomear, mudar % e data
+  (`_payment_section`/`_payment_row` + `payment_schedule_controller.js`, com prévia do valor e da
+  soma ao vivo). Grava por `ProjectPricing#payment_schedule_items=`, onde linha sem marco é
+  descartada (é assim que "remover" funciona, sem rota própria) e aceita vírgula no %.
+  Validação `payment_schedule_sums_to_100`, só quando o `payment_schedule` muda.
+  `payment_dates=` continua existindo por compatibilidade.
+- **Modelo `.docx` (string crua, como sempre):** saiu 1 dos 2 parágrafos vazios antes do Quadro
+  N-1; a legenda do Quadro N-2 e o parágrafo "Os preços deverão..." ganharam `w:before="240"`; o
+  título PREÇO ganhou `w:before="360"` (colava em "Data do aceite"); a coluna SERVIÇO do Quadro
+  N-1 foi de 4542 pra 5644 dxa (PREÇO 3402 → 2300), pra descrição longa não quebrar em 7 linhas;
+  as células N° das linhas do Desembolso perderam o entrelinha 1,5, que deixava o número
+  desalinhado no topo. Conferido no LibreOffice (headless → PDF → captura).
+
 **"EXIGÊNCIAS SMS" virou capítulo fixo, logo depois de EQUIPE TÉCNICA (2026-09, pedido do
 consultor a partir de um texto pronto da Papyrus).** Texto INTEIRO fixo do modelo — nada vem da
 IA nem de `ProjectFinding` nenhum, mesmo princípio das "Observações fixas no item de preços"
