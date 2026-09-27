@@ -33,6 +33,21 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_equal original_bytes, File.binread(TEMPLATE_PATH)
   end
 
+  # 2026-09, relato da Charlene: o 1º item de "8.1 OBRIGAÇÕES DA PAPYRUS" ("Executar todas as
+  # atividades vinculadas ao escopo do serviço.") começava numa posição diferente dos demais
+  # itens da mesma lista — estava em ilvl=1 com indentação zerada explícita (w:ind left=0
+  # firstLine=0), enquanto os irmãos estão em ilvl=0 sem override nenhum. Corrigido igualando o
+  # nível/indentação ao resto da lista (mesmo numId=2).
+  test "o primeiro item de OBRIGAÇÕES DA PAPYRUS está no mesmo nível/indentação dos demais itens da lista" do
+    xml = document_xml(File.binread(TEMPLATE_PATH))
+    paragrafo = xml[/<w:p w14:paraId="249DB663".*?<\/w:p>/m]
+
+    assert paragrafo.present?, "parágrafo 'Executar todas as atividades...' não encontrado no modelo"
+    assert_includes paragrafo, "Executar todas as atividades vinculadas ao escopo do serviço."
+    assert_includes paragrafo, '<w:ilvl w:val="0"/>'
+    assert_not_includes paragrafo, '<w:ind w:left="0" w:firstLine="0"/>'
+  end
+
   test "fill replaces every simple placeholder and leaves the rest of the document intact" do
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
     xml = document_xml(bytes)

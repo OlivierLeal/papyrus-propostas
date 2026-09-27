@@ -29,8 +29,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     cronograma de desembolso, que ainda não foram revisados pelo consultor; a comercial (ou o
     documento combinado) só fica disponível depois que o status virar "priced"/"approved". Só
     chame depois de confirmar que não falta nenhuma informação que bloqueia a proposta (ver
-    passo a passo interno). Nomes/CNPJ que você não tiver certeza, escreva "A confirmar" em vez
-    de inventar.
+    passo a passo interno). Nomes que você não tiver certeza, escreva "A confirmar" em vez de
+    inventar. CNPJ é diferente (pedido da Charlene, 2026-09): sem certeza do número, mande
+    cnpj_cliente como string vazia (nunca "A confirmar", "[confidencial]" nem qualquer texto de
+    preenchimento) — o campo sai em branco no documento, sem inventar nem sinalizar nada no
+    lugar do número.
 
     NUNCA escreva códigos de citação "[F12]" em nenhum parâmetro de texto desta ferramenta —
     esse formato só existe pra virar link no CHAT (bloco [ACHADOS DESTA PROPOSTA]), não tem
@@ -69,12 +72,19 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :descricao_servico, desc: "Descrição curta do serviço (ex.: \"elaboração de EIA/RIMA do Parque Eólico X\")"
   param :municipios, desc: "Município(s) do empreendimento"
   param :estado, desc: "Sigla do estado (ex.: BA)"
-  param :cnpj_cliente, desc: "CNPJ do cliente, ou \"A confirmar\" se não souber"
+  param :cnpj_cliente, desc: "CNPJ do cliente. Sem certeza do número, mande string vazia \"\" — NUNCA \"A " \
+    "confirmar\", \"[confidencial]\" ou qualquer texto no lugar do número; o campo fica em branco no " \
+    "documento (pedido da Charlene, 2026-09)."
   param :objetivo_dos_servicos, desc: "Texto da seção 'Objetivo dos Serviços' — CURTO, no máximo 2 frases: só O QUÊ e PRA QUÊ " \
     "(qual serviço/assessoria, para qual ato de licenciamento, do empreendimento com suas características essenciais — " \
     "nº de aerogeradores/MW/etc. — e onde). NÃO descreva aqui o que o serviço abrange, as etapas, a metodologia ou o " \
-    "que será diagnosticado: isso é escopo_e_metodologia/topicos_escopo. Frases como \"O presente serviço abrange…\", " \
-    "\"considerando que…\" ou qualquer detalhamento de execução NÃO entram nesta seção."
+    "que será diagnosticado: isso é escopo_e_metodologia/topicos_escopo. NUNCA comece com preâmbulo/blablabla " \
+    "genérico — frases como \"O presente serviço abrange…\", \"considerando que…\", \"por meio da presente " \
+    "proposta…\" ou qualquer detalhamento de execução NÃO entram nesta seção; vá direto ao ponto. Comece SEMPRE " \
+    "com um verbo no infinitivo (\"Realizar\", \"Elaborar\", \"Prestar\"…), nunca no gerúndio/presente " \
+    "(\"Realizando\"/\"Realiza\"). Exemplo do formato esperado: \"Realizar Assessoria Estratégica e Elaboração de " \
+    "Estudos Técnicos para Licenciamento Ambiental de [empreendimento], junto ao órgão ambiental estadual, com " \
+    "área de aproximadamente X m², localizado no município de Y, estado de Z.\""
   param :caracterizacao_do_empreendimento, desc: "Texto da seção 'Caracterização do Empreendimento' — só a descrição FACTUAL do " \
     "empreendimento: o que é, onde fica, composição (sub-parques, aerogeradores, potência), e o histórico da licença " \
     "quando houver (processo nº, data de publicação, validade). NÃO escreva aqui o que a proposta/serviço vai fazer " \
@@ -105,9 +115,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "negrito — não escreva o número nem \"5.\" você mesma, nem tente negritar com texto. Use o " \
           "search_historical_archive pra ver como a Papyrus estruturou o escopo de projetos parecidos antes de " \
           "escrever — a estrutura processual varia bastante por tipo de estudo e vale seguir o padrão já usado."
-  param :prazo_de_execucao, desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\"). Texto independente da " \
+  param :prazo_de_execucao, required: false,
+    desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\"). Texto independente da " \
     "tabela/infográfico do cronograma (Quadro/Figura N-1) — mudar só este texto não reconstrói o cronograma; " \
-    "pra isso, use atualizar_cronograma."
+    "pra isso, use atualizar_cronograma. Sem informação clara no ET/TR, pode deixar de fora — o sistema usa " \
+    "\"12 (doze) meses contratuais\" como padrão automaticamente (pedido da Charlene, 2026-09), nunca invente " \
+    "um número pra preencher a lacuna."
   param :produtos, type: "array",
     desc: "Lista dos produtos/entregáveis — tem que bater com o que topicos_escopo descreve: cada etapa que gera " \
           "um documento próprio (o estudo/diagnóstico principal, mas também fichas, relatórios e certidões " \
@@ -126,7 +139,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "\"Regularização fundiária\", \"Tratativas junto a INCRA ou FUNAI\"). Vira o capítulo \"ITENS NÃO " \
           "PREVISTOS\" (seção própria do documento) — é o que impede o cliente de cobrar depois um serviço que " \
           "não foi orçado. Liste só o que for específico deste projeto; a frase padrão sobre proposta " \
-          "complementar o modelo já traz fixa nesse capítulo. Sem nada específico, pode deixar de fora."
+          "complementar o modelo já traz fixa nesse capítulo. Sem nada específico, pode deixar de fora. " \
+          "PADRÃO DA PAPYRUS (pedido da Charlene, 2026-09): inclua SEMPRE estes dois itens, A NÃO SER que o " \
+          "ET/TR desta proposta peça explicitamente por eles como parte do escopo contratado (nesse caso eles " \
+          "entram em produtos/topicos_escopo, não aqui): \"Planejamento, organização e realização de reunião " \
+          "e/ou audiência pública.\" e \"Estudos de comunidades tradicionais, espeleológicos, paleontológico, " \
+          "dentre outros para atendimentos de exigências de órgãos intervenientes.\""
   param :nome_arquivo,
     desc: "SÓ quando o consultor disser como o arquivo deve se chamar (ex.: \"o arquivo tem que se chamar " \
           "PTC26002_PMM_LU_Simões Filho_BA\"). Copie o nome exatamente como ele escreveu, sem inventar, sem " \
@@ -456,10 +474,15 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # demais atos vale o prazo que a IA escreveu a partir do ET/TR.
     LP_LI_FAMILY_ACTS = %w[LP LI RLP RLI LPI].freeze
 
+    # Prazo padrão de 12 meses (2026-09, pedido da Charlene: "quando não houver a informação
+    # muito clara, deixar como 12 meses") — não é mais exclusivo da família LP/LI acima: quando o
+    # ET/TR não deixa claro o prazo (a IA manda prazo_de_execucao em branco/nil), cai no mesmo
+    # padrão de 12 meses, em vez de sair sem nenhum prazo no documento. Continua sendo conta
+    # determinística em Ruby, nunca a IA "inventando" um número pra preencher a lacuna.
     def prazo_execucao_value(args)
       return "12 (doze) meses contratuais" if lp_li_family_licensing?
 
-      args[:prazo_de_execucao]
+      args[:prazo_de_execucao].presence || "12 (doze) meses contratuais"
     end
 
     def lp_li_family_licensing?

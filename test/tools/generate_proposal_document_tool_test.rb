@@ -385,6 +385,34 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes document_texts(@proposal.generated_documents.first).join(" "), "180 dias corridos"
   end
 
+  # 2026-09, pedido da Charlene: "quando não houver a informação muito clara, deixar como 12
+  # meses" — não é mais exclusivo da família LP/LI, vale pra qualquer ato quando a IA não manda
+  # prazo_de_execucao (ET/TR não deixou claro).
+  test "prazo cai pra 12 meses contratuais quando a IA não informa e o ato não é LP/LI" do
+    @proposal.update!(document_split: "combined")
+    @proposal.conversation.project_findings.create!(field: "tipo_licenca", value: "LO", source_kind: "et")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(prazo_de_execucao: ""))
+
+    assert_includes document_texts(@proposal.generated_documents.first).join(" "), "12 (doze) meses contratuais"
+  end
+
+  # 2026-09, pedido da Charlene: "pode deixar sempre em branco" — sem certeza do CNPJ, o campo
+  # sai vazio no documento (rótulo "CNPJ: " fixo do modelo, sem nada depois), nunca um texto de
+  # preenchimento tipo "A confirmar"/"[confidencial]".
+  test "CNPJ sai em branco no documento quando a IA manda string vazia" do
+    @proposal.update!(document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(cnpj_cliente: ""))
+
+    texto = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_not_includes texto, "A confirmar"
+    assert_not_includes texto, "[confidencial]"
+    assert_not_includes texto, @args[:cnpj_cliente]
+  end
+
   test "as observações fixas do item de preços saem no documento e nunca aparece 'CONTRATADA'" do
     @proposal.update!(document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
