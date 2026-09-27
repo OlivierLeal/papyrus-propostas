@@ -29,6 +29,7 @@ class MessagesControllerTest < ActionDispatch::IntegrationTest
 
   test "the user recorded follows who is actually signed in, not always the same person" do
     post conversation_messages_path(@conversation), params: { content: "Mensagem da consultora Um" }
+    @conversation.reload.release_ai_turn! # a IA terminou de responder (o job não roda neste teste)
     sign_out
     sign_in_as users(:two)
 
@@ -36,6 +37,36 @@ class MessagesControllerTest < ActionDispatch::IntegrationTest
 
     assert_equal users(:one), @conversation.messages.find_by(content: "Mensagem da consultora Um").user
     assert_equal users(:two), @conversation.messages.find_by(content: "Mensagem do consultor Dois").user
+  end
+
+  # 2026-09-27, cenário do consultor: pedir a proposta técnica e, enquanto gera, mandar outra
+  # mensagem pedindo de novo — geraria uma segunda revisão logo depois da primeira.
+  test "mensagem enquanto a IA ainda responde é recusada, sem criar mensagem nem job" do
+    post conversation_messages_path(@conversation), params: { content: "gere a proposta técnica" }
+
+    assert_no_difference -> { @conversation.messages.count } do
+      assert_no_enqueued_jobs(only: RespondToMessageJob) do
+        post conversation_messages_path(@conversation), params: { content: "gera de novo" }, as: :turbo_stream
+      end
+    end
+    assert_match "A IA ainda está respondendo", response.body
+  end
+
+  test "depois que a IA termina, a próxima mensagem é aceita" do
+    post conversation_messages_path(@conversation), params: { content: "primeira" }
+    @conversation.reload.release_ai_turn!
+
+    assert_enqueued_with(job: RespondToMessageJob) do
+      post conversation_messages_path(@conversation), params: { content: "segunda" }
+    end
+  end
+
+  test "marca de 'respondendo' antiga (job morreu sem liberar) expira e não trava a conversa" do
+    @conversation.update_column(:ai_responding_since, 20.minutes.ago)
+
+    assert_enqueued_with(job: RespondToMessageJob) do
+      post conversation_messages_path(@conversation), params: { content: "ainda estou aqui" }
+    end
   end
 
   test "create does nothing when there is no content and no documents" do

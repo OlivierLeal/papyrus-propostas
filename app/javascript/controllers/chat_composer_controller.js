@@ -11,6 +11,31 @@ export default class extends Controller {
   connect() {
     this.resize()
     this.inputTarget.focus()
+    this.placeholder = this.inputTarget.placeholder
+
+    // "A IA está respondendo" = o indicador de digitando está na lista de mensagens (ele chega por
+    // broadcast pra todas as abas quando a IA começa e é removido quando ela termina). Enquanto
+    // isso, dá pra escrever mas não enviar — o servidor recusaria de qualquer jeito (ver
+    // AiResponding), e o texto digitado nunca se perde.
+    this.messages = document.getElementById("messages")
+    if (this.messages) {
+      this.observer = new MutationObserver(() => this.syncBusy())
+      this.observer.observe(this.messages, { childList: true })
+    }
+    this.syncBusy()
+  }
+
+  disconnect() {
+    this.observer?.disconnect()
+  }
+
+  syncBusy() {
+    this.busy = Boolean(document.getElementById("typing_indicator"))
+    this.submitTarget.disabled = this.busy
+    this.submitTarget.value = this.busy ? "Aguarde..." : "Enviar"
+    this.inputTarget.placeholder = this.busy
+      ? "A IA está respondendo… pode ir escrevendo, você envia quando ela terminar."
+      : this.placeholder
   }
 
   resize() {
@@ -22,6 +47,7 @@ export default class extends Controller {
     if (event.key !== "Enter" || event.shiftKey) return
 
     event.preventDefault()
+    if (this.busy) return
     this.element.requestSubmit()
   }
 
@@ -33,7 +59,6 @@ export default class extends Controller {
 
   unlock() {
     this.inputTarget.disabled = false
-    this.submitTarget.disabled = false
-    this.submitTarget.value = "Enviar"
+    this.syncBusy()
   }
 }

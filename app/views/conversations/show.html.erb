@@ -160,7 +160,7 @@
           <% visible_messages.each do |message| %>
             <%= render "message", message: message %>
           <% end %>
-          <% if visible_messages.last&.role == "user" %>
+          <% if @conversation.ai_responding? %>
             <%= render "typing_indicator" %>
           <% end %>
         </div>

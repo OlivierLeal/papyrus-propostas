@@ -544,4 +544,26 @@ class ConversationTest < ActiveSupport::TestCase
 
     assert_not_includes conversation.messages.where(role: "user", internal: true).last.content, "DIVERGÊNCIAS ABERTAS"
   end
+
+  # 2026-09-27: mensagem do consultor gravada ENTRE a chamada de ferramenta e o resultado dela (ele
+  # mandou "gera de novo" enquanto o .docx era gerado) fazia o Bedrock recusar todo turno seguinte.
+  test "histórico pra IA põe o resultado da ferramenta logo depois da chamada, mesmo com mensagem no meio" do
+    conversation = conversations(:reviewing_conversation)
+    t = Time.current
+    conversation.messages.create!(role: "user", content: "gere a proposta técnica", created_at: t)
+    call = conversation.messages.create!(role: "assistant", content: nil, created_at: t + 1)
+    tool_call = call.tool_calls.create!(tool_call_id: "toolu_x", name: "generate_proposal_document", arguments: {})
+    conversation.messages.create!(role: "user", content: "gera de novo", created_at: t + 2)
+    conversation.messages.create!(role: "tool", content: "{}", tool_call_id: tool_call.id, created_at: t + 3)
+    conversation.messages.create!(role: "assistant", content: "Pronto.", created_at: t + 4)
+
+    sequence = conversation.reload.to_llm.messages.last(5).map do |message|
+      next "tool_use" if message.tool_calls.present?
+      next "tool_result" if message.tool_call_id
+
+      message.role.to_s
+    end
+
+    assert_equal %w[user tool_use tool_result user assistant], sequence
+  end
 end

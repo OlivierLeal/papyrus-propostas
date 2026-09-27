@@ -164,6 +164,26 @@ pro consultor B ler a mensagem do consultor A.
   a proposta do consultor A, a mensagem de A aparece com "Consultora Um" (nome de A), e a de B
   aparece como "Você".
 
+**Mensagem enviada enquanto a IA ainda responde (2026-09-27, cenário do consultor: "peço a
+proposta técnica e, enquanto gera, mando mensagem pedindo de novo").** Dois problemas, dois
+consertos:
+1. **O histórico quebrava pra sempre.** O ruby_llm monta o histórico pela ordem de criação; a
+   mensagem do consultor era gravada ENTRE a chamada de ferramenta (já gravada) e o resultado dela
+   (gravado só quando o .docx termina). O Bedrock recusa isso ("tool_use ids were found without
+   tool_result blocks immediately after"), e todo turno seguinte falhava. `LlmMessageOrdering`
+   (concern em `Conversation`/`GeneralChat`, sobrescreve `order_messages_for_llm` da gem) põe
+   cada resultado logo depois da sua chamada; cura também conversa que já ficou nesse estado.
+2. **Um turno por vez.** A caixa só travava durante o POST, não enquanto a IA respondia, então o
+   "gera de novo" virava um segundo turno e uma SEGUNDA revisão do documento. `AiResponding`
+   (`ai_responding_since` nas duas tabelas de chat): `claim_ai_turn!` atômico no controller
+   (mensagem nova com a marca ativa é recusada com flash, e o texto digitado continua na caixa),
+   `release_ai_turn!` no job, ANTES de remover o "digitando…" e de novo no `ensure`. A marca
+   expira em 15 min, então a conversa nunca trava se o job morrer. Na tela,
+   `chat_composer_controller.js` observa o `#typing_indicator` (transmitido pra todas as abas):
+   enquanto ele existe, dá pra escrever mas não enviar ("Aguarde…"). O indicador na renderização da
+   página passou a depender de `ai_responding?`, e não mais de "a última mensagem é do usuário",
+   que ficava eterno quando o job falhava.
+
 **Bolha "(sem conteúdo)" no chat = passo em que a IA só chamou ferramenta (2026-09-27, relato do
 consultor).** O ruby_llm grava cada volta de ferramenta como uma mensagem `assistant` SEM texto, com
 as `tool_calls` (a resposta de verdade vem na mensagem seguinte). O resultado da ferramenta

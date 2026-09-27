@@ -1,5 +1,7 @@
 class Conversation < ApplicationRecord
   acts_as_chat
+  include LlmMessageOrdering
+  include AiResponding
 
   has_many :knowledge_notes, dependent: :destroy
   # Versões finais revisadas manualmente que o consultor mandou aprender pro acervo RAG (ver
@@ -654,6 +656,15 @@ class Conversation < ApplicationRecord
   end
 
   private
+    # LlmMessageOrdering: quais ToolCall cada mensagem disparou, e de qual ToolCall veio cada
+    # resultado. Uma consulta só pro histórico inteiro.
+    def tool_call_ids_by_message(message_ids)
+      ToolCall.where(message_id: message_ids).order(:id).pluck(:message_id, :id)
+        .group_by(&:first).transform_values { |pairs| pairs.map(&:last) }
+    end
+
+    def tool_result_call_id(message) = message.tool_call_id
+
     # O valor que a IA respondeu continua registrado como achado normal (source_kind "et"/"tr") —
     # este aqui é o aviso do SISTEMA de que ele não casa com nada cadastrado. Fica visível no
     # resumo, no snapshot que a IA lê a cada turno e na tela de achados. NUNCA bloqueia nada

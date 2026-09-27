@@ -12,6 +12,10 @@ class MessagesController < ApplicationController
     kmz, complementary_documents = documents.partition { |document| kmz_filename?(document) }
 
     if content.present? || documents.any?
+      # Um turno da IA por vez (ver AiResponding): mensagem enquanto ela ainda responde é
+      # recusada — o texto digitado continua na caixa, nada se perde.
+      return respond_busy unless @conversation.claim_ai_turn!
+
       message = @conversation.create_user_message(content.presence || default_content(kmz, complementary_documents))
       complementary_documents.each { |document| attach_with_kind(message, document, "complementary") }
       kmz.each { |document| attach_with_kind(message, document, "kmz") }
@@ -47,6 +51,14 @@ class MessagesController < ApplicationController
   end
 
   private
+    def respond_busy
+      flash.now[:alert] = "A IA ainda está respondendo à mensagem anterior. Aguarde a resposta para enviar outra."
+      respond_to do |format|
+        format.turbo_stream { render turbo_stream: turbo_stream.append_all("body", partial: "shared/flash") }
+        format.html { redirect_to @conversation, alert: flash.now[:alert] }
+      end
+    end
+
     def set_conversation
       @conversation = Conversation.find(params[:conversation_id])
     end

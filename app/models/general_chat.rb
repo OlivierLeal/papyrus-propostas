@@ -3,6 +3,8 @@ class GeneralChat < ApplicationRecord
   # Conversation (general_chat.messages, não general_chat.general_messages) — message_class é que
   # aponta pra classe/tabela real.
   acts_as_chat messages: :messages, message_class: "GeneralMessage"
+  include LlmMessageOrdering
+  include AiResponding
 
   belongs_to :user
   has_many :knowledge_notes, dependent: :destroy
@@ -72,6 +74,14 @@ class GeneralChat < ApplicationRecord
   end
 
   private
+    # LlmMessageOrdering (ver Conversation).
+    def tool_call_ids_by_message(message_ids)
+      GeneralToolCall.where(general_message_id: message_ids).order(:id).pluck(:general_message_id, :id)
+        .group_by(&:first).transform_values { |pairs| pairs.map(&:last) }
+    end
+
+    def tool_result_call_id(message) = message.general_tool_call_id
+
     def first_user_message
       messages.where(role: "user", internal: false).order(:created_at).first
     end

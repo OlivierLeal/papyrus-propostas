@@ -39,6 +39,8 @@ class RespondToMessageJob < ApplicationJob
     # #ask_internally concorrente na MESMA conversa (ex.: SuggestScheduleJob, enfileirado de
     # dentro de uma tool call deste turno, ver Conversation#complete_with_lock).
     conversation.complete_with_lock
+    # Antes de tirar o "digitando…": é a remoção dele que destrava a caixa de mensagem na tela.
+    conversation.release_ai_turn!
 
     conversation.broadcast_remove_to conversation, target: "typing_indicator"
 
@@ -71,9 +73,14 @@ class RespondToMessageJob < ApplicationJob
     Rails.logger.error("RespondToMessageJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
     return unless conversation
 
+    conversation.release_ai_turn!
     conversation.broadcast_remove_to conversation, target: "typing_indicator"
     conversation.broadcast_append_to conversation, target: "messages", partial: "conversations/error_bubble",
       locals: { text: error_text_for(e) }
+  ensure
+    # Libera o turno (AiResponding) mesmo com erro ou retorno antecipado — senão a conversa ficaria
+    # recusando mensagens até a marca expirar.
+    conversation&.release_ai_turn!
   end
 
   private

@@ -9,7 +9,10 @@ class ChatMessageOrderTest < ApplicationSystemTestCase
     @user = users(:one)
   end
 
-  test "segunda mensagem enviada com o indicador já na tela mantém a ordem" do
+  # Até 2026-09-27 dava pra mandar a segunda mensagem com a IA ainda respondendo — o que gerava
+  # um segundo turno (ex.: uma segunda revisão do documento logo depois da primeira). Agora a
+  # caixa trava enquanto o indicador está na tela (ver AiResponding/chat_composer_controller.js).
+  test "com o indicador na tela, a segunda mensagem não é enviada e a ordem continua certa" do
     sign_in
     visit conversation_path(@conversation)
 
@@ -17,21 +20,17 @@ class ChatMessageOrderTest < ApplicationSystemTestCase
     click_on "Enviar"
     assert_selector "#typing_indicator", wait: 10
 
-    # O consultor manda outra antes de a IA responder — o indicador da primeira ainda está lá.
     fill_in "content", with: "segunda pergunta"
-    click_on "Enviar"
-    assert_text "segunda pergunta", wait: 10
+    assert_button "Aguarde...", disabled: true
+    find("textarea[name='content']").send_keys(:enter)
     sleep 1
 
     ordem = dom_order
-    puts "\nordem com duas mensagens:"
-    ordem.each_with_index { |item, i| puts "  #{i + 1}. #{item}" }
-
-    typing = ordem.rindex("TYPING")
-    segunda = ordem.rindex { |item| item.include?("segunda pergunta") }
-
     assert_equal 1, ordem.count("TYPING"), "não pode sobrar indicador duplicado"
-    assert_operator segunda, :<, typing, "o indicador tem que vir DEPOIS da última mensagem"
+    assert_operator ordem.rindex { |item| item.include?("primeira pergunta") }, :<, ordem.rindex("TYPING")
+    assert_equal 0, ordem.count { |item| item.include?("segunda pergunta") }, "a segunda não pode ter sido enviada"
+    assert_equal 1, @conversation.messages.where(role: "user", content: "primeira pergunta").count
+    assert_not @conversation.messages.exists?(content: "segunda pergunta")
   end
 
   test "mensagem enviada aparece acima do indicador de digitando" do

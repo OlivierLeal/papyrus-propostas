@@ -19,7 +19,7 @@
       <% visible_messages.each do |message| %>
         <%= render "message", message: message %>
       <% end %>
-      <% if visible_messages.last&.role == "user" %>
+      <% if @general_chat.ai_responding? %>
         <%= render "conversations/typing_indicator" %>
       <% end %>
     </div>

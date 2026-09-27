@@ -26,6 +26,7 @@ class RespondToGeneralChatMessageJob < ApplicationJob
       .where.not(id: before_message_ids).order(:created_at)
     return if new_messages.none?
 
+    general_chat.release_ai_turn! # antes do "digitando…" sumir (é o que destrava a caixa)
     general_chat.broadcast_remove_to general_chat, target: "typing_indicator"
     new_messages.each do |message|
       general_chat.broadcast_append_to general_chat, target: "messages", partial: "general_chats/message",
@@ -35,9 +36,14 @@ class RespondToGeneralChatMessageJob < ApplicationJob
     Rails.logger.error("RespondToGeneralChatMessageJob failed for general_chat #{general_chat_id}: #{e.class} #{e.message}")
     return unless general_chat
 
+    general_chat.release_ai_turn! # antes do "digitando…" sumir (é o que destrava a caixa)
     general_chat.broadcast_remove_to general_chat, target: "typing_indicator"
     general_chat.broadcast_append_to general_chat, target: "messages", partial: "conversations/error_bubble",
       locals: { text: error_text_for(e) }
+  ensure
+    # Libera o turno (AiResponding) mesmo com erro ou retorno antecipado — senão a conversa ficaria
+    # recusando mensagens até a marca expirar.
+    general_chat&.release_ai_turn!
   end
 
   private

@@ -28,6 +28,15 @@ class GeneralMessagesControllerTest < ActionDispatch::IntegrationTest
     assert_equal @user, message.user
   end
 
+  test "mensagem enquanto a IA ainda responde é recusada (um turno por vez)" do
+    post general_chat_general_messages_path(@general_chat), params: { content: "primeira pergunta" }
+
+    assert_no_difference -> { @general_chat.messages.count } do
+      post general_chat_general_messages_path(@general_chat), params: { content: "e aí?" }, as: :turbo_stream
+    end
+    assert_match "A IA ainda está respondendo", response.body
+  end
+
   test "create does nothing for blank content" do
     assert_no_enqueued_jobs(only: RespondToGeneralChatMessageJob) do
       assert_no_difference "@general_chat.messages.count" do

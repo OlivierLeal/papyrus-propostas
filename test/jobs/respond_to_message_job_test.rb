@@ -8,6 +8,14 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     @conversation = conversations(:reviewing_conversation)
   end
 
+  test "libera o turno da IA no fim, mesmo quando a chamada falha" do
+    @conversation.update_column(:ai_responding_since, Time.current)
+
+    stub_ai_error { RespondToMessageJob.perform_now(@conversation.id) }
+
+    assert_nil @conversation.reload.ai_responding_since
+  end
+
   test "completes the conversation and appends the new assistant message to the stream" do
     turbo_streams = capture_turbo_stream_broadcasts @conversation do
       stub_ai_complete("Aqui está o resumo revisado.") { RespondToMessageJob.perform_now(@conversation.id) }
