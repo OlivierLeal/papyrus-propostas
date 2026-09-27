@@ -706,6 +706,17 @@ class Conversation < ApplicationRecord
       TEXT
     end
 
+    # Proposta aprovada e reaberta pra ajuste (Proposal#reopen!) — a IA precisa saber que ela voltou a
+    # ser editável por pedido do cliente, e qual foi o preço aprovado antes.
+    def proposal_reopen_note
+      return "" unless proposal.reopened_at && proposal.status != "approved"
+
+      note = " (REABERTA para ajuste em #{proposal.reopened_at.strftime('%d/%m/%Y')} depois de aprovada"
+      note += " por R$ #{proposal.approved_total}" if proposal.approved_total
+      note += "; motivo: #{proposal.reopen_reason}" if proposal.reopen_reason.present?
+      note + " — precisa ser aprovada de novo na Tela de Precificação)"
+    end
+
     def proposal_state_text
       pricing = proposal.project_pricing
       lines = pricing.proposal_professionals.includes(:professional).map do |pp|
@@ -719,7 +730,7 @@ class Conversation < ApplicationRecord
       <<~TEXT
         #{PROPOSAL_STATE_MARKER} (gerado pelo sistema, sempre reflete o estado real da Tela de
         Precificação — não pergunte isso ao consultor, apenas use como fato já resolvido):
-        - Status da proposta: #{proposal.status}
+        - Status da proposta: #{proposal.status}#{proposal_reopen_note}
         - Nome do arquivo: #{proposal.docx_filename_override.presence&.then { |n| "definido pelo consultor (\"#{n}\") — a ferramenta já usa esse nome sozinha, não precisa reenviar" } || "padrão do sistema (número + cliente + escopo + revisão)"}
         - Formato do documento: #{proposal.document_split == "separated" ? "técnica e comercial separadas" : "documento único"}
         - Equipe e horas definidas:

@@ -1,5 +1,6 @@
 class Proposal < ApplicationRecord
   belongs_to :conversation
+  belongs_to :reopened_by, class_name: "User", optional: true
   has_one :project_pricing, dependent: :destroy
   has_many_attached :generated_documents
 
@@ -180,6 +181,34 @@ class Proposal < ApplicationRecord
     end
 
     past_rows << [ curr_rev_num, curr_desc, Date.current.strftime("%d/%m/%Y") ]
+  end
+
+  def approve!
+    transaction do
+      update!(status: "approved", approved_at: Time.current, approved_total: project_pricing.total_value)
+      conversation.update!(status: "completed")
+    end
+  end
+
+  # Reabre uma precificação aprovada pra ajuste (2026-09-27, pedido do consultor: o cliente pede
+  # mudança depois do preço aprovado). Volta a "priced" (editável) e a conversa volta a
+  # "pricing"; o preço aprovado anterior fica em approved_total/approved_at pra referência.
+  #
+  # Preço aprovado fica congelado (Professional#recalculate_open_pricings pula aprovadas), então
+  # se o valor da hora-homem/diária mudou no cadastro nesse meio-tempo, reabrir recalcula — e
+  # devolve o total antes/depois pra quem chamou AVISAR, nunca mudar o preço em silêncio.
+  # Retorna [total_antes, total_depois].
+  def reopen!(user:, reason: nil)
+    raise ArgumentError, "só proposta aprovada pode ser reaberta" unless status == "approved"
+
+    pricing = project_pricing
+    before = pricing.total_value
+    transaction do
+      update!(status: "priced", reopened_at: Time.current, reopened_by: user, reopen_reason: reason.to_s.strip.presence)
+      conversation.update!(status: "pricing") if conversation.status == "completed"
+      pricing.recalculate! if pricing.stale_subtotals?
+    end
+    [ before, pricing.reload.total_value ]
   end
 
   # A IA monta a equipe a partir do CADASTRO COMPLETO de profissionais ativos (cargo +

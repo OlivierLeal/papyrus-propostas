@@ -79,5 +79,15 @@ class IndexApprovedProposalJob < ApplicationJob
     # Salvar+chunkar+embedar é compartilhado com HistoricalProposal#approve! (ver Rag::
     # ProposalIndexer) — os dois caminhos convergem aqui, só o gatilho e os atributos acima mudam.
     Rag::ProposalIndexer.new(record, text).call!
+    supersede_previous_versions!(record)
+  end
+
+  # Precificação reaberta e aprovada de novo (Proposal#reopen!) gera um documento novo, com outro
+  # checksum — sem isto, a mesma proposta ficaria DUAS vezes no acervo, a versão que o cliente
+  # pediu pra mudar e a nova. `superseded` tira a anterior das buscas (HistoricalProposal.current)
+  # sem apagar o rastro.
+  def supersede_previous_versions!(record)
+    HistoricalProposal.where(origin: "sistema", conversation_id: record.conversation_id)
+      .where.not(id: record.id).update_all(superseded: true)
   end
 end

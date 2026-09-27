@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -403,16 +403,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_180000) do
   end
 
   create_table "proposals", force: :cascade do |t|
+    t.datetime "approved_at"
+    t.decimal "approved_total", precision: 12, scale: 2
     t.jsonb "content_json", default: {}, null: false
     t.bigint "conversation_id", null: false
     t.datetime "created_at", null: false
     t.string "document_split", default: "combined", null: false
     t.string "docx_filename_override"
     t.string "pdf_url"
+    t.string "reopen_reason"
+    t.datetime "reopened_at"
+    t.bigint "reopened_by_id"
     t.string "status", default: "draft", null: false
     t.datetime "updated_at", null: false
     t.integer "version", default: 0, null: false
     t.index ["conversation_id"], name: "index_proposals_on_conversation_id", unique: true
+    t.index ["reopened_by_id"], name: "index_proposals_on_reopened_by_id"
   end
 
   create_table "schedule_items", force: :cascade do |t|
@@ -648,6 +654,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_180000) do
   add_foreign_key "proposal_professionals", "professionals"
   add_foreign_key "proposal_professionals", "project_pricings"
   add_foreign_key "proposals", "conversations"
+  add_foreign_key "proposals", "users", column: "reopened_by_id"
   add_foreign_key "schedule_items", "project_pricings"
   add_foreign_key "sessions", "users"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

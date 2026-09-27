@@ -46,8 +46,21 @@
       <p class="text-xs text-base-content/50 text-center">Salve antes de aprovar — alterações não salvas não entram.</p>
     <% else %>
       <div class="alert alert-success alert-soft text-sm">
-        <span>Preço aprovado. Proposta concluída.</span>
+        <span>
+          Preço aprovado<%= " em #{l(proposal.approved_at, format: '%d/%m/%Y')}" if proposal.approved_at %>. Proposta concluída.
+        </span>
       </div>
+      <%# Reabrir (2026-09-27): o cliente às vezes pede mudança depois da aprovação. %>
+      <details class="group">
+        <summary class="btn btn-ghost btn-sm w-full list-none">Reabrir para ajuste</summary>
+        <%= form_with url: reopen_conversation_proposal_path(conversation), method: :post, class: "flex flex-col gap-2 mt-2" do |reopen_form| %>
+          <%= reopen_form.text_area :reason, rows: 2, class: "textarea textarea-sm w-full",
+                placeholder: "Motivo (opcional) — ex.: cliente pediu incluir campanha de fauna" %>
+          <%= reopen_form.submit "Reabrir precificação", class: "btn btn-warning btn-sm w-full",
+                data: { turbo_confirm: "Reabrir a precificação aprovada de #{brl(pricing.total_value)}? A proposta volta a ser editável e precisa ser aprovada de novo." } %>
+          <p class="text-xs text-base-content/50">O preço aprovado fica registrado. Documentos já gerados não mudam; a próxima geração sai como nova revisão.</p>
+        <% end %>
+      </details>
     <% end %>
   </div>
 </section>

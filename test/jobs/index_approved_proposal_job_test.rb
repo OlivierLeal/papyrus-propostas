@@ -56,23 +56,39 @@ class IndexApprovedProposalJobTest < ActiveJob::TestCase
     Rag::Embedder.define_method(:embed_documents, original)
   end
 
+  # Precificação reaberta e aprovada de novo gera documento novo (outro checksum): a versão
+  # anterior sai das buscas em vez de a mesma proposta ficar duas vezes no acervo.
+  test "reaprovação marca a versão anterior da mesma proposta como substituída" do
+    attach_document
+    stub_embedder { IndexApprovedProposalJob.new.perform(@proposal.id) }
+    first = HistoricalProposal.find_by!(conversation: @conversation)
+
+    attach_document(version: 2, extra: "Inclusão de campanha de fauna pedida pelo cliente. ")
+    stub_embedder { IndexApprovedProposalJob.new.perform(@proposal.id) }
+
+    records = HistoricalProposal.where(conversation: @conversation)
+    assert_equal 2, records.count
+    assert first.reload.superseded
+    assert_equal [ false ], records.where.not(id: first.id).pluck(:superseded)
+  end
+
   private
 
   # DOCX real com estrutura de proposta, para exercitar extração e chunking de verdade.
-  def attach_document
+  def attach_document(version: 1, extra: "")
     buffer = Zip::OutputStream.write_buffer do |zip|
       zip.put_next_entry("word/document.xml")
       zip.write(<<~XML)
         <w:document xmlns:w="x"><w:body>
           <w:p><w:pPr><w:pStyle w:val="Ttulo1"/></w:pPr><w:r><w:t>OBJETIVO DOS SERVIÇOS</w:t></w:r></w:p>
-          <w:p><w:r><w:t>#{'Elaboração de estudo ambiental para licenciamento do empreendimento. ' * 8}</w:t></w:r></w:p>
+          <w:p><w:r><w:t>#{extra}#{'Elaboração de estudo ambiental para licenciamento do empreendimento. ' * 8}</w:t></w:r></w:p>
         </w:body></w:document>
       XML
     end
 
     @proposal.generated_documents.attach(
       io: StringIO.new(buffer.string), filename: "proposta_tecnica.docx",
-      metadata: { "version" => 1, "description" => "Emissão Inicial" }
+      metadata: { "version" => version, "description" => "Emissão Inicial" }
     )
   end
 end

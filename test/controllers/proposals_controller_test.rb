@@ -221,6 +221,58 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match "já foi aprovada", response.body
   end
 
+  test "approve guarda data e preço aprovados" do
+    post approve_conversation_proposal_path(@conversation)
+
+    @proposal.reload
+    assert @proposal.approved_at.present?
+    assert_equal @proposal.project_pricing.total_value, @proposal.approved_total
+  end
+
+  # 2026-09-27: o cliente às vezes pede mudança depois do preço aprovado.
+  test "reopen destrava a proposta aprovada, volta a conversa pra precificação e guarda quem/por quê" do
+    post approve_conversation_proposal_path(@conversation)
+
+    post reopen_conversation_proposal_path(@conversation), params: { reason: "Cliente pediu campanha extra" }
+
+    @proposal.reload
+    assert_equal "priced", @proposal.status
+    assert_equal "pricing", @conversation.reload.status
+    assert_equal users(:two), @proposal.reopened_by
+    assert_equal "Cliente pediu campanha extra", @proposal.reopen_reason
+    follow_redirect!
+    assert_match "Precificação reaberta", response.body
+    assert_match "Motivo: Cliente pediu campanha extra", response.body
+    assert_select "button", text: "Salvar e recalcular"
+  end
+
+  test "reopen avisa quando o preço mudou porque o cadastro mudou depois da aprovação" do
+    post approve_conversation_proposal_path(@conversation)
+    professionals(:coordenador).update_columns(rate_man_hour: 300) # proposta aprovada não recalcula sozinha
+
+    post reopen_conversation_proposal_path(@conversation)
+
+    assert_match "preço foi recalculado de", flash[:notice]
+    assert_equal 18_000, proposal_professionals(:coordenacao_line).reload.subtotal
+  end
+
+  test "reopen recusa proposta que não está aprovada" do
+    post reopen_conversation_proposal_path(@conversation)
+
+    assert_match "não está aprovada", flash[:alert]
+    assert_equal "priced", @proposal.reload.status
+  end
+
+  test "depois de reaberta, dá pra aprovar de novo" do
+    post approve_conversation_proposal_path(@conversation)
+    post reopen_conversation_proposal_path(@conversation)
+
+    post approve_conversation_proposal_path(@conversation)
+
+    assert_equal "approved", @proposal.reload.status
+    assert_equal "completed", @conversation.reload.status
+  end
+
   test "add_external_cost appends a cost line and recalculates the total" do
     original_total = @proposal.project_pricing.total_value
 

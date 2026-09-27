@@ -313,6 +313,20 @@ detalhamento da logística, o resumo lateral e as parcelas (evento `pricing-prev
 selo "Prévia · não salvo" avisa. **Mudou a fórmula em Ruby? Mude no JS também**
 (`test/system/pricing_preview_test.rb` trava os números).
 
+**Reabrir precificação aprovada (2026-09-27, pedido do consultor: "às vezes aprovo e o cliente
+pede pra mudar algo").** `Proposal#reopen!(user:, reason:)` → status volta a `priced` (editável),
+conversa volta de `completed` pra `pricing`, e fica registrado quem/quando/por quê
+(`reopened_at`/`reopened_by`/`reopen_reason`). `Proposal#approve!` passou a gravar
+`approved_at`/`approved_total`, então o preço aprovado anterior aparece numa faixa no topo da tela
+enquanto a proposta não é reaprovada. A IA vê isso no `[ESTADO ATUAL DA PROPOSTA]`
+(`Conversation#proposal_reopen_note`). **Preço nunca muda em silêncio:** proposta aprovada não
+acompanha mudança de valor no cadastro (`Professional#recalculate_open_pricings` pula aprovadas),
+então se o valor da hora-homem/diária mudou nesse meio-tempo, reabrir recalcula e o aviso mostra
+"de R$ X para R$ Y". **Acervo:** reaprovar gera documento novo (outro checksum), e
+`IndexApprovedProposalJob#supersede_previous_versions!` marca a versão anterior da mesma proposta
+como `superseded` (sai das buscas do RAG sem apagar o rastro). Documentos já gerados não mudam; a
+próxima geração sai como nova revisão.
+
 **"Serviços Terceirizados" — campo separado de Custos Externos, 100% manual (2026-09, pedido do
 consultor a partir de conversa com o time — "a parte terceirizada a gente coloca um campo
 específico... 100% responsabilidade dela inserir").** Mesmo armazenamento de sempre

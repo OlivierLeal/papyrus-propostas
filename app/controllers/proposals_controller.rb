@@ -1,6 +1,6 @@
 class ProposalsController < ApplicationController
   before_action :set_conversation
-  before_action :set_proposal, only: %i[ show update approve suggest_logistics add_external_cost remove_external_cost ]
+  before_action :set_proposal, only: %i[ show update approve reopen suggest_logistics add_external_cost remove_external_cost ]
 
   def show
     @professionals = Professional.active.order(:name)
@@ -42,8 +42,7 @@ class ProposalsController < ApplicationController
 
   def approve
     if editable?
-      @proposal.update!(status: "approved")
-      @conversation.update!(status: "completed")
+      @proposal.approve!
       # A partir daqui a proposta é documento revisado por humano, então pode virar referência
       # para as próximas (ver IndexApprovedProposalJob).
       IndexApprovedProposalJob.perform_later(@proposal.id)
@@ -51,6 +50,21 @@ class ProposalsController < ApplicationController
     else
       redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."
     end
+  end
+
+  def reopen
+    if editable?
+      redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta não está aprovada."
+      return
+    end
+
+    before, after = @proposal.reopen!(user: current_user, reason: params[:reason])
+    notice = "Precificação reaberta — ajuste o que precisar e aprove de novo."
+    if before != after
+      notice += " Atenção: o valor da hora-homem/diária mudou no cadastro desde a aprovação, " \
+                "e o preço foi recalculado de #{helpers.brl(before)} para #{helpers.brl(after)}."
+    end
+    redirect_to conversation_proposal_path(@conversation), notice: notice
   end
 
   def suggest_logistics
