@@ -82,6 +82,14 @@ module ApplicationHelper
     "schedule_mspdi_implantacao" => "MS Project · Implantação"
   }.freeze
 
+  # Selo colorido da etapa da proposta (Conversation#status). "Processando" ganha um ponto
+  # pulsando — é a única etapa em que o sistema está trabalhando sozinho.
+  def conversation_status_badge(conversation, extra_class: nil)
+    dot = tag.span(class: [ "size-1.5 rounded-full bg-current", ("animate-pulse" if conversation.status == "processing") ])
+    tag.span(safe_join([ dot, conversation.status_label ]),
+      class: [ "badge gap-1.5", conversation.status_badge_class, extra_class ])
+  end
+
   def document_kind_label(document)
     DOCUMENT_KIND_LABELS[document.blob.metadata["kind"]]
   end

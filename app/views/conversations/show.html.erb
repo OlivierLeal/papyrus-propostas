@@ -14,9 +14,7 @@
       </h1>
       <p class="text-sm text-base-content/60"><%= @conversation.study_types_label %></p>
     </div>
-    <span class="badge badge-soft ml-auto <%= @conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
-      <%= @conversation.status_label %>
-    </span>
+    <%= conversation_status_badge(@conversation, extra_class: "ml-auto") %>
   </div>
 
   <%= turbo_stream_from @conversation %>

@@ -303,6 +303,16 @@ da equipe**: `ProposalProfessional#removable?` (fixo só pode perder linha EXTRA
 checado na view e em `ProposalProfessionalsController#destroy`, que também passou a recusar
 proposta aprovada (create e destroy).
 
+**Prévia ao vivo na Tela de Precificação (2026-09-27, pedido do consultor: "quando eu mudo a
+hora homem ele não atualiza o valor no frontend").** `pricing_preview_controller.js` refaz no
+navegador a MESMA conta do Ruby (`ProposalProfessional#expected_subtotal`,
+`ProjectPricing#logistics_breakdown`/total, arredondamento do desembolso) a cada tecla em HH,
+diárias, BDI, impostos e logística. Atualiza o subtotal da linha, os totais da equipe, o
+detalhamento da logística, o resumo lateral e as parcelas (evento `pricing-preview:total` →
+`payment_schedule_controller#updateTotal`). É só prévia: nada grava até "Salvar e recalcular", e o
+selo "Prévia · não salvo" avisa. **Mudou a fórmula em Ruby? Mude no JS também**
+(`test/system/pricing_preview_test.rb` trava os números).
+
 **"Serviços Terceirizados" — campo separado de Custos Externos, 100% manual (2026-09, pedido do
 consultor a partir de conversa com o time — "a parte terceirizada a gente coloca um campo
 específico... 100% responsabilidade dela inserir").** Mesmo armazenamento de sempre

@@ -51,9 +51,7 @@
                     <span class="text-base-content/50 font-normal text-sm"><%= conversation.proposal.docx_numero_proposta %></span>
                   <% end %>
                 </h3>
-                <span class="badge badge-soft shrink-0 <%= conversation.status == "setup" ? "badge-warning" : "badge-success" %>">
-                  <%= conversation.status_label %>
-                </span>
+                <%= conversation_status_badge(conversation, extra_class: "shrink-0") %>
               </div>
 
               <span class="badge badge-ghost w-fit"><%= conversation.study_types_label %></span>

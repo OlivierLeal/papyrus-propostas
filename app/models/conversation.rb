@@ -22,6 +22,18 @@ class Conversation < ApplicationRecord
     "completed" => "Concluída"
   }.freeze
 
+  # Cor do selo de cada etapa (lista de propostas e cabeçalho da conversa) — uma cor por etapa,
+  # pra dar pra separar as propostas de relance. Classes completas aqui (não montadas por
+  # interpolação) pro Tailwind enxergar e gerar o CSS. "Precificação" é sólida de propósito: o
+  # petróleo da marca em versão suave fica quase igual ao cinza de "Configuração".
+  STATUS_BADGE_CLASSES = {
+    "setup" => "badge-soft badge-neutral",
+    "processing" => "badge-soft badge-info",
+    "reviewing" => "badge-soft badge-warning",
+    "pricing" => "badge-primary",
+    "completed" => "badge-soft badge-success"
+  }.freeze
+
   # Etapas de processamento em background disparadas ao confirmar o setup.
   # "summary" roda depois que as etapas abaixo terminam (done/skipped/failed).
   # "et" é o documento principal (pedido técnico do cliente); "tr" é o guia institucional
@@ -268,6 +280,10 @@ class Conversation < ApplicationRecord
 
   def status_label
     STATUS_LABELS.fetch(status, status)
+  end
+
+  def status_badge_class
+    STATUS_BADGE_CLASSES.fetch(status, "badge-ghost")
   end
 
   # "EIA-RIMA, Relatório Técnico" (vários), "Acompanhamento" (um só, cadastrado como qualquer

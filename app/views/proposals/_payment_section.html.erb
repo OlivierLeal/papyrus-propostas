@@ -4,7 +4,8 @@
     <%# Parcelas editáveis (2026-09-27): marco, % e data; valor calculado a partir do total. Linha
         sem marco é descartada no servidor (ProjectPricing#payment_schedule_items=). %>
 
-    <div class="bg-base-100 p-6" data-controller="payment-schedule" data-payment-schedule-total-value="<%= pricing.total_value.to_f %>">
+    <div class="bg-base-100 p-6" data-controller="payment-schedule" data-payment-schedule-total-value="<%= pricing.total_value.to_f %>"
+         data-action="pricing-preview:total@window->payment-schedule#updateTotal">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="font-semibold text-base-content">Desembolso</h2>

@@ -11,8 +11,8 @@
     </div>
     <div class="flex gap-2 text-xs">
       <span class="badge badge-ghost"><%= pluralize(lines.map(&:professional_id).uniq.size, "pessoa", plural: "pessoas") %></span>
-      <span class="badge badge-ghost"><%= number_with_delimiter(lines.sum(&:man_hours).to_f.round(1), delimiter: ".", separator: ",") %> HH</span>
-      <span class="badge badge-ghost"><%= number_with_delimiter(lines.sum(&:field_days).to_f.round(1), delimiter: ".", separator: ",") %> diárias</span>
+      <span class="badge badge-ghost" data-pricing-preview-target="teamHours"><%= number_with_delimiter(lines.sum(&:man_hours).to_f.round(1), delimiter: ".", separator: ",") %> HH</span>
+      <span class="badge badge-ghost"><span data-pricing-preview-target="teamDays"><%= number_with_delimiter(lines.sum(&:field_days).to_f.round(1), delimiter: ".", separator: ",") %></span> diárias</span>
     </div>
   </div>
 
@@ -43,7 +43,8 @@
         <%= form.fields_for :proposal_professionals, lines do |pp_form| %>
           <% line = pp_form.object %>
           <% professional = line.professional %>
-          <tr class="align-top hover:bg-base-200/30">
+          <tr class="align-top hover:bg-base-200/30" data-pricing-preview-target="line"
+              data-rate-hour="<%= professional.rate_man_hour.to_f %>" data-rate-day="<%= professional.rate_daily.to_f %>">
             <td class="min-w-44">
               <%= pp_form.hidden_field :id %>
               <div class="flex items-center gap-3">
@@ -74,7 +75,7 @@
                     class: "input input-sm w-20 text-right tabular-nums" %>
               <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
             </td>
-            <td class="text-right font-medium text-base-content tabular-nums whitespace-nowrap pt-5"><%= brl(line.subtotal) %></td>
+            <td class="text-right font-medium text-base-content tabular-nums whitespace-nowrap pt-5" data-role="subtotal"><%= brl(line.subtotal) %></td>
             <td class="text-right pt-4">
               <% if editable && line.removable? %>
                 <%= link_to conversation_proposal_proposal_professional_path(conversation, line),
@@ -98,9 +99,9 @@
         <tfoot>
           <tr class="bg-base-200/40 text-sm text-base-content">
             <td colspan="2" class="font-semibold">Total da equipe</td>
-            <td class="text-right tabular-nums"><%= number_with_delimiter(lines.sum(&:man_hours).to_f.round(1), delimiter: ".", separator: ",") %> HH</td>
-            <td class="text-right tabular-nums"><%= number_with_delimiter(lines.sum(&:field_days).to_f.round(1), delimiter: ".", separator: ",") %></td>
-            <td class="text-right font-semibold tabular-nums whitespace-nowrap"><%= brl(pricing.professionals_total) %></td>
+            <td class="text-right tabular-nums" data-pricing-preview-target="teamHours"><%= number_with_delimiter(lines.sum(&:man_hours).to_f.round(1), delimiter: ".", separator: ",") %> HH</td>
+            <td class="text-right tabular-nums" data-pricing-preview-target="teamDays"><%= number_with_delimiter(lines.sum(&:field_days).to_f.round(1), delimiter: ".", separator: ",") %></td>
+            <td class="text-right font-semibold tabular-nums whitespace-nowrap" data-pricing-preview-target="teamTotal"><%= brl(pricing.professionals_total) %></td>
             <td></td>
           </tr>
         </tfoot>

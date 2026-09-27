@@ -30,6 +30,12 @@ export default class extends Controller {
     this.recalculate()
   }
 
+  // Total da prévia ao vivo (pricing_preview_controller) — as parcelas acompanham.
+  updateTotal(event) {
+    this.totalValue = event.detail.total
+    this.recalculate()
+  }
+
   recalculate() {
     const percentages = this.percentageTargets.map((input) => parseFloat(input.value.replace(",", ".")) || 0)
     const sum = percentages.reduce((a, b) => a + b, 0)

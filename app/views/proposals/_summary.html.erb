@@ -3,19 +3,22 @@
     conversation, editable %>
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
   <div class="px-6 pt-5 pb-4">
-    <p class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Total da proposta</p>
-    <p class="font-display text-3xl font-bold text-primary tabular-nums mt-1"><%= brl(pricing.total_value) %></p>
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Total da proposta</p>
+      <span class="badge badge-warning badge-soft badge-sm" data-pricing-preview-target="dirty" hidden title="Os valores mudam na hora enquanto você edita; clique em Salvar e recalcular para gravar">Prévia · não salvo</span>
+    </div>
+    <p class="font-display text-3xl font-bold text-primary tabular-nums mt-1" data-pricing-preview-target="summaryTotal"><%= brl(pricing.total_value) %></p>
   </div>
 
   <dl class="border-t border-base-300 px-6 py-4 flex flex-col gap-2 text-sm">
     <% outsourced = pricing.outsourced_costs.sum { |cost, _| cost["value"].to_f } %>
-    <% [ [ "Equipe", pricing.professionals_total ],
-         [ "Logística", pricing.logistics_total ],
-         [ "Custos externos", pricing.external_costs_total - outsourced ],
-         [ "Terceirizados", outsourced ] ].each do |label, value| %>
+    <% [ [ "Equipe", pricing.professionals_total, "summaryTeam" ],
+         [ "Logística", pricing.logistics_total, "summaryLogistics" ],
+         [ "Custos externos", pricing.external_costs_total - outsourced, nil ],
+         [ "Terceirizados", outsourced, nil ] ].each do |label, value, target| %>
       <div class="flex justify-between gap-3">
         <dt class="text-base-content/60"><%= label %></dt>
-        <dd class="text-base-content tabular-nums"><%= brl(value) %></dd>
+        <dd class="text-base-content tabular-nums" <% if target %>data-pricing-preview-target="<%= target %>"<% end %>><%= brl(value) %></dd>
       </div>
     <% end %>
   </dl>
@@ -28,7 +31,7 @@
           <span class="text-base-content/60 min-w-0 truncate">
             <%= item["label"] %> · <%= item["percentage"] %>%<%= " · #{Date.parse(item["date"]).strftime("%d/%m/%Y")}" if item["date"].present? %>
           </span>
-          <span class="text-base-content tabular-nums shrink-0"><%= brl(item["amount"]) %></span>
+          <span class="text-base-content tabular-nums shrink-0" data-pricing-preview-target="installment" data-percentage="<%= item["percentage"] %>"><%= brl(item["amount"]) %></span>
         </li>
       <% end %>
     </ul>
