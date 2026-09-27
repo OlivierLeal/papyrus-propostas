@@ -166,3 +166,15 @@
   padding: 0.3em 0.6em;
   text-align: left;
 }
+
+/* Sem as setinhas de incremento nos campos numéricos (pedido do consultor, 2026-09) — ocupam
+   espaço, cobrem o valor em campos estreitos e ninguém usa; o valor é sempre digitado. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
