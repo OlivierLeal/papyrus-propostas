@@ -170,6 +170,37 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal [ @proposal.docx_filename("combined") ], result["filenames"]
   end
 
+  # 2026-09-28 (VESTAS/conversa 63): o ET pedia "os valores relativos às principais etapas".
+  test "preco_discriminado abre o Quadro de Preço por etapa, com valores do sistema e linha TOTAL" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    lines = @proposal.project_pricing.proposal_professionals.order(:id).to_a
+    lines.first.update!(stage: "Planejamento")
+    lines.last.update!(stage: "Campanhas de campo")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, preco_discriminado: true))
+
+    assert result["success"]
+    assert @proposal.project_pricing.reload.price_breakdown?
+    ns = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }
+    tabela = Nokogiri::XML(document_xml(@proposal.generated_documents.first)).xpath("//w:tbl", ns)[3]
+    linhas = tabela.xpath(".//w:tr", ns)[1..].map { |tr| tr.xpath(".//w:tc", ns).map { |tc| tc.xpath(".//w:t", ns).map(&:text).join.strip } }
+    assert_equal @proposal.docx_price_rows, linhas
+    assert_equal [ "", "TOTAL", "44.910,00" ], linhas.last
+    assert tabela.xpath(".//w:tr", ns).last.xpath(".//w:r[w:t[normalize-space()!='']]", ns).all? { |run| run.at_xpath("w:rPr/w:b", ns) }
+    assert_equal 3, linhas.size
+  end
+
+  test "preco_discriminado sem etapas definidas sai com o total e avisa o consultor" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = JSON.parse(tool.execute(**@args, preco_discriminado: true))
+
+    assert_match "pelo menos 2", result["message"]
+    assert_equal 1, @proposal.reload.docx_price_rows.size
+  end
+
   test "an unrecognized formato_documento value is ignored instead of raising" do
     @proposal.update!(status: "priced", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)

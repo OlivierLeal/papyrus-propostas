@@ -255,6 +255,19 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert first["amount"].positive?
   end
 
+  test "price_breakdown_rows: logística repartida pelas diárias, externos em linha própria, soma bate com o total" do
+    pricing = project_pricings(:priced_pricing)
+    proposal_professionals(:coordenacao_line).update!(stage: nil)
+    proposal_professionals(:fauna_flora_line).update!(stage: "Campanhas de campo")
+    pricing.update!(external_costs: [ { "description" => "ART", "value" => 99.99 } ])
+    pricing.recalculate!
+
+    rows = pricing.reload.price_breakdown_rows
+    assert_equal [ "Campanhas de campo", ProjectPricing::UNSTAGED_LABEL, ProjectPricing::EXTERNAL_COSTS_LABEL ], rows.map(&:first)
+    assert_equal pricing.total_value, rows.sum(&:last)
+    assert_equal 99.99.to_d, rows.last.last
+  end
+
   private
     def fake_mapbox_directions(result)
       Object.new.tap { |fake| fake.define_singleton_method(:fetch) { result } }

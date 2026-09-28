@@ -55,6 +55,19 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "combined", proposal.reload.document_split
   end
 
+  test "build_with_ai_suggested_team! grava a etapa de cada linha e liga o preço discriminado quando o ET pede" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    ai_response = {
+      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna", etapa: " Campanhas de campo ", man_hours: 40, field_days: 6 } ],
+      preco_discriminado: true, documentos_separados: false
+    }.to_json
+
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    assert_equal "Campanhas de campo", pricing.proposal_professionals.find_by(professional: professionals(:biologa)).stage
+    assert pricing.reload.price_breakdown?
+  end
+
   test "build_with_ai_suggested_team! lista a equipe fixa e o quadro completo no prompt" do
     proposal = @conversation.create_proposal!(status: "draft")
     prompt = nil
@@ -518,7 +531,29 @@ class ProposalTest < ActiveSupport::TestCase
   test "docx_price_rows: 1 linha só, com o nome do serviço e o preço total formatado" do
     proposal = proposals(:priced_proposal)
 
-    assert_equal [ [ proposal.docx_servico_label, "44.910,00" ] ], proposal.docx_price_rows
+    assert_equal [ [ "1", proposal.docx_servico_label, "44.910,00" ] ], proposal.docx_price_rows
+  end
+
+  test "docx_price_rows discriminado: uma linha por etapa, calculada pelo sistema, e TOTAL no fim" do
+    proposal = proposals(:priced_proposal)
+    proposal_professionals(:coordenacao_line).update!(stage: "Planejamento")
+    proposal_professionals(:fauna_flora_line).update!(stage: "Campanhas de campo")
+    proposal.project_pricing.update!(price_breakdown: true)
+
+    # Logística (R$ 1.650) vai toda pra etapa que tem diárias de campo.
+    rows = proposal.reload.docx_price_rows
+    assert_equal [ "1", "2" ], rows[0..1].map(&:first)
+    assert_equal [ [ "Campanhas de campo", "29.910,00" ], [ "Planejamento", "15.000,00" ] ], rows[0..1].map { |row| row[1..] }.sort
+    assert_equal [ "", "TOTAL", "44.910,00" ], rows.last
+  end
+
+  test "docx_price_rows: preço discriminado pedido mas sem 2 etapas cai no total único" do
+    proposal = proposals(:priced_proposal)
+    proposal.project_pricing.update!(price_breakdown: true)
+    proposal_professionals(:fauna_flora_line).update!(stage: "Campanhas de campo")
+
+    assert_not proposal.reload.price_breakdown_active?
+    assert_equal 1, proposal.docx_price_rows.size
   end
 
   test "docx_servico_label derives from the identified ato de licenciamento, never from the AI" do

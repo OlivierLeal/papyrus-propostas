@@ -664,6 +664,8 @@ class ProposalDocxFiller
 
           set_cell_text!(cell, value.to_s)
         end
+        # Linha de total (Quadro de Preço discriminado, ver Proposal#docx_price_rows) em negrito.
+        row_node.xpath(".//w:t", NS).each { |text_node| bold_run!(text_node) } if row_values.include?("TOTAL")
 
         row_node
       end

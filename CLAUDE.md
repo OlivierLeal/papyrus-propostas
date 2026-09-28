@@ -582,6 +582,24 @@ e ser possível adicionar").**
   as células N° das linhas do Desembolso perderam o entrelinha 1,5, que deixava o número
   desalinhado no topo. Conferido no LibreOffice (headless → PDF → captura).
 
+**Preço discriminado por etapa, sob demanda (2026-09-28, VESTAS/conversa 63 — o ET pedia "custos
+discriminados, permitindo identificar os valores relativos às principais etapas e estudos").**
+Padrão continua sendo o Quadro de Preço com 1 linha (total). Com `project_pricings.price_breakdown`
+ligado e a equipe com 2+ etapas, o quadro sai com uma linha por etapa + linha TOTAL em negrito.
+- Cada linha da equipe tem `proposal_professionals.stage` (coluna "Etapa" na Tela de Precificação).
+  A IA sugere a etapa junto com a equipe (`"etapa"` no JSON de `team_suggestion_prompt`, 3 a 6
+  etapas; Diretoria/Coordenação pode ficar sem).
+- `ProjectPricing#price_breakdown_rows`, só Ruby: etapa = soma dos subtotais das linhas dela +
+  logística repartida pelas diárias de campo de cada etapa; linhas sem etapa viram "Coordenação e
+  gestão do projeto"; custos externos em linha própria; a última linha absorve o arredondamento.
+- Liga: checkbox "Discriminar o preço por etapa" na Tela de Precificação; `preco_discriminado` na
+  sugestão de equipe (quando o ET/TR pede); ou o parâmetro `preco_discriminado` de
+  `GenerateProposalDocumentTool` (consultor pede no chat; `false` volta ao total). Sem 2 etapas, sai o
+  total e a mensagem avisa pra definir as etapas.
+- Achado novo `apresentacao_preco` (ET/TR/complementar): a sugestão de equipe não relê o PDF, então o
+  que o documento diz sobre a forma do preço vai explícito no prompt (`price_presentation_context`).
+- `docx_price_rows` passou a devolver o N° pronto (tabela 3 com `auto_number: false`).
+
 **"EXIGÊNCIAS SMS" virou capítulo fixo, logo depois de EQUIPE TÉCNICA (2026-09, pedido do
 consultor a partir de um texto pronto da Papyrus).** Texto INTEIRO fixo do modelo — nada vem da
 IA nem de `ProjectFinding` nenhum, mesmo princípio das "Observações fixas no item de preços"

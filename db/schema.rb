@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_230000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -407,6 +407,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_230000) do
     t.integer "logistics_days", default: 0, null: false
     t.decimal "meal_per_person_per_day", precision: 10, scale: 2, default: "0.0", null: false
     t.jsonb "payment_schedule", default: [{"label"=>"Assinatura do contrato", "percentage"=>30}, {"label"=>"Protocolo no órgão ambiental", "percentage"=>60}, {"label"=>"Vistoria", "percentage"=>5}, {"label"=>"Emissão da licença", "percentage"=>5}], null: false
+    t.boolean "price_breakdown", default: false, null: false
     t.bigint "proposal_id", null: false
     t.decimal "rental_per_day", precision: 10, scale: 2, default: "0.0", null: false
     t.date "schedule_empreendimento_start_date"
@@ -428,6 +429,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_230000) do
     t.decimal "man_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.bigint "professional_id", null: false
     t.bigint "project_pricing_id", null: false
+    t.string "stage"
     t.decimal "subtotal", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
     t.index ["professional_id"], name: "index_proposal_professionals_on_professional_id"

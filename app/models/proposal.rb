@@ -112,13 +112,27 @@ class Proposal < ApplicationRecord
     "R$ #{format_currency(project_pricing.total_value)}"
   end
 
-  # Linha do Quadro de Preço (N° | SERVIÇO | PREÇO R$, reintroduzido em 2026-09 a pedido do
-  # consultor) — sempre 1 linha só, o sistema calcula um preço TOTAL por proposta, nunca por
-  # serviço/entregável separado (ver seção 5, motor de precificação). `descricao_fallback` é o
-  # texto livre que a IA já escreve pra outros fins (descricao_servico) — só entra quando não dá
-  # pra derivar um nome determinístico do ato de licenciamento (ver #docx_servico_label).
+  # Linhas do Quadro de Preço (N° | SERVIÇO | PREÇO R$, reintroduzido em 2026-09), já com o N°.
+  # Padrão: 1 linha só, o preço TOTAL. `descricao_fallback` é o texto livre que a IA já escreve
+  # pra outros fins (descricao_servico) — só entra quando não dá pra derivar um nome
+  # determinístico do ato de licenciamento (ver #docx_servico_label).
+  #
+  # Preço discriminado (2026-09-28, VESTAS/conversa 63 — o ET pedia "os valores relativos às
+  # principais etapas e estudos"): com `project_pricing.price_breakdown` ligado e pelo menos 2
+  # etapas, sai uma linha por etapa (ProjectPricing#price_breakdown_rows, calculado em Ruby) e uma
+  # linha TOTAL sem número no fim.
   def docx_price_rows(descricao_fallback: nil)
-    [ [ docx_servico_label(fallback: descricao_fallback), format_currency(project_pricing.total_value) ] ]
+    unless price_breakdown_active?
+      return [ [ "1", docx_servico_label(fallback: descricao_fallback), format_currency(project_pricing.total_value) ] ]
+    end
+
+    project_pricing.price_breakdown_rows.each_with_index.map { |(label, value), index| [ (index + 1).to_s, label, format_currency(value) ] } +
+      [ [ "", "TOTAL", format_currency(project_pricing.total_value) ] ]
+  end
+
+  # Preço sai discriminado no documento: pedido (flag) E a equipe já tem 2+ etapas.
+  def price_breakdown_active?
+    project_pricing.price_breakdown? && project_pricing.price_stages_count >= 2
   end
 
   # Nome do serviço pro Quadro de Preço — deriva do(s) ato(s) de licenciamento já identificados
@@ -224,6 +238,7 @@ class Proposal < ApplicationRecord
     apply_team_lines!(pricing, Array(suggestion["linhas"]))
     ensure_always_included_lines!(pricing)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
+    pricing.update!(price_breakdown: true) if suggestion["preco_discriminado"] == true
 
     finalize!(pricing)
   rescue StandardError => e
@@ -262,6 +277,7 @@ class Proposal < ApplicationRecord
     apply_team_lines!(pricing, Array(suggestion["linhas"]))
     ensure_always_included_lines!(pricing)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
+    pricing.update!(price_breakdown: true) if suggestion["preco_discriminado"] == true
     pricing.recalculate!
   rescue StandardError => e
     Rails.logger.error("suggest_team_if_missing! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
@@ -616,6 +632,16 @@ class Proposal < ApplicationRecord
       ""
     end
 
+    # O que o ET/TR disse sobre como apresentar o preço (achado "apresentacao_preco") — entregue
+    # no prompt de equipe porque a IA ali não relê o PDF original, só a conversa.
+    def price_presentation_context
+      notes = conversation.project_findings.active.where(field: "apresentacao_preco").pluck(:value, :excerpt)
+      return "" if notes.empty?
+
+      lines = notes.map { |value, excerpt| "- #{value}#{" (trecho: \"#{excerpt}\")" if excerpt.present?}" }
+      "O que os documentos desta proposta dizem sobre a apresentação do preço:\n#{lines.join("\n")}"
+    end
+
     def team_suggestion_prompt
       describe = lambda do |professional|
         "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
@@ -645,6 +671,11 @@ class Proposal < ApplicationRecord
         - "deliverable_name" é o entregável/frente de trabalho da pessoa NESTA proposta (ex.:
           "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Coordenação Geral").
         - Um mesmo profissional pode ter mais de uma linha se entregar frentes distintas.
+        - "etapa" é a ETAPA principal do serviço a que a linha pertence (ex.: "Enquadramento e
+          planejamento", "Campanhas de campo", "Elaboração dos estudos", "Protocolo e
+          acompanhamento"). Use de 3 a 6 etapas no total, com nomes curtos e iguais entre as
+          linhas da mesma etapa — é com elas que o preço pode ser aberto por etapa pro cliente.
+          Diretoria/Coordenação que atravessa o projeto inteiro pode ficar com "etapa" vazia.
         - Esforço em duas quantidades:
           #{EFFORT_UNITS_GUIDE}
           Estime pelo porte e complexidade do escopo. Se realmente não houver base, use 0 (o
@@ -654,13 +685,19 @@ class Proposal < ApplicationRecord
         como documentos/envelopes SEPARADOS (comum em licitação) — se nenhum falar nada, considere
         que NÃO (documento único).
 
+        Diga também se o ET ou o TR pede os custos DISCRIMINADOS por etapa/estudo (ex.: "custos
+        discriminados", "valores relativos às principais etapas", "preço por item/fase") em vez
+        de só o preço global — "preco_discriminado": true só quando pedir; senão false.
+        #{price_presentation_context}
+
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
 
         {
           "linhas": [
-            { "professional_id": 12, "deliverable_name": "Geoprocessamento e Cartografia", "man_hours": 40, "field_days": 2 }
+            { "professional_id": 12, "deliverable_name": "Geoprocessamento e Cartografia", "etapa": "Elaboração dos estudos", "man_hours": 40, "field_days": 2 }
           ],
+          "preco_discriminado": false,
           "documentos_separados": false,
           "justificativa_documentos_separados": "..."
         }
@@ -815,7 +852,8 @@ class Proposal < ApplicationRecord
         next if seen.include?(key)
 
         seen << key
-        attrs = { deliverable_name: deliverable, man_hours: effort(line["man_hours"]), field_days: effort(line["field_days"]) }
+        attrs = { deliverable_name: deliverable, stage: line["etapa"].to_s.strip.truncate(80).presence,
+                  man_hours: effort(line["man_hours"]), field_days: effort(line["field_days"]) }
         placeholder = professional.always_included && pricing.proposal_professionals
           .find_by(professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0)
 

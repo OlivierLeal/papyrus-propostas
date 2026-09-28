@@ -33,6 +33,9 @@ class ProjectFinding < ApplicationRecord
     "condicionantes" => { label: "Condicionantes", comparable: false },
     "ressalvas" => { label: "Ressalvas", comparable: false },
     "produtos" => { label: "Produtos/entregáveis", comparable: false },
+    # 2026-09-28 (VESTAS/conversa 63): "custos discriminados por etapa" no ET não virava achado e
+    # a sugestão de equipe (que não relê o PDF) não sabia que tinha que abrir o preço.
+    "apresentacao_preco" => { label: "Forma de apresentação do preço pedida (preço global, discriminado por etapa/estudo/item, condições de pagamento)", comparable: false },
     "outro" => { label: "Outra informação", comparable: false }
   }.freeze
 

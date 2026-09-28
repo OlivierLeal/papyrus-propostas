@@ -152,10 +152,10 @@ class ProposalsController < ApplicationController
         :bdi, :tax_multiplier, :distance_km, :travel_hours, :logistics_days,
         :rental_per_day, :vehicles_count, :meal_per_person_per_day, :lodging_per_person_per_night,
         :fuel_total, :fuel_price_per_liter, :vehicle_consumption_km_per_liter,
-        :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
+        :schedule_papyrus_start_date, :schedule_empreendimento_start_date, :price_breakdown,
         payment_dates: [],
         payment_schedule_items: %i[ label percentage date ],
-        proposal_professionals_attributes: %i[ id deliverable_name man_hours field_days ],
+        proposal_professionals_attributes: %i[ id deliverable_name stage man_hours field_days ],
         schedule_items_attributes: %i[ id phase_name activity_name start_period duration_periods milestone ]
       )
     end

@@ -116,6 +116,43 @@ class ProjectPricing < ApplicationRecord
     external_costs.each_with_index.reject { |item, _index| item["kind"] == "terceirizado" }
   end
 
+  # Rótulo das linhas de equipe sem etapa (normalmente Diretoria/Coordenação, que atravessam o
+  # projeto inteiro) no preço discriminado.
+  UNSTAGED_LABEL = "Coordenação e gestão do projeto"
+  EXTERNAL_COSTS_LABEL = "Custos externos (ARTs, taxas e demais despesas)"
+  FIELD_LOGISTICS_LABEL = "Logística de campo"
+
+  # Subpreço de cada etapa, pro Quadro de Preço discriminado (2026-09-28). Tudo sai do MESMO
+  # motor do total, nunca da IA: cada etapa soma os subtotais das linhas de equipe dela; a
+  # logística (C4) é repartida entre as etapas na proporção das diárias de campo de cada uma
+  # (quem não vai a campo não carrega logística); custos externos (C5) viram linha própria. A
+  # última linha absorve o arredondamento, então a soma bate centavo a centavo com total_value.
+  # Ordem: etapas na ordem em que aparecem na equipe, linhas sem etapa por último.
+  def price_breakdown_rows
+    lines = proposal_professionals.sort_by(&:id)
+    staged, unstaged = lines.partition { |line| line.stage.to_s.strip.present? }
+    groups = staged.group_by { |line| line.stage.strip }
+    groups[UNSTAGED_LABEL] = unstaged if unstaged.any?
+
+    logistics = logistics_total.to_d
+    field_days = lines.sum(&:field_days).to_d
+    rows = groups.map do |label, group|
+      share = field_days.positive? ? logistics * group.sum(&:field_days) / field_days : 0
+      [ label, group.sum(&:subtotal).to_d + share ]
+    end
+    rows << [ FIELD_LOGISTICS_LABEL, logistics ] if field_days.zero? && logistics.positive?
+    rows << [ EXTERNAL_COSTS_LABEL, external_costs_total.to_d ] if external_costs_total.positive?
+
+    rows = rows.map { |label, value| [ label, value.round(2) ] }
+    rows[-1] = [ rows[-1][0], (total_value.to_d - rows[0..-2].sum { |_, value| value }).round(2) ] if rows.any?
+    rows
+  end
+
+  # Quantas etapas distintas a equipe tem — o quadro só abre com 2 ou mais.
+  def price_stages_count
+    proposal_professionals.filter_map { |line| line.stage.to_s.strip.presence }.uniq.size
+  end
+
   # C6 = TOTAL = Σ profissionais + logística + externos
   def recalculate!
     # Usa a mesma lista de objetos pra calcular, salvar e somar — carregar a associação de novo

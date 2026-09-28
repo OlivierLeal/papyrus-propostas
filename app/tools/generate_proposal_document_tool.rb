@@ -195,6 +195,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "especificamente. Formato AAAA-MM-DD.",
     required: false
 
+  param :preco_discriminado, type: "boolean", required: false,
+    desc: "true quando o ET/TR ou o consultor pedir o preço ABERTO por etapa/estudo (ex.: \"custos " \
+          "discriminados\", \"valor de cada etapa\", \"subpreços dos marcos\") em vez de só o total; false " \
+          "quando o consultor pedir pra voltar ao preço total único. Fora disso, NÃO envie (a escolha já " \
+          "feita continua valendo). Os valores de cada etapa são calculados pelo sistema a partir da " \
+          "equipe — você nunca escreve valor nenhum."
+
   param :exportar_cronograma_ms_project, type: "boolean", required: false,
     desc: "true SOMENTE em dois casos: (1) o consultor pediu explicitamente no chat o cronograma em formato " \
           "MS Project (ex.: \"manda também em .xml\", \"preciso importar no MS Project\"), ou (2) o ET ou o TR " \
@@ -296,6 +303,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # 2026-09, pedido do consultor: antes só o ET/TR (na criação da proposta) ou a tela decidiam
     # se o documento sai combinado ou separado — pedir a mudança no CHAT não tinha efeito nenhum.
     apply_document_split_override!(args[:formato_documento])
+    apply_price_breakdown_override!(args[:preco_discriminado])
 
     # Guarda o ÚLTIMO conjunto de parâmetros de conteúdo desta geração — usado por
     # .replay_pending_regeneration! pra remontar o .docx sozinho, sem IA, quando o cronograma/
@@ -677,7 +685,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         # um profissional cai no mesmo setor em linhas consecutivas (2026-09, pedido do consultor
         # — ver ProposalDocxFiller#merge_first_column!).
         2 => { rows: @proposal.team_rows_for_docx, merge_first_column: true },
-        3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: true },
+        3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: false },
         4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
     end
@@ -776,6 +784,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types = [], team_background_task: nil)
       parts = []
+      if @proposal.project_pricing&.price_breakdown? && !@proposal.price_breakdown_active? && team_background_task != :team
+        parts << " O preço discriminado por etapa foi pedido, mas a equipe ainda não tem pelo menos 2 " \
+          "etapas definidas — por isso o quadro saiu com o preço total. Defina a etapa de cada linha " \
+          "na Tela de Precificação (coluna Etapa) e gere de novo."
+      end
       if team_background_task == :team
         parts << " Estou sugerindo a equipe técnica desta proposta em segundo plano — quando " \
           "terminar, gero uma nova versão sozinho e aviso aqui, sem precisar pedir de novo."
@@ -897,6 +910,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # docx_filename_override) — a IA só passa o parâmetro quando ele disse algo explicitamente,
     # nunca inventa. Formato livre tolerado (Date.parse aceita "2026-10-15" e várias variações);
     # data ilegível é ignorada em silêncio, não derruba a geração.
+    # Preço discriminado por etapa (2026-09-28) — só muda quando a IA manda o parâmetro; ausente
+    # mantém o que já foi decidido (pela sugestão de equipe ou pela Tela de Precificação).
+    def apply_price_breakdown_override!(value)
+      return if value.nil?
+
+      @proposal.project_pricing&.update!(price_breakdown: ActiveModel::Type::Boolean.new.cast(value) == true)
+    end
+
     def apply_schedule_start_date_overrides!(args)
       pricing = @proposal.project_pricing
       return unless pricing
