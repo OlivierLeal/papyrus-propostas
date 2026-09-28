@@ -7,7 +7,7 @@
   <td class="w-28">
     <label class="input input-sm w-24">
       <%= number_field_tag "project_pricing[payment_schedule_items][#{index}][percentage]", item["percentage"], disabled: !editable,
-            id: nil, step: 0.01, min: 0, max: 100, class: "grow text-right",
+            id: nil, step: "any", min: 0, max: 100, class: "grow text-right",
             data: { payment_schedule_target: "percentage", action: "input->payment-schedule#recalculate" } %>
       <span class="text-base-content/40 text-xs">%</span>
     </label>

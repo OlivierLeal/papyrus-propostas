@@ -45,7 +45,7 @@
             <legend class="fieldset-legend">Valor da hora-homem</legend>
             <label class="<%= settings_field_class(professional, :rate_man_hour) %>">
               <span class="text-base-content/50">R$</span>
-              <%= form.number_field :rate_man_hour, step: "0.01", min: 0, required: true, class: "grow" %>
+              <%= form.number_field :rate_man_hour, step: "any", min: 0, required: true, class: "grow" %>
               <span class="text-xs text-base-content/40">/ hora</span>
             </label>
             <%= settings_field_error(professional, :rate_man_hour) %>
@@ -55,7 +55,7 @@
             <legend class="fieldset-legend">Valor da diária</legend>
             <label class="<%= settings_field_class(professional, :rate_daily) %>">
               <span class="text-base-content/50">R$</span>
-              <%= form.number_field :rate_daily, step: "0.01", min: 0, required: true, class: "grow" %>
+              <%= form.number_field :rate_daily, step: "any", min: 0, required: true, class: "grow" %>
               <span class="text-xs text-base-content/40">/ dia</span>
             </label>
             <%= settings_field_error(professional, :rate_daily) %>

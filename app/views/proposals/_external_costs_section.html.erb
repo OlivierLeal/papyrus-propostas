@@ -48,7 +48,7 @@
         <legend class="fieldset-legend pt-0">Valor</legend>
         <label class="input input-sm w-full">
           <span class="text-base-content/40 text-xs">R$</span>
-          <%= cost_form.number_field :value, step: 0.01, min: 0.01, required: true, class: "grow text-right" %>
+          <%= cost_form.number_field :value, step: "any", min: 0.01, required: true, class: "grow text-right" %>
         </label>
       </fieldset>
       <%= cost_form.submit "Adicionar", class: "btn btn-sm btn-outline" %>

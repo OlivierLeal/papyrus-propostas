@@ -16,11 +16,11 @@
       <div class="grid grid-cols-2 lg:grid-cols-1 gap-3">
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">BDI</legend>
-          <%= pricing_number_field form, :bdi, suffix: "×", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :bdi, suffix: "×", step: "any", min: 0, disabled: !editable %>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Impostos (ADM)</legend>
-          <%= pricing_number_field form, :tax_multiplier, suffix: "×", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :tax_multiplier, suffix: "×", step: "any", min: 0, disabled: !editable %>
         </fieldset>
       </div>
     </div>
@@ -46,11 +46,11 @@
       <div class="grid grid-cols-2 gap-3">
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Distância</legend>
-          <%= pricing_number_field form, :distance_km, suffix: "km", step: 1, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :distance_km, suffix: "km", step: "any", min: 0, disabled: !editable %>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Viagem (ida)</legend>
-          <%= pricing_number_field form, :travel_hours, suffix: "h", step: 0.1, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :travel_hours, suffix: "h", step: "any", min: 0, disabled: !editable %>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Veículos</legend>
@@ -58,16 +58,16 @@
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Consumo</legend>
-          <%= pricing_number_field form, :vehicle_consumption_km_per_liter, suffix: "km/l", step: 0.1, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :vehicle_consumption_km_per_liter, suffix: "km/l", step: "any", min: 0, disabled: !editable %>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Combustível</legend>
-          <%= pricing_number_field form, :fuel_price_per_liter, prefix: "R$", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :fuel_price_per_liter, prefix: "R$", step: "any", min: 0, disabled: !editable %>
           <p class="label">litro</p>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Combustível total</legend>
-          <%= pricing_number_field form, :fuel_total, prefix: "R$", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :fuel_total, prefix: "R$", step: "any", min: 0, disabled: !editable %>
         </fieldset>
       </div>
     </div>
@@ -80,21 +80,21 @@
       <div class="grid grid-cols-2 gap-3">
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Dias de campo</legend>
-          <%= pricing_number_field form, :logistics_days, suffix: "dias", step: 1, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :logistics_days, suffix: "dias", step: "any", min: 0, disabled: !editable %>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Aluguel</legend>
-          <%= pricing_number_field form, :rental_per_day, prefix: "R$", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :rental_per_day, prefix: "R$", step: "any", min: 0, disabled: !editable %>
           <p class="label">veículo/dia</p>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Hospedagem</legend>
-          <%= pricing_number_field form, :lodging_per_person_per_night, prefix: "R$", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :lodging_per_person_per_night, prefix: "R$", step: "any", min: 0, disabled: !editable %>
           <p class="label">pessoa/noite</p>
         </fieldset>
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Alimentação</legend>
-          <%= pricing_number_field form, :meal_per_person_per_day, prefix: "R$", step: 0.01, min: 0, disabled: !editable %>
+          <%= pricing_number_field form, :meal_per_person_per_day, prefix: "R$", step: "any", min: 0, disabled: !editable %>
           <p class="label">pessoa/dia</p>
         </fieldset>
       </div>
