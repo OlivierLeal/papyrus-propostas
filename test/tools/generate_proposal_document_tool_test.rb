@@ -32,10 +32,18 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     Conversation.define_method(:complete) do
       messages.create!(role: "assistant", content: '{"cronograma_servico": [], "cronograma_implantacao": []}')
     end
+
+    # A fixture não tem cronograma nem equipe sugerida — sem isto, toda geração ficaria esperando a
+    # sugestão em segundo plano (#wait_for_background_work, 2026-09-28) em vez de gerar o .docx que
+    # estes testes conferem. Os testes da espera ligam o comportamento real com
+    # `with_background_wait`.
+    @original_wait_method = GenerateProposalDocumentTool.instance_method(:wait_for_background_work)
+    GenerateProposalDocumentTool.define_method(:wait_for_background_work) { |_args| nil }
   end
 
   teardown do
     Conversation.define_method(:complete, @original_complete_method)
+    GenerateProposalDocumentTool.define_method(:wait_for_background_work, @original_wait_method)
   end
 
   # 2026-09, pedido do consultor: a comercial/combinado sai sempre que pedido, mesmo em "draft"
@@ -171,6 +179,22 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   end
 
   # 2026-09-28 (VESTAS/conversa 63): o ET pedia "os valores relativos às principais etapas".
+  # Conversas 43/57 (2026-09-28): o job de fundo carregava a proposta antes da própria chamada de
+  # IA; enquanto isso o chat gerava a Rev.01, e a geração automática saía com "Rev.01" de novo.
+  test "geração com a proposta carregada antes de outra revisão sai com a revisão seguinte, nunca repetida" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    stale = Proposal.find(@proposal.id) # o job de fundo carregou aqui (versão 0)
+    GenerateProposalDocumentTool.new(conversation: @proposal.conversation).execute(**@args) # chat: versão 1
+    stale.update!(content_json: @args)
+
+    GenerateProposalDocumentTool.generate_pending!(stale)
+
+    versions = @proposal.reload.generated_documents.map { |doc| doc.blob.metadata["version"].to_i }
+    assert_equal [ 1, 2 ], versions.sort
+    assert_equal 2, @proposal.version
+    assert_equal 2, @proposal.generated_documents.map { |doc| doc.filename.to_s }.uniq.size
+  end
+
   test "apresentacao_preco abre o Quadro de Preço por item, com valores do sistema e linha TOTAL" do
     @proposal.update!(status: "priced", document_split: "combined")
     campo = @proposal.project_pricing.pricing_items.create!(name: "Campanhas de campo", position: 1)
@@ -591,6 +615,21 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       result.area_image.attach(io: StringIO.new(bytes), filename: "area.#{content_type == 'image/png' ? 'png' : 'svg'}", content_type: content_type)
     end
 
+    # Cronograma com marcos e data: nada de cronograma a esperar.
+    def ready_schedule!
+      pricing = @proposal.project_pricing
+      pricing.update!(schedule_papyrus_start_date: Date.new(2026, 10, 1), schedule_key_points: [ { "nome" => "Contrato", "periodo" => 1 } ])
+      pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização", activity_name: "Contrato",
+        start_period: 1, duration_periods: 1, position: 0)
+    end
+
+    def with_background_wait
+      GenerateProposalDocumentTool.define_method(:wait_for_background_work, @original_wait_method)
+      yield
+    ensure
+      GenerateProposalDocumentTool.define_method(:wait_for_background_work) { |_args| nil }
+    end
+
     def document_xml(document)
       Zip::File.open(ActiveStorage::Blob.service.path_for(document.blob.key)) { |zip| zip.read("word/document.xml") }.force_encoding("UTF-8")
     end
@@ -870,8 +909,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       start_period: 1, duration_periods: 1, position: 0)
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    assert_enqueued_with(job: ElectScheduleKeyPointsJob, args: [ @proposal.id ]) do
-      tool.execute(**@args)
+    with_background_wait do
+      assert_enqueued_with(job: ElectScheduleKeyPointsJob, args: [ @proposal.id ]) do
+        tool.execute(**@args)
+      end
     end
   end
 
@@ -1012,8 +1053,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   test "suggests the schedule in the BACKGROUND (never synchronously) when there is no schedule yet" do
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    assert_enqueued_with(job: SuggestScheduleJob, args: [ @proposal.id ]) do
-      tool.execute(**@args)
+    with_background_wait do
+      assert_enqueued_with(job: SuggestScheduleJob, args: [ @proposal.id ]) do
+        tool.execute(**@args)
+      end
     end
 
     assert_equal 0, @proposal.project_pricing.schedule_items.count
@@ -1036,7 +1079,9 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    assert_enqueued_with(job: SuggestTeamJob, args: [ @proposal.id ]) { tool.execute(**@args) }
+    with_background_wait do
+      assert_enqueued_with(job: SuggestTeamJob, args: [ @proposal.id ]) { tool.execute(**@args) }
+    end
   end
 
   test "does not enqueue SuggestTeamJob when the team already has a non-always_included line" do
@@ -1047,15 +1092,66 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_no_enqueued_jobs(only: SuggestTeamJob) { tool.execute(**@args) }
   end
 
-  test "mentions suggesting the team in the background when SuggestTeamJob is enqueued" do
-    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
-      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
+  # 2026-09-28, pedido do consultor: "não faz sentido eu ter a proposta sem essas informações e
+  # depois pedir pra gerar novamente" — com equipe/cronograma faltando, não gera nada agora.
+  test "com a equipe ainda por sugerir, não gera documento: marca a espera e avisa que gera sozinho" do
+    ready_schedule!
     @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    result = JSON.parse(tool.execute(**@args))
+    result = with_background_wait { JSON.parse(tool.execute(**@args)) }
 
-    assert_match "sugerindo a equipe técnica", result["message"]
+    assert result["pending"]
+    assert_match "preparando a equipe técnica", result["message"]
+    assert_match "não precisa pedir de novo", result["message"]
+    assert_equal 0, @proposal.generated_documents.count
+    assert_equal [ "team" ], @proposal.reload.pending_generation["waiting"]
+    assert_equal @args.deep_stringify_keys, @proposal.content_json
+  end
+
+  test "equipe e cronograma faltando: espera os dois e gera UMA vez, quando o último termina" do
+    @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+    with_background_wait { tool.execute(**@args) }
+    assert_equal %w[team schedule], @proposal.reload.pending_generation["waiting"]
+
+    GenerateProposalDocumentTool.background_task_finished!(@proposal, "team")
+    assert_equal 0, @proposal.generated_documents.count, "ainda falta o cronograma"
+
+    GenerateProposalDocumentTool.background_task_finished!(@proposal, "schedule")
+    assert_equal 1, @proposal.generated_documents.count
+    assert_equal({}, @proposal.reload.pending_generation)
+    assert_match "Gerado o arquivo", @proposal.conversation.messages.where(role: "assistant").order(:id).last.content
+
+    GenerateProposalDocumentTool.background_task_finished!(@proposal, "schedule") # aviso repetido/atrasado
+    assert_equal 1, @proposal.generated_documents.count
+  end
+
+  test "pedido repetido enquanto espera não enfileira de novo, e os parâmetros novos valem na geração" do
+    ready_schedule!
+    @proposal.project_pricing.proposal_professionals.where(professional: [ professionals(:coordenador), professionals(:biologa) ]).destroy_all
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+    with_background_wait { tool.execute(**@args) }
+
+    result = nil
+    with_background_wait do
+      assert_no_enqueued_jobs(only: SuggestTeamJob) { result = JSON.parse(tool.execute(**@args, prazo_de_execucao: "6 meses")) }
+    end
+
+    assert_match "Ainda estou preparando", result["message"]
+    assert_equal "6 meses", @proposal.reload.content_json["prazo_de_execucao"]
+  end
+
+  test "espera travada há mais de 10 minutos (job morreu): o próximo pedido gera com o que houver" do
+    ready_schedule!
+    @proposal.update!(pending_generation: { "waiting" => [ "team" ], "requested_at" => 11.minutes.ago.iso8601 })
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    result = with_background_wait { JSON.parse(tool.execute(**@args)) }
+
+    assert result["success"]
+    assert_nil result["pending"]
+    assert_equal 1, @proposal.generated_documents.count
   end
 
   test "execute persists the content args so a later background job can replay them" do
@@ -1066,51 +1162,18 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal @args.deep_stringify_keys, @proposal.reload.content_json
   end
 
-  # .replay_pending_regeneration! é o que fecha o relato do consultor: gerar sem cronograma/
-  # equipe e pedir "gere de novo" era ruim — o sistema termina sozinho quando o background acaba.
-  test ".replay_pending_regeneration! regenerates the docx from the stored args and posts a chat message" do
-    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
-    tool.execute(**@args) # 1ª geração, grava content_json
-    message_count_before = @proposal.conversation.messages.count
-    version_before = @proposal.reload.version
+  test ".generate_pending! nunca refaz o cronograma de novo, mesmo com atualizar_cronograma: true guardado" do
+    ready_schedule!
+    @proposal.update!(content_json: @args.merge(atualizar_cronograma: true).deep_stringify_keys)
 
-    GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
-
-    assert_equal version_before + 1, @proposal.reload.version
-    assert_operator @proposal.conversation.messages.count, :>, message_count_before
-    last_message = @proposal.conversation.messages.order(:created_at).last
-    assert_equal "assistant", last_message.role
-    assert_match(/Gerado o arquivo/, last_message.content)
+    assert_no_enqueued_jobs(only: RegenerateScheduleJob) { GenerateProposalDocumentTool.generate_pending!(@proposal) }
+    assert_equal 1, @proposal.generated_documents.count
   end
 
-  test ".replay_pending_regeneration! never replays atualizar_cronograma: true (would loop forever)" do
-    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
-    @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Mobilização",
-      activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
-    tool.execute(**@args, atualizar_cronograma: true) # 1ª geração, guardou atualizar_cronograma: true
-
-    assert_no_enqueued_jobs(only: RegenerateScheduleJob) do
-      GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
-    end
-  end
-
-  test ".replay_pending_regeneration! does nothing when no document was generated yet" do
-    @proposal.update!(content_json: @args.deep_stringify_keys)
-
-    assert_no_difference "@proposal.generated_documents.count" do
-      GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
-    end
-  end
-
-  test ".replay_pending_regeneration! does nothing when there's no content_json stored" do
-    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
-    tool.execute(**@args)
+  test ".generate_pending! não faz nada sem parâmetros guardados" do
     @proposal.update_column(:content_json, {})
-    version_before = @proposal.reload.version
 
-    GenerateProposalDocumentTool.replay_pending_regeneration!(@proposal)
-
-    assert_equal version_before, @proposal.reload.version
+    assert_no_difference("@proposal.generated_documents.count") { GenerateProposalDocumentTool.generate_pending!(@proposal) }
   end
 
   # Achado em produção (conversa 44): a IA só tinha esta ferramenta pra "atualizar" o cronograma,
@@ -1122,8 +1185,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    assert_enqueued_with(job: RegenerateScheduleJob, args: [ @proposal.id ]) do
-      assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args, atualizar_cronograma: true) }
+    with_background_wait do
+      assert_enqueued_with(job: RegenerateScheduleJob, args: [ @proposal.id ]) do
+        assert_no_enqueued_jobs(only: SuggestScheduleJob) { tool.execute(**@args, atualizar_cronograma: true) }
+      end
     end
 
     # A tabela antiga não é tocada sincronamente — a reconstrução acontece só no job em background.
@@ -1144,9 +1209,10 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       activity_name: "Contrato", start_period: 1, duration_periods: 1, position: 0)
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
 
-    result = JSON.parse(tool.execute(**@args, atualizar_cronograma: true))
+    result = with_background_wait { JSON.parse(tool.execute(**@args, atualizar_cronograma: true)) }
 
-    assert_match "reconstruindo o cronograma", result["message"]
+    assert result["pending"]
+    assert_match "preparando o cronograma", result["message"]
   end
 
   # ensure_logistics_suggested! — cobre o KMZ ter terminado DEPOIS da 1ª tentativa

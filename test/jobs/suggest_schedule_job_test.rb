@@ -41,11 +41,8 @@ class SuggestScheduleJobTest < ActiveJob::TestCase
 
   # Relato do consultor: gerar sem cronograma e pedir "gere de novo" era ruim — o job agora
   # termina sozinho, remontando o .docx com o cronograma incluído (CLAUDE.md seção 8).
-  test "auto-regenerates the docx when a document was already generated without a schedule" do
-    @proposal.generated_documents.attach(
-      io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
-      metadata: { kind: "combined", version: 1, description: "Emissão Inicial" }
-    )
+  test "gera o documento que estava esperando o cronograma, quando a sugestão termina" do
+    @proposal.update!(pending_generation: { "waiting" => [ "schedule" ], "requested_at" => Time.current.iso8601 })
     @proposal.update!(content_json: {
       nome_cliente: "A confirmar", contato_cliente: "A confirmar", descricao_servico: "EIA/RIMA",
       municipios: "Vitória da Conquista", estado: "BA", cnpj_cliente: "A confirmar",
@@ -59,6 +56,8 @@ class SuggestScheduleJobTest < ActiveJob::TestCase
     stub_ai_complete(ai_response) { SuggestScheduleJob.new.perform(@proposal.id) }
 
     assert_operator @proposal.reload.version, :>, version_before
+    assert_equal 1, @proposal.generated_documents.count
+    assert_equal({}, @proposal.pending_generation)
     assert_equal "assistant", @proposal.conversation.messages.order(:created_at).last.role
   end
 end

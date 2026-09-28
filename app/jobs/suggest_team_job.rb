@@ -27,11 +27,12 @@ class SuggestTeamJob < ApplicationJob
     end
     if suggested
       proposal.conversation.broadcast_refresh
-      # Mesmo motivo de SuggestScheduleJob: termina sozinho, sem o consultor precisar pedir "gere
-      # de novo" depois que a equipe terminar de ser sugerida (CLAUDE.md seção 8).
-      GenerateProposalDocumentTool.replay_pending_regeneration!(proposal)
     end
   rescue StandardError => e
     Rails.logger.error("SuggestTeamJob failed for proposal #{proposal_id}: #{e.class} #{e.message}")
+  ensure
+    # Sucesso, "nada a fazer" ou falha: sempre avisa, senão uma geração pendente esperaria pra
+    # sempre (GenerateProposalDocumentTool.background_task_finished!).
+    GenerateProposalDocumentTool.background_task_finished!(proposal, "team") if proposal
   end
 end

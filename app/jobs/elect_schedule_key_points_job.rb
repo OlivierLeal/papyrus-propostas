@@ -33,11 +33,12 @@ class ElectScheduleKeyPointsJob < ApplicationJob
     end
     if elected
       proposal.conversation.broadcast_refresh
-      # Mesmo motivo de SuggestScheduleJob: termina sozinho, sem o consultor precisar pedir "gere
-      # de novo" depois que o infográfico terminar de ser resumido (CLAUDE.md seção 8).
-      GenerateProposalDocumentTool.replay_pending_regeneration!(proposal)
     end
   rescue StandardError => e
     Rails.logger.error("ElectScheduleKeyPointsJob failed for proposal #{proposal_id}: #{e.class} #{e.message}")
+  ensure
+    # Sucesso, "nada a fazer" ou falha: sempre avisa, senão uma geração pendente esperaria pra
+    # sempre (GenerateProposalDocumentTool.background_task_finished!).
+    GenerateProposalDocumentTool.background_task_finished!(proposal, "key_points") if proposal
   end
 end

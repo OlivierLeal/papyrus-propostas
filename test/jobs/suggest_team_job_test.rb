@@ -51,14 +51,11 @@ class SuggestTeamJobTest < ActiveJob::TestCase
 
   # Relato do consultor: gerar sem a equipe e pedir "gere de novo" era ruim — o job agora termina
   # sozinho, remontando o .docx com a equipe incluída (CLAUDE.md seção 8).
-  test "auto-regenerates the docx when a document was already generated without the team" do
+  test "gera o documento que estava esperando a equipe, quando a sugestão termina" do
     conversation = Conversation.create!(user: users(:one), client_name: "Sem Templates", status: "reviewing", study_types: [ study_types(:rap) ])
     proposal = conversation.create_proposal!(status: "draft")
     proposal.build_base_team!
-    proposal.generated_documents.attach(
-      io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
-      metadata: { kind: "tecnica", version: 1, description: "Emissão Inicial" }
-    )
+    proposal.update!(pending_generation: { "waiting" => [ "team" ], "requested_at" => Time.current.iso8601 })
     proposal.update!(content_json: {
       nome_cliente: "A confirmar", contato_cliente: "A confirmar", descricao_servico: "RAP",
       municipios: "Correntina", estado: "BA", cnpj_cliente: "A confirmar",
@@ -72,6 +69,22 @@ class SuggestTeamJobTest < ActiveJob::TestCase
     stub_ai_complete(ai_response) { SuggestTeamJob.new.perform(proposal.id) }
 
     assert_operator proposal.reload.version, :>, version_before
+    assert_equal 1, proposal.generated_documents.count
+    assert_equal({}, proposal.pending_generation)
     assert_equal "assistant", conversation.messages.order(:created_at).last.role
+  end
+
+  test "mesmo quando a sugestão falha, libera a geração que estava esperando (gera com o que houver)" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(pending_generation: { "waiting" => [ "team" ], "requested_at" => Time.current.iso8601 })
+    called = []
+    stub_class_method(GenerateProposalDocumentTool, :generate_pending!, ->(record) { called << record.id }) do
+      stub_class_method(Proposal, :find_by, ->(**) { proposal.tap { |p| p.define_singleton_method(:with_team_lock) { |&_| raise "Bedrock fora" } } }) do
+        SuggestTeamJob.new.perform(proposal.id)
+      end
+    end
+
+    assert_equal [ proposal.id ], called
+    assert_equal({}, proposal.reload.pending_generation)
   end
 end

@@ -38,9 +38,12 @@ class SuggestScheduleJob < ApplicationJob
       # Relato do consultor: gerar sem cronograma e pedir "gere de novo" era ruim — o sistema
       # agora termina sozinho, remontando o .docx com o cronograma já incluído (CLAUDE.md seção
       # 8). No-op se ainda não existe nenhum documento gerado (nada a completar).
-      GenerateProposalDocumentTool.replay_pending_regeneration!(proposal)
     end
   rescue StandardError => e
     Rails.logger.error("SuggestScheduleJob failed for proposal #{proposal_id}: #{e.class} #{e.message}")
+  ensure
+    # Sucesso, "nada a fazer" ou falha: sempre avisa, senão uma geração pendente esperaria pra
+    # sempre (GenerateProposalDocumentTool.background_task_finished!).
+    GenerateProposalDocumentTool.background_task_finished!(proposal, "schedule") if proposal
   end
 end

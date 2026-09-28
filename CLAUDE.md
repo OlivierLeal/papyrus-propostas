@@ -1679,6 +1679,29 @@ enfileirados na mesma tool call. O worker pegava o job antes do commit, `Proposa
 `ApplicationJob.enqueue_after_transaction_commit = true` adia o enfileiramento até o commit (e
 descarta o job no rollback) — vale pra todo job. Teste: `test/jobs/enqueue_after_commit_test.rb`.
 
+**A proposta só é gerada depois que equipe e cronograma ficam prontos (2026-09-28, pedido do
+consultor: "não faz sentido eu ter a proposta sem essas informações e depois pedir pra gerar
+novamente").** SUBSTITUI o mecanismo descrito logo abaixo (gerar incompleta e depois uma revisão
+automática, `replay_pending_regeneration!`, que foi removido — era também o que produzia revisões
+repetidas, ver "Mesma revisão saindo 2-3 vezes"). Agora:
+- `GenerateProposalDocumentTool#wait_for_background_work`: se precisa enfileirar `SuggestTeamJob`,
+  `SuggestScheduleJob`, `RegenerateScheduleJob` ou `ElectScheduleKeyPointsJob`, NÃO gera nada — grava
+  os parâmetros em `content_json`, marca `proposals.pending_generation` (`{"waiting" => ["team",
+  "schedule", "key_points"], "requested_at"}`) e responde `pending: true` ("gero assim que terminar,
+  não precisa pedir de novo"; a descrição da ferramenta manda a IA não chamar de novo).
+- Cada job chama `GenerateProposalDocumentTool.background_task_finished!(proposal, tarefa)` no
+  `ensure` — com sucesso, "nada a fazer" ou falha, senão a espera nunca acaba. Quem tira o último item
+  (sob `proposal.with_lock`) roda `.generate_pending!`: gera UMA vez com os parâmetros guardados, sem IA
+  e sem enfileirar de novo (`background_ready: true`, `atualizar_cronograma` volta a false), e posta no
+  chat.
+- Pedido repetido durante a espera não enfileira nada, só atualiza os parâmetros (vale o mais
+  recente). Espera com mais de `PENDING_TIMEOUT` (10 min, job que morreu) é descartada no próximo
+  pedido, que gera com o que houver.
+- Verificado com o worker de verdade do Solid Queue (proposta 41, `atualizar_cronograma`): resposta
+  pendente sem documento, cronograma refeito em ~30 s, e aí uma única revisão nova + mensagem no chat.
+- Testes da ferramenta desligam a espera no `setup` (a fixture não tem cronograma); os testes da
+  espera usam `with_background_wait`.
+
 **"Gere de novo em alguns instantes" era ruim — o consultor tinha que voltar e pedir de novo
 manualmente (2026-09, relato do consultor a partir de um print de chat real).** Todas as
 correções acima (cronograma/equipe/infográfico em background) terminavam avisando "peça pra
@@ -1725,6 +1748,17 @@ novamente?"
   anexar o `.docx` original) terminar, uma ordem que NUNCA acontece em produção (lá o job só é
   pego pelo worker depois que a chamada síncrona já retornou). Sempre validar este tipo de
   correção com o adapter assíncrono de verdade, nunca com `:inline`.
+
+**Mesma revisão saindo 2-3 vezes (2026-09-28, conversas 43/57: "Rev.01" três vezes em 30 s).** Os
+jobs de fundo (`SuggestTeamJob`/`SuggestScheduleJob`) carregam a proposta ANTES da chamada de IA
+deles; nesse meio-tempo o chat gerava uma revisão, e o replay usava a cópia velha: `increment!` soma
+no banco mas o nome do arquivo sai do valor em memória — repetia a revisão (proposta 29 ficou com
+versão 3 no banco e arquivos só até a 2). Agora `GenerateProposalDocumentTool#execute` recarrega a
+proposta e reserva a revisão com `Proposal#claim_next_version!` (`UPDATE ... RETURNING`, atômico).
+(A regeneração automática que causava isso foi trocada pela geração que espera — ver acima.)
+Não é bug quando saem 2 arquivos da MESMA revisão com prefixos PT e PC: é o formato separado. E a
+sugestão de equipe pode mudar o formato depois da 1ª versão (conversa 65: o edital da Petrobras exige
+envelopes separados) — com a geração que espera, isso já é decidido antes da 1ª versão.
 
 **Confirmado: a regeneração automática acima já cobre o documento COMERCIAL/combinado, sem
 precisar de nenhum código a mais (2026-09, pedido do consultor pra confirmar essa cobertura).**

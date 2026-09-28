@@ -101,6 +101,19 @@ class Proposal < ApplicationRecord
       end
   end
 
+  # Reserva a próxima revisão direto no banco e devolve o número (2026-09-28, conversas 43/57: o
+  # mesmo "Rev.01" saiu 2-3 vezes). increment! soma no banco mas usa o valor em MEMÓRIA pra montar
+  # o nome — um job de fundo com a proposta carregada antes de uma geração pelo chat repetia a
+  # revisão. UPDATE ... RETURNING é atômico: duas gerações simultâneas nunca pegam o mesmo número.
+  def claim_next_version!
+    next_version = self.class.connection.select_value(
+      "UPDATE proposals SET version = version + 1, updated_at = NOW() WHERE id = #{id.to_i} RETURNING version"
+    ).to_i
+    self.version = next_version
+    clear_attribute_change(:version)
+    next_version
+  end
+
   # Preço total por extenso na frase de abertura da seção 10 — o modelo da Papyrus (revisão de
   # 2026-08) deixou de trazer o quadro de preço aberto por profissional/entregável, então o valor
   # que o cliente lê é este. Continua vindo do motor determinístico, nunca da IA. Ficou sem uso
