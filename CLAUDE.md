@@ -1629,6 +1629,14 @@ verdade ela nunca tinha sido CHAMADA pra isso nesse caminho.
   17 profissionais reais com entregável e horas específicas (geólogo, geógrafa, bióloga de fauna,
   arqueólogo, advogado etc.), mapeados a partir do escopo da conversa.
 
+**Jobs só entram na fila depois do commit (2026-09-28, proposta 43/conversa 65: "não calculou
+quais pessoas devem ir nesse trabalho").** Na 1ª geração pelo chat a proposta nasce DENTRO da
+transação do turno (`complete_with_lock`), e `SuggestTeamJob`/`SuggestScheduleJob` eram
+enfileirados na mesma tool call. O worker pegava o job antes do commit, `Proposal.find_by` devolvia
+`nil` e o job saía em silêncio: equipe só com os fixos a 0h e nenhum cronograma, para sempre.
+`ApplicationJob.enqueue_after_transaction_commit = true` adia o enfileiramento até o commit (e
+descarta o job no rollback) — vale pra todo job. Teste: `test/jobs/enqueue_after_commit_test.rb`.
+
 **"Gere de novo em alguns instantes" era ruim — o consultor tinha que voltar e pedir de novo
 manualmente (2026-09, relato do consultor a partir de um print de chat real).** Todas as
 correções acima (cronograma/equipe/infográfico em background) terminavam avisando "peça pra

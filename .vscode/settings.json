@@ -1,0 +1,8 @@
+{
+  "files.watcherExclude": {
+    "**/tmp/**": true,
+    "**/storage/**": true,
+    "**/log/**": true,
+    "**/coverage/**": true
+  }
+}
