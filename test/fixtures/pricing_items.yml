@@ -1,0 +1,6 @@
+# Item único da proposta precificada (2026-09-28, precificação por item).
+servico_item:
+  project_pricing: priced_pricing
+  name: Execução do serviço
+  position: 0
+  costs: []

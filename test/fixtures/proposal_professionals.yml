@@ -1,5 +1,6 @@
 coordenacao_line:
   project_pricing: priced_pricing
+  pricing_item: servico_item
   professional: coordenador
   deliverable_name: Coordenação geral
   man_hours: 40
@@ -8,6 +9,7 @@ coordenacao_line:
 
 fauna_flora_line:
   project_pricing: priced_pricing
+  pricing_item: servico_item
   professional: biologa
   deliverable_name: Diagnóstico de fauna e flora
   man_hours: 30

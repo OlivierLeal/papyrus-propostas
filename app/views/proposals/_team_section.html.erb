@@ -2,7 +2,7 @@
     conversation, professionals (ativos, pra busca de "Adicionar à equipe"). %>
 <% lines = pricing.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, line.id ] } %>
 <% sem_valor = lines.map(&:professional).uniq.select { |pro| pro.rate_man_hour.zero? && pro.rate_daily.zero? } %>
-<% stage_options = lines.filter_map { |line| line.stage.to_s.strip.presence }.uniq %>
+<% item_options = pricing.pricing_items.map { |item| [ item.name, item.id ] } %>
 
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
   <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5 pb-4">
@@ -34,7 +34,7 @@
         <tr class="bg-base-200/60 text-xs uppercase tracking-wide text-base-content/50">
           <th class="font-semibold">Profissional</th>
           <th class="font-semibold">Entregável</th>
-          <th class="font-semibold" title="Usada pra abrir o preço por etapa no documento, quando pedido">Etapa</th>
+          <th class="font-semibold">Item</th>
           <th class="font-semibold text-right">Horas-homem</th>
           <th class="font-semibold text-right">Diárias</th>
           <th class="font-semibold text-right">Subtotal</th>
@@ -67,9 +67,9 @@
             <td class="min-w-40">
               <%= pp_form.text_field :deliverable_name, disabled: !editable, class: "input input-sm w-full", required: true %>
             </td>
-            <td class="min-w-36">
-              <%= pp_form.text_field :stage, disabled: !editable, list: "stage-options", autocomplete: "off",
-                    placeholder: "—", class: "input input-sm w-full" %>
+            <td class="min-w-52">
+              <%= pp_form.select :pricing_item_id, item_options, {}, disabled: !editable, class: "select select-sm w-full",
+                    data: { role: "line-item" } %>
             </td>
             <td class="text-right">
               <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
@@ -115,17 +115,13 @@
     </table>
   </div>
 
-  <datalist id="stage-options">
-    <% stage_options.each do |stage| %><option value="<%= stage %>"></option><% end %>
-  </datalist>
-
   <% if editable %>
     <%# Campos ligados ao #add-member-form (fora do form principal) pelo atributo `form=`. %>
     <div class="border-t border-base-300 bg-base-200/30 px-6 py-4 rounded-b-box"
          data-controller="professional-picker"
          data-professional-picker-professionals-value="<%= professionals.map { |p| { id: p.id, name: p.name, role: p.role, specialties: p.specialties, fixed: p.always_included, rate: (p.rate_man_hour.positive? ? "#{brl(p.rate_man_hour)}/h" : nil) } }.to_json %>">
       <h3 class="text-sm font-semibold text-base-content mb-3">Adicionar à equipe</h3>
-      <div class="grid gap-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_6.5rem_6rem_auto] items-end">
+      <div class="grid gap-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,0.9fr)_6.5rem_6rem_auto] items-end">
         <fieldset class="fieldset p-0 relative">
           <legend class="fieldset-legend pt-0">Profissional</legend>
           <input type="text" autocomplete="off" placeholder="Buscar por nome, cargo ou especialidade..."
@@ -149,6 +145,11 @@
           <%= text_field_tag "proposal_professional[deliverable_name]", nil, form: "add-member-form", required: true,
                 placeholder: "Ex.: Diagnóstico de Flora", class: "input input-sm w-full",
                 data: { professional_picker_target: "deliverable" } %>
+        </fieldset>
+
+        <fieldset class="fieldset p-0">
+          <legend class="fieldset-legend pt-0">Item</legend>
+          <%= select_tag "proposal_professional[pricing_item_id]", options_for_select(item_options), form: "add-member-form", class: "select select-sm w-full" %>
         </fieldset>
 
         <fieldset class="fieldset p-0">

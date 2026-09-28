@@ -55,17 +55,57 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal "combined", proposal.reload.document_split
   end
 
-  test "build_with_ai_suggested_team! grava a etapa de cada linha e liga o preço discriminado quando o ET pede" do
+  # Precificação por item (2026-09-28, planilha real da Papyrus): a IA organiza em itens, com
+  # equipe e campos de cada um, e empreendimentos quando há mais de um.
+  test "build_with_ai_suggested_team! grava itens, equipe por item, campos, empreendimentos e a forma do preço" do
     proposal = @conversation.create_proposal!(status: "draft")
     ai_response = {
-      linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna", etapa: " Campanhas de campo ", man_hours: 40, field_days: 6 } ],
-      preco_discriminado: true, documentos_separados: false
+      empreendimentos: [ "BESS Irecê", "BESS Brumado" ],
+      itens: [
+        { nome: "Gestão e Coordenação", empreendimento: nil,
+          equipe: [ { professional_id: professionals(:coordenador).id, deliverable_name: "Coordenação geral", man_hours: 60, field_days: 0 } ],
+          campos: [] },
+        { nome: "EMI – BESS Irecê", empreendimento: "BESS Irecê",
+          equipe: [ { professional_id: professionals(:biologa).id, deliverable_name: "Diagnóstico de Fauna", man_hours: 40, field_days: 6 } ],
+          campos: [ { descricao: "Campo Fauna – 02 biólogos", pessoas: 2, dias: 3, veiculos: 1, tipo_veiculo: "4x4" } ] }
+      ],
+      apresentacao_preco: "empreendimentos", documentos_separados: false
     }.to_json
 
     pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
 
-    assert_equal "Campanhas de campo", pricing.proposal_professionals.find_by(professional: professionals(:biologa)).stage
-    assert pricing.reload.price_breakdown?
+    assert_equal [ "BESS Irecê", "BESS Brumado" ], pricing.pricing_enterprises.map(&:name)
+    assert_equal [ "Gestão e Coordenação", "EMI – BESS Irecê" ], pricing.pricing_items.map(&:name), "o item padrão vazio sai"
+    irece = pricing.pricing_items.find_by(name: "EMI – BESS Irecê")
+    assert_equal "BESS Irecê", irece.pricing_enterprise.name
+    assert_equal irece, pricing.proposal_professionals.find_by(professional: professionals(:biologa)).pricing_item
+    campaign = irece.field_campaigns.sole
+    assert_equal [ 2, 3, "4x4" ], [ campaign.people, campaign.days.to_i, campaign.vehicle_type ]
+    assert_equal "empreendimentos", pricing.reload.price_presentation
+    # A diretora (fixa) não veio na sugestão: entra sozinha no primeiro item.
+    assert_equal "Gestão e Coordenação", pricing.proposal_professionals.find_by(professional: professionals(:diretora)).pricing_item.name
+    assert_equal pricing.pricing_items.sum(&:total), pricing.total_value
+  end
+
+  test "build_with_ai_suggested_team! ainda aceita o formato antigo (lista plana em linhas)" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    ai_response = { linhas: [ { professional_id: professionals(:biologa).id, deliverable_name: "Fauna", man_hours: 10, field_days: 0 } ],
+                    preco_discriminado: true }.to_json
+
+    pricing = stub_ai_complete(ai_response) { proposal.build_with_ai_suggested_team! }
+
+    assert_equal [ ProjectPricing::DEFAULT_ITEM_NAME ], pricing.pricing_items.map(&:name)
+    assert_equal "itens", pricing.reload.price_presentation
+  end
+
+  test "prompt de equipe traz o que o ET disse sobre a apresentação do preço" do
+    proposal = @conversation.create_proposal!(status: "draft")
+    @conversation.project_findings.create!(field: "apresentacao_preco", nature: "fato", source_kind: "et",
+      value: "Custos discriminados por etapa", excerpt: "Os custos deverão ser apresentados de forma discriminada")
+
+    prompt = stub_class_method(Rag::PrecedentFinder, :new, ->(*) { raise "sem acervo" }) { proposal.send(:team_suggestion_prompt) }
+
+    assert_includes prompt, "Os custos deverão ser apresentados de forma discriminada"
   end
 
   test "build_with_ai_suggested_team! lista a equipe fixa e o quadro completo no prompt" do
@@ -534,25 +574,34 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal [ [ "1", proposal.docx_servico_label, "44.910,00" ] ], proposal.docx_price_rows
   end
 
-  test "docx_price_rows discriminado: uma linha por etapa, calculada pelo sistema, e TOTAL no fim" do
+  test "docx_price_rows por item: uma linha por item, calculada pelo sistema, e TOTAL no fim" do
     proposal = proposals(:priced_proposal)
-    proposal_professionals(:coordenacao_line).update!(stage: "Planejamento")
-    proposal_professionals(:fauna_flora_line).update!(stage: "Campanhas de campo")
-    proposal.project_pricing.update!(price_breakdown: true)
+    campo = proposal.project_pricing.pricing_items.create!(name: "Campanhas de campo", position: 1)
+    proposal_professionals(:fauna_flora_line).update!(pricing_item: campo)
+    proposal.project_pricing.update!(price_presentation: "itens")
 
-    # Logística (R$ 1.650) vai toda pra etapa que tem diárias de campo.
-    rows = proposal.reload.docx_price_rows
-    assert_equal [ "1", "2" ], rows[0..1].map(&:first)
-    assert_equal [ [ "Campanhas de campo", "29.910,00" ], [ "Planejamento", "15.000,00" ] ], rows[0..1].map { |row| row[1..] }.sort
-    assert_equal [ "", "TOTAL", "44.910,00" ], rows.last
+    assert_equal [ [ "1", "Execução do serviço", "16.650,00" ], [ "2", "Campanhas de campo", "28.260,00" ], [ "", "TOTAL", "44.910,00" ] ],
+      proposal.reload.docx_price_rows
   end
 
-  test "docx_price_rows: preço discriminado pedido mas sem 2 etapas cai no total único" do
+  test "docx_price_rows por empreendimento: itens, total de cada empreendimento e TOTAL" do
     proposal = proposals(:priced_proposal)
-    proposal.project_pricing.update!(price_breakdown: true)
-    proposal_professionals(:fauna_flora_line).update!(stage: "Campanhas de campo")
+    pricing = proposal.project_pricing
+    irece = pricing.pricing_enterprises.create!(name: "Irecê")
+    pricing.pricing_enterprises.create!(name: "Brumado", position: 1)
+    campo = pricing.pricing_items.create!(name: "EMI Irecê", pricing_enterprise: irece, position: 1)
+    proposal_professionals(:fauna_flora_line).update!(pricing_item: campo)
+    pricing.update!(price_presentation: "empreendimentos")
 
-    assert_not proposal.reload.price_breakdown_active?
+    rows = proposal.reload.docx_price_rows
+    assert_equal [ [ "", "TOTAL – Irecê", "36.585,00" ], [ "", "TOTAL – Brumado", "8.325,00" ], [ "", "TOTAL", "44.910,00" ] ], rows.last(3)
+  end
+
+  test "docx_price_rows: quadro aberto pedido com um item só cai no total único" do
+    proposal = proposals(:priced_proposal)
+    proposal.project_pricing.update!(price_presentation: "itens")
+
+    assert_equal "total", proposal.reload.price_presentation_mode
     assert_equal 1, proposal.docx_price_rows.size
   end
 

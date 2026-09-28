@@ -76,10 +76,13 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match "referência de porte, não preço", response.body
   end
 
-  test "show renders the new logistics fields and the recalculate button" do
+  test "show renders the logistics fields, the items with their field campaigns and the recalculate button" do
     get conversation_proposal_path(@conversation)
 
-    assert_select "input[name='project_pricing[vehicles_count]']"
+    assert_select "input[name='project_pricing[rental_4x4_per_day]']"
+    assert_select "input[name='project_pricing[daily_km]']"
+    assert_select "input[name$='[field_campaigns_attributes][0][people]']"
+    assert_select "select[name$='[pricing_item_id]']"
     assert_select "input[name='project_pricing[meal_per_person_per_day]']"
     assert_select "input[name='project_pricing[lodging_per_person_per_night]']"
     assert_select "input[name='project_pricing[fuel_price_per_liter]']"
@@ -93,13 +96,13 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
 
     get conversation_proposal_path(@conversation)
 
-    assert_match "deslocamento", response.body
+    assert_match "deslocamento aéreo", response.body
   end
 
   test "show does not render the long-distance warning when the pricing isn't flagged" do
     get conversation_proposal_path(@conversation)
 
-    assert_no_match "deslocamento", response.body
+    assert_no_match "deslocamento aéreo", response.body
   end
 
   test "create builds an AI-suggested team and moves the conversation into pricing" do
@@ -141,8 +144,8 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
 
   test "update recalculates pricing and marks the proposal as priced" do
     patch conversation_proposal_path(@conversation), params: {
-      project_pricing: { bdi: "1.30", tax_multiplier: "1.25", distance_km: "120", logistics_days: "4",
-                          rental_per_day: "160", meal_per_person_per_day: "90", fuel_total: "600" },
+      project_pricing: { bdi: "1.30", tax_multiplier: "1.25", distance_km: "120", daily_km: "80",
+                          rental_per_day: "160", meal_per_person_per_day: "90" },
       proposal: { document_split: "combined" }
     }
 
@@ -157,8 +160,8 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
   # 2026-09 mostra só % DO ITEM — ver Proposal#docx_payment_schedule_rows).
   test "update stores the instalment dates typed on the pricing screen" do
     patch conversation_proposal_path(@conversation), params: {
-      project_pricing: { bdi: "1.20", tax_multiplier: "1.25", distance_km: "0", logistics_days: "0",
-                          rental_per_day: "0", meal_per_person_per_day: "0", fuel_total: "0",
+      project_pricing: { bdi: "1.20", tax_multiplier: "1.25", distance_km: "0",
+                          rental_per_day: "0", meal_per_person_per_day: "0",
                           payment_dates: [ "2026-03-25", "", "2026-05-25", "" ] },
       proposal: { document_split: "combined" }
     }
@@ -169,10 +172,66 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "2026-05-25", schedule[2]["date"]
   end
 
+  # Precificação por item (2026-09-28).
+  test "update edits items, field campaigns, item costs and moves a team line to another item" do
+    pricing = @proposal.project_pricing
+    item = pricing_items(:servico_item)
+    other = pricing.pricing_items.create!(name: "Campanhas", position: 1)
+    campaign = field_campaigns(:campo_servico)
+    line = proposal_professionals(:fauna_flora_line)
+
+    patch conversation_proposal_path(@conversation), params: {
+      project_pricing: {
+        bdi: "1.20", tax_multiplier: "1.25",
+        pricing_items_attributes: {
+          "0" => { id: item.id, name: "Gestão", cost_items: { "0" => { description: "ART", quantity: "2", unit_value: "300" } },
+                   field_campaigns_attributes: { "0" => { id: campaign.id, people: "3", vehicle_type: "4x4" } } },
+          "1" => { id: other.id, name: "Campanhas de campo" }
+        },
+        proposal_professionals_attributes: { "0" => { id: line.id, pricing_item_id: other.id } }
+      },
+      proposal: { document_split: "combined" }
+    }
+
+    assert_redirected_to conversation_proposal_path(@conversation)
+    assert_equal "Gestão", item.reload.name
+    assert_equal [ { "description" => "ART", "quantity" => 2.0, "unit_value" => 300.0 } ], item.costs
+    assert_equal [ 3, "4x4" ], [ campaign.reload.people, campaign.vehicle_type ]
+    assert_equal other, line.reload.pricing_item
+    assert_equal pricing.reload.pricing_items.sum(&:total), pricing.total_value
+  end
+
+  test "structure buttons add and remove items, campaigns, costs and enterprises without losing the typed values" do
+    pricing = @proposal.project_pricing
+    base = { bdi: "1.30", tax_multiplier: "1.25" }
+
+    patch conversation_proposal_path(@conversation), params: { project_pricing: base, structure_action: "add_item" }
+    new_item = pricing.pricing_items.reload.last
+    assert_equal "Novo item", new_item.name
+    assert_equal 1.30, pricing.reload.bdi, "o que foi digitado é salvo junto"
+    assert_redirected_to conversation_proposal_path(@conversation, anchor: "item-#{new_item.id}")
+
+    patch conversation_proposal_path(@conversation), params: { project_pricing: base, structure_action: "add_campaign:#{new_item.id}" }
+    patch conversation_proposal_path(@conversation), params: { project_pricing: base, structure_action: "add_cost:#{new_item.id}" }
+    patch conversation_proposal_path(@conversation), params: { project_pricing: base, structure_action: "add_enterprise" }
+    assert_equal 1, new_item.field_campaigns.count
+    assert_equal 1, new_item.reload.costs.size
+    assert_equal 1, pricing.pricing_enterprises.count
+
+    line = proposal_professionals(:coordenacao_line)
+    line.update!(pricing_item: new_item)
+    patch conversation_proposal_path(@conversation), params: { project_pricing: base, structure_action: "remove_item:#{new_item.id}" }
+    assert_not PricingItem.exists?(new_item.id)
+    assert_equal pricing_items(:servico_item), line.reload.pricing_item, "a equipe do item removido vai pro primeiro"
+
+    patch conversation_proposal_path(@conversation), params: { project_pricing: base, structure_action: "remove_item:#{pricing_items(:servico_item).id}" }
+    assert PricingItem.exists?(pricing_items(:servico_item).id), "o último item nunca sai"
+  end
+
   test "update rejects invalid pricing params and keeps the proposal editable" do
     patch conversation_proposal_path(@conversation), params: {
-      project_pricing: { bdi: "0", tax_multiplier: "1.25", distance_km: "1", logistics_days: "1",
-                          rental_per_day: "1", meal_per_person_per_day: "1", fuel_total: "1" },
+      project_pricing: { bdi: "0", tax_multiplier: "1.25", distance_km: "1",
+                          rental_per_day: "1", meal_per_person_per_day: "1" },
       proposal: { document_split: "combined" }
     }
 
@@ -184,8 +243,8 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     @proposal.update!(status: "approved")
 
     patch conversation_proposal_path(@conversation), params: {
-      project_pricing: { bdi: "2.0", tax_multiplier: "1.25", distance_km: "1", logistics_days: "1",
-                          rental_per_day: "1", meal_per_person_per_day: "1", fuel_total: "1" },
+      project_pricing: { bdi: "2.0", tax_multiplier: "1.25", distance_km: "1",
+                          rental_per_day: "1", meal_per_person_per_day: "1" },
       proposal: { document_split: "combined" }
     }
 

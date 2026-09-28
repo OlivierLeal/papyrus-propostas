@@ -48,35 +48,46 @@
       <% end %>
     </div>
 
-    <%# Preço discriminado por etapa (2026-09-28): subpreços calculados em Ruby a partir da etapa de
-        cada linha da equipe (ProjectPricing#price_breakdown_rows). %>
+    <%# Quadro de Preço do documento (2026-09-28): total, por item, ou por item + empreendimento.
+        Valores de ProjectPricing#price_rows/#enterprise_totals, sempre calculados em Ruby. %>
     <div class="bg-base-100 p-6">
-      <label class="flex items-start gap-3 cursor-pointer <%= "opacity-60 pointer-events-none" unless editable %>">
-        <%= form.check_box :price_breakdown, disabled: !editable, class: "checkbox checkbox-primary checkbox-sm mt-0.5" %>
-        <span>
-          <span class="block font-semibold text-base-content">Discriminar o preço por etapa no documento</span>
-          <span class="block text-sm text-base-content/60">Quando o cliente pede o valor de cada etapa. Cada etapa soma as linhas da equipe dela; a logística vai pras etapas com diárias de campo. Desligado, sai só o preço total.</span>
-        </span>
-      </label>
-      <% if pricing.price_breakdown? %>
-        <% if proposal.price_breakdown_active? %>
-          <ul class="mt-4 flex flex-col gap-1.5 text-sm max-w-xl">
-            <% pricing.price_breakdown_rows.each do |label, value| %>
-              <li class="flex justify-between gap-3">
-                <span class="text-base-content/70 min-w-0 truncate"><%= label %></span>
-                <span class="tabular-nums shrink-0"><%= brl(value) %></span>
-              </li>
-            <% end %>
-            <li class="flex justify-between gap-3 border-t border-base-300 pt-1.5 font-semibold">
-              <span>Total</span><span class="tabular-nums"><%= brl(pricing.total_value) %></span>
-            </li>
-          </ul>
-          <p class="text-xs text-base-content/50 mt-2">Valores do último "Salvar e recalcular".</p>
-        <% else %>
-          <div role="alert" class="alert alert-warning alert-soft text-sm mt-4 py-2">
-            <span>Defina a <strong>Etapa</strong> das linhas da equipe (pelo menos 2 etapas diferentes) — até lá o documento sai com o preço total.</span>
-          </div>
+      <h2 class="font-semibold text-base-content">Quadro de preço no documento</h2>
+      <p class="text-sm text-base-content/60 mt-0.5 mb-4">Quando o cliente pede o valor de cada etapa/estudo ou de cada empreendimento.</p>
+      <div class="grid sm:grid-cols-3 gap-3">
+        <% ProjectPricing::PRICE_PRESENTATIONS.each do |value, label| %>
+          <label class="flex items-start gap-3 p-3 rounded-box border border-base-300 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5 <%= "opacity-60 pointer-events-none" unless editable %>">
+            <%= form.radio_button :price_presentation, value, disabled: !editable, class: "radio radio-primary radio-sm mt-0.5" %>
+            <span class="text-sm font-medium text-base-content"><%= label %></span>
+          </label>
         <% end %>
+      </div>
+      <% mode = proposal.price_presentation_mode %>
+      <% if pricing.price_presentation != "total" && mode != pricing.price_presentation %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm mt-4 py-2">
+          <span>
+            <% if mode == "total" %>
+              A proposta tem um item só — o documento sai com o preço total. Divida o serviço em itens acima.
+            <% else %>
+              Menos de 2 empreendimentos cadastrados — o documento sai aberto só por item.
+            <% end %>
+          </span>
+        </div>
+      <% end %>
+      <% if mode != "total" %>
+        <ul class="mt-4 flex flex-col gap-1.5 text-sm max-w-xl">
+          <% pricing.price_rows.each do |label, value| %>
+            <li class="flex justify-between gap-3"><span class="text-base-content/70 min-w-0 truncate"><%= label %></span><span class="tabular-nums shrink-0"><%= brl(value) %></span></li>
+          <% end %>
+          <% if mode == "empreendimentos" %>
+            <% pricing.enterprise_totals.each do |name, value| %>
+              <li class="flex justify-between gap-3 font-medium"><span>Total – <%= name %></span><span class="tabular-nums"><%= brl(value) %></span></li>
+            <% end %>
+          <% end %>
+          <li class="flex justify-between gap-3 border-t border-base-300 pt-1.5 font-semibold">
+            <span>Total</span><span class="tabular-nums"><%= brl(pricing.total_value) %></span>
+          </li>
+        </ul>
+        <p class="text-xs text-base-content/50 mt-2">Valores do último "Salvar e recalcular".</p>
       <% end %>
     </div>
 

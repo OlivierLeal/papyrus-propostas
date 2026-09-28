@@ -29,9 +29,10 @@ class ProposalsController < ApplicationController
       pricing = @proposal.project_pricing
 
       if pricing.update(pricing_params) && @proposal.update(document_split_params)
+        anchor = PricingStructure.new(pricing).apply(params[:structure_action])
         pricing.recalculate!
         @proposal.update!(status: "priced")
-        redirect_to conversation_proposal_path(@conversation), notice: "Preço recalculado."
+        redirect_to conversation_proposal_path(@conversation, anchor: anchor), notice: anchor ? nil : "Preço recalculado."
       else
         errors = (pricing.errors.full_messages + @proposal.errors.full_messages).to_sentence
         redirect_to conversation_proposal_path(@conversation), alert: errors
@@ -149,13 +150,20 @@ class ProposalsController < ApplicationController
 
     def pricing_params
       params.require(:project_pricing).permit(
-        :bdi, :tax_multiplier, :distance_km, :travel_hours, :logistics_days,
-        :rental_per_day, :vehicles_count, :meal_per_person_per_day, :lodging_per_person_per_night,
-        :fuel_total, :fuel_price_per_liter, :vehicle_consumption_km_per_liter,
-        :schedule_papyrus_start_date, :schedule_empreendimento_start_date, :price_breakdown,
+        :bdi, :tax_multiplier, :distance_km, :travel_hours, :daily_km,
+        :rental_per_day, :rental_4x4_per_day, :meal_per_person_per_day, :lodging_per_person_per_night,
+        :fuel_price_per_liter, :vehicle_consumption_km_per_liter, :toll_price, :wash_price,
+        :uber_price, :mateiro_per_day, :epi_price, :common_split, :price_presentation,
+        :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
         payment_schedule_items: %i[ label percentage date ],
-        proposal_professionals_attributes: %i[ id deliverable_name stage man_hours field_days ],
+        proposal_professionals_attributes: %i[ id deliverable_name pricing_item_id man_hours field_days ],
+        pricing_enterprises_attributes: %i[ id name ],
+        pricing_items_attributes: [
+          :id, :name, :pricing_enterprise_id, { cost_items: %i[ description quantity unit_value ] },
+          { field_campaigns_attributes: %i[ id description people days travel_days vehicles vehicle_type
+                                            tolls washes uber_trips mateiro_days epi_count ] }
+        ],
         schedule_items_attributes: %i[ id phase_name activity_name start_period duration_periods milestone ]
       )
     end

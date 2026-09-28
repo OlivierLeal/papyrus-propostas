@@ -22,4 +22,11 @@ module ProposalsHelper
       ].compact)
     end
   end
+
+  # Botão de mudança de estrutura da precificação (adicionar/remover item, campo, custo,
+  # empreendimento) — submete o form principal com structure_action (ver PricingStructure).
+  def structure_button(label, value, editable:, css: "btn btn-ghost btn-xs text-primary", confirm: nil)
+    tag.button(label, type: "submit", name: "structure_action", value: value, class: css, disabled: !editable,
+      data: ({ turbo_confirm: confirm } if confirm))
+  end
 end

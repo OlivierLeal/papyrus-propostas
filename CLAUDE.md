@@ -233,6 +233,37 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
 5. **Hospedagem**: desde 2026-09, entra no cálculo automático via uma diária média configurável por pessoa (`lodging_per_person_per_night`) — não depende do Stay22 (ver abaixo, ainda greenfield). O Stay22 continua fora de escopo (chave de API pendente); quando existir, é uma segunda fonte de referência pro consultor ajustar essa diária, não substitui o campo.
 6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas (`payment_schedule_amounts`, default 30/60/5/5), dados prontos para o PDF. Proposta só é editável enquanto `status != "approved"`; aprovar (`proposals#approve`) trava os campos e conclui a conversa.
 
+**Precificação por ITEM, com logística por campo e vários empreendimentos (2026-09-28, a partir da
+planilha real da Papyrus `26098_Newave Energia_BESS_Rev00.xlsx`, trazida pela Sara: "são campos/dias/
+veículos diferentes por área" e "3 empreendimentos numa proposta só").** Substitui a logística única
+por proposta descrita logo abaixo (os parágrafos seguintes ficam como histórico; `vehicles_count`,
+`logistics_days`, `fuel_total` e `price_breakdown` estão em `ignored_columns`, no banco até uma
+migração de limpeza).
+- `PricingItem` (nome, empreendimento opcional, `costs` jsonb de custos fechados `{description,
+  quantity, unit_value}`) — cada linha da equipe pertence a um (`proposal_professionals.pricing_item_id`;
+  sem item cai no primeiro, `ProjectPricing#default_item`). Item = equipe + campos + custos.
+- `FieldCampaign` (por item): pessoas, dias em campo, dias de viagem, veículos, carro/4x4, pedágios,
+  lavagens, Uber, dias de mateiro, EPI/ASO. `#breakdown` reproduz a planilha (conferido linha a linha
+  no teste): veículo = veículos × (dias + viagem) × diária; combustível = (2 × distância + km/dia ×
+  dias) × veículos ÷ consumo × preço; alimentação = pessoas × (dias + viagem); hospedagem = pessoas ×
+  (dias + viagem − 1); extras × valor unitário. Viagem de 3h+ → campo novo nasce com 2 dias de viagem.
+- **Logística e custos do item levam BDI × impostos** (decisão do consultor, igual à planilha — antes a
+  logística entrava sem multiplicador). Custos externos da proposta seguem como repasse, sem BDI.
+- Valores unitários por proposta (`rental_per_day` = carro, `rental_4x4_per_day`, hospedagem,
+  alimentação, combustível, consumo, `toll_price`, `wash_price`, `uber_price`, `mateiro_per_day`,
+  `epi_price`, `daily_km`); padrões das propostas novas = os da planilha.
+- `PricingEnterprise`: itens com empreendimento somam só pra ele; os sem empreendimento (e os custos
+  externos) são comuns, rateados em partes iguais ou proporcional ao valor próprio (`common_split`).
+- IA: `team_suggestion_prompt` pede `empreendimentos` + `itens` (cada um com `equipe` e `campos`) +
+  `apresentacao_preco`; `Proposal#apply_team_suggestion!` grava (formato antigo "linhas" ainda aceito;
+  o item padrão vazio sai). Pessoas/dias/veículos vêm da IA; pedágios/lavagens/Uber/viagem, de regra.
+- Tela: seção "Itens e logística de campo" (`_items_section`); adicionar/remover item/campo/custo/
+  empreendimento são botões `structure_action` DENTRO do `#pricing-form` (`PricingStructure`) — salvam o
+  que foi digitado antes. Prévia ao vivo refaz `FieldCampaign#breakdown` no JS
+  (`pricing_preview_controller.js`, escuta `input` e `change`).
+- Migração `AddPricingItems` só aditiva (tem `down`): etapas viraram itens, a logística antiga virou um
+  campo, e nenhum total gravado mudou — muda quando alguém salvar a precificação de novo.
+
 **Logística automática — distância, combustível, veículos e hospedagem (2026-09, pedido do
 consultor: "não vai ficar querendo calculando distância e quanto vai gastar de combustível").**
 Antes, `distance_km`/`logistics_days`/`rental_per_day`/`meal_per_day`/`fuel_total` eram 5 campos
@@ -582,23 +613,16 @@ e ser possível adicionar").**
   as células N° das linhas do Desembolso perderam o entrelinha 1,5, que deixava o número
   desalinhado no topo. Conferido no LibreOffice (headless → PDF → captura).
 
-**Preço discriminado por etapa, sob demanda (2026-09-28, VESTAS/conversa 63 — o ET pedia "custos
-discriminados, permitindo identificar os valores relativos às principais etapas e estudos").**
-Padrão continua sendo o Quadro de Preço com 1 linha (total). Com `project_pricings.price_breakdown`
-ligado e a equipe com 2+ etapas, o quadro sai com uma linha por etapa + linha TOTAL em negrito.
-- Cada linha da equipe tem `proposal_professionals.stage` (coluna "Etapa" na Tela de Precificação).
-  A IA sugere a etapa junto com a equipe (`"etapa"` no JSON de `team_suggestion_prompt`, 3 a 6
-  etapas; Diretoria/Coordenação pode ficar sem).
-- `ProjectPricing#price_breakdown_rows`, só Ruby: etapa = soma dos subtotais das linhas dela +
-  logística repartida pelas diárias de campo de cada etapa; linhas sem etapa viram "Coordenação e
-  gestão do projeto"; custos externos em linha própria; a última linha absorve o arredondamento.
-- Liga: checkbox "Discriminar o preço por etapa" na Tela de Precificação; `preco_discriminado` na
-  sugestão de equipe (quando o ET/TR pede); ou o parâmetro `preco_discriminado` de
-  `GenerateProposalDocumentTool` (consultor pede no chat; `false` volta ao total). Sem 2 etapas, sai o
-  total e a mensagem avisa pra definir as etapas.
-- Achado novo `apresentacao_preco` (ET/TR/complementar): a sugestão de equipe não relê o PDF, então o
-  que o documento diz sobre a forma do preço vai explícito no prompt (`price_presentation_context`).
-- `docx_price_rows` passou a devolver o N° pronto (tabela 3 com `auto_number: false`).
+**Quadro de Preço aberto por item ou por empreendimento (2026-09-28, VESTAS/conversa 63 — o ET
+pedia "custos discriminados, permitindo identificar os valores relativos às principais etapas").**
+`project_pricings.price_presentation`: `total` (padrão, 1 linha), `itens` (uma linha por
+`PricingItem` + custos externos + TOTAL) ou `empreendimentos` (as linhas por item + "TOTAL –
+<empreendimento>" de cada um + TOTAL). Valores de `ProjectPricing#price_rows`/`#enterprise_totals`,
+sempre Ruby; linhas de total sem número e em negrito. `Proposal#price_presentation_mode` cai pra
+`total` com um item só e pra `itens` com menos de 2 empreendimentos (a mensagem da ferramenta avisa).
+Liga pela Tela de Precificação, pelo parâmetro `apresentacao_preco` de `GenerateProposalDocumentTool`
+(o antigo `preco_discriminado: true` vale como `itens`) ou pela sugestão de equipe, que lê o achado
+`apresentacao_preco` do ET/TR (`Proposal#price_presentation_context` — a sugestão não relê o PDF).
 
 **"EXIGÊNCIAS SMS" virou capítulo fixo, logo depois de EQUIPE TÉCNICA (2026-09, pedido do
 consultor a partir de um texto pronto da Papyrus).** Texto INTEIRO fixo do modelo — nada vem da

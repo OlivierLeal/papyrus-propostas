@@ -39,6 +39,29 @@ class PricingPreviewTest < ApplicationSystemTestCase
     within("tr", text: @line.professional.name) { assert_selector "[data-role='subtotal']", text: "R$ 13.375,00" }
   end
 
+  # 2026-09-28: logística por campo, dentro do item, × BDI × impostos (FieldCampaign#breakdown).
+  test "mudar um campo atualiza o custo dele, o item, a logística e o total — igual ao que o servidor grava" do
+    sign_in
+    visit conversation_proposal_path(@proposal.conversation)
+
+    campaign_row = find("[data-pricing-preview-target='campaign']")
+    within(campaign_row) do
+      find("input[data-field='people']").fill_in(with: "2")      # + alimentação 1 × 2 dias × 80
+      find("select[data-field='vehicle_type']").select("4x4")    # diária 4x4: 750 (em vez de 150)
+    end
+    # custo direto: veículo 2 × 750 = 1.500 + combustível 400 + alimentação 2 × 2 × 80 = 320
+    # + hospedagem 0 + pedágios 240 = 2.460 → × 1,5 = 3.690,00
+    within(campaign_row) { assert_selector "[data-role='campaign-total']", text: "R$ 3.690,00" }
+    assert_selector "[data-pricing-preview-target='logistics']", text: "R$ 3.690,00"
+    assert_selector "[data-pricing-preview-target='summaryTotal']", text: "R$ 46.950,00" # 43.260 + 3.690
+    preview_total = find("[data-pricing-preview-target='summaryTotal']").text
+
+    click_button "Salvar e recalcular"
+    assert_text "Preço recalculado"
+    assert_equal preview_total, find("[data-pricing-preview-target='summaryTotal']").text
+    assert_equal 46_950, @proposal.project_pricing.reload.total_value
+  end
+
   private
 
   def sign_in

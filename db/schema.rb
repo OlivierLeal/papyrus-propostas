@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_28_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -67,6 +67,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
     t.index ["model_id"], name: "index_conversations_on_model_id"
     t.index ["status"], name: "index_conversations_on_status"
     t.index ["user_id"], name: "index_conversations_on_user_id"
+  end
+
+  create_table "field_campaigns", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.decimal "days", precision: 8, scale: 2, default: "1.0", null: false
+    t.string "description", null: false
+    t.integer "epi_count", default: 0, null: false
+    t.decimal "mateiro_days", precision: 8, scale: 2, default: "0.0", null: false
+    t.integer "people", default: 1, null: false
+    t.integer "position", default: 0, null: false
+    t.bigint "pricing_item_id", null: false
+    t.integer "tolls", default: 0, null: false
+    t.decimal "travel_days", precision: 8, scale: 2, default: "0.0", null: false
+    t.integer "uber_trips", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.string "vehicle_type", default: "carro", null: false
+    t.integer "vehicles", default: 1, null: false
+    t.integer "washes", default: 0, null: false
+    t.index ["pricing_item_id"], name: "index_field_campaigns_on_pricing_item_id"
   end
 
   create_table "general_chats", force: :cascade do |t|
@@ -338,6 +357,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
     t.index ["provider"], name: "index_models_on_provider"
   end
 
+  create_table "pricing_enterprises", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.integer "position", default: 0, null: false
+    t.bigint "project_pricing_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_pricing_id"], name: "index_pricing_enterprises_on_project_pricing_id"
+  end
+
+  create_table "pricing_items", force: :cascade do |t|
+    t.jsonb "costs", default: [], null: false
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.integer "position", default: 0, null: false
+    t.bigint "pricing_enterprise_id"
+    t.bigint "project_pricing_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pricing_enterprise_id"], name: "index_pricing_items_on_pricing_enterprise_id"
+    t.index ["project_pricing_id"], name: "index_pricing_items_on_project_pricing_id"
+  end
+
   create_table "professionals", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.boolean "always_included", default: false, null: false
@@ -398,27 +438,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
 
   create_table "project_pricings", force: :cascade do |t|
     t.decimal "bdi", precision: 6, scale: 4, default: "1.2", null: false
+    t.string "common_split", default: "equal", null: false
     t.datetime "created_at", null: false
+    t.decimal "daily_km", precision: 10, scale: 2, default: "100.0", null: false
     t.decimal "distance_km", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "epi_price", precision: 10, scale: 2, default: "2700.0", null: false
     t.jsonb "external_costs", default: [], null: false
-    t.decimal "fuel_price_per_liter", precision: 10, scale: 2, default: "6.2", null: false
+    t.decimal "fuel_price_per_liter", precision: 10, scale: 2, default: "8.0", null: false
     t.decimal "fuel_total", precision: 10, scale: 2, default: "0.0", null: false
-    t.decimal "lodging_per_person_per_night", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "lodging_per_person_per_night", precision: 10, scale: 2, default: "220.0", null: false
     t.integer "logistics_days", default: 0, null: false
-    t.decimal "meal_per_person_per_day", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "mateiro_per_day", precision: 10, scale: 2, default: "250.0", null: false
+    t.decimal "meal_per_person_per_day", precision: 10, scale: 2, default: "100.0", null: false
     t.jsonb "payment_schedule", default: [{"label"=>"Assinatura do contrato", "percentage"=>30}, {"label"=>"Protocolo no órgão ambiental", "percentage"=>60}, {"label"=>"Vistoria", "percentage"=>5}, {"label"=>"Emissão da licença", "percentage"=>5}], null: false
     t.boolean "price_breakdown", default: false, null: false
+    t.string "price_presentation", default: "total", null: false
     t.bigint "proposal_id", null: false
-    t.decimal "rental_per_day", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "rental_4x4_per_day", precision: 10, scale: 2, default: "750.0", null: false
+    t.decimal "rental_per_day", precision: 10, scale: 2, default: "250.0", null: false
     t.date "schedule_empreendimento_start_date"
     t.jsonb "schedule_key_points", default: [], null: false
     t.date "schedule_papyrus_start_date"
     t.decimal "tax_multiplier", precision: 6, scale: 4, default: "1.25", null: false
+    t.decimal "toll_price", precision: 10, scale: 2, default: "30.0", null: false
     t.decimal "total_value", precision: 12, scale: 2, default: "0.0", null: false
     t.decimal "travel_hours", precision: 10, scale: 2
+    t.decimal "uber_price", precision: 10, scale: 2, default: "70.0", null: false
     t.datetime "updated_at", null: false
-    t.decimal "vehicle_consumption_km_per_liter", precision: 10, scale: 2, default: "10.0", null: false
+    t.decimal "vehicle_consumption_km_per_liter", precision: 10, scale: 2, default: "8.0", null: false
     t.integer "vehicles_count", default: 1, null: false
+    t.decimal "wash_price", precision: 10, scale: 2, default: "80.0", null: false
     t.index ["proposal_id"], name: "index_project_pricings_on_proposal_id", unique: true
   end
 
@@ -427,11 +476,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
     t.string "deliverable_name", null: false
     t.decimal "field_days", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "man_hours", precision: 8, scale: 2, default: "0.0", null: false
+    t.bigint "pricing_item_id"
     t.bigint "professional_id", null: false
     t.bigint "project_pricing_id", null: false
     t.string "stage"
     t.decimal "subtotal", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
+    t.index ["pricing_item_id"], name: "index_proposal_professionals_on_pricing_item_id"
     t.index ["professional_id"], name: "index_proposal_professionals_on_professional_id"
     t.index ["project_pricing_id"], name: "index_proposal_professionals_on_project_pricing_id"
   end
@@ -658,6 +709,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
   add_foreign_key "conversation_study_types", "study_types"
   add_foreign_key "conversations", "models"
   add_foreign_key "conversations", "users"
+  add_foreign_key "field_campaigns", "pricing_items", on_delete: :cascade
   add_foreign_key "general_chats", "models"
   add_foreign_key "general_chats", "users"
   add_foreign_key "general_messages", "general_chats"
@@ -677,6 +729,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
   add_foreign_key "messages", "models"
   add_foreign_key "messages", "tool_calls"
   add_foreign_key "messages", "users"
+  add_foreign_key "pricing_enterprises", "project_pricings"
+  add_foreign_key "pricing_items", "pricing_enterprises", on_delete: :nullify
+  add_foreign_key "pricing_items", "project_pricings"
   add_foreign_key "project_conflict_findings", "project_conflicts"
   add_foreign_key "project_conflict_findings", "project_findings"
   add_foreign_key "project_conflicts", "conversations"
@@ -685,6 +740,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_180000) do
   add_foreign_key "project_findings", "conversations"
   add_foreign_key "project_findings", "project_findings", column: "superseded_by_id"
   add_foreign_key "project_pricings", "proposals"
+  add_foreign_key "proposal_professionals", "pricing_items", on_delete: :nullify
   add_foreign_key "proposal_professionals", "professionals"
   add_foreign_key "proposal_professionals", "project_pricings"
   add_foreign_key "proposals", "conversations"

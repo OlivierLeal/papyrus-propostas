@@ -13,7 +13,8 @@
   <dl class="border-t border-base-300 px-6 py-4 flex flex-col gap-2 text-sm">
     <% outsourced = pricing.outsourced_costs.sum { |cost, _| cost["value"].to_f } %>
     <% [ [ "Equipe", pricing.professionals_total, "summaryTeam" ],
-         [ "Logística", pricing.logistics_total, "summaryLogistics" ],
+         [ "Logística dos campos", pricing.logistics_total, "summaryLogistics" ],
+         [ "Custos dos itens", pricing.item_costs_total, "summaryItemCosts" ],
          [ "Custos externos", pricing.external_costs_total - outsourced, nil ],
          [ "Terceirizados", outsourced, nil ] ].each do |label, value, target| %>
       <div class="flex justify-between gap-3">

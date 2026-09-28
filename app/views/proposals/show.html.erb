@@ -59,10 +59,11 @@
   <div class="grid xl:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start"
        data-controller="pricing-preview"
        data-pricing-preview-external-total-value="<%= pricing.external_costs_total.to_f %>"
-       <% if editable %>data-action="input->pricing-preview#update"<% end %>>
+       <% if editable %>data-action="input->pricing-preview#update change->pricing-preview#update"<% end %>>
     <div class="flex flex-col gap-6 min-w-0">
       <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, id: "pricing-form", class: "flex flex-col gap-6" do |form| %>
         <%= render "team_section", form: form, pricing: pricing, editable: editable, conversation: @conversation, professionals: @professionals %>
+        <%= render "items_section", form: form, pricing: pricing, editable: editable %>
         <%= render "parameters_section", form: form, pricing: pricing, editable: editable %>
         <%= render "payment_section", form: form, pricing: pricing, proposal: @proposal, editable: editable %>
 

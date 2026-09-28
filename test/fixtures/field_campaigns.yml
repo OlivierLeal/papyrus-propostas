@@ -1,0 +1,18 @@
+# Campo do item: custo direto R$ 1.100 → × 1,20 × 1,25 = R$ 1.650, o mesmo valor da logística
+# antiga da fixture (total da proposta continua 44.910,00).
+#   veículo 1 × 2 dias × 150 = 300; combustível (2×100 + 100×2) km ÷ 8 × 8 = 400;
+#   alimentação 1 × 2 × 80 = 160; hospedagem 0; 8 pedágios × 30 = 240.
+campo_servico:
+  pricing_item: servico_item
+  description: Campo
+  people: 1
+  days: 2
+  travel_days: 0
+  vehicles: 1
+  vehicle_type: carro
+  tolls: 8
+  washes: 0
+  uber_trips: 0
+  mateiro_days: 0
+  epi_count: 0
+  position: 0

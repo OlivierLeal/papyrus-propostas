@@ -1,32 +1,52 @@
 class ProjectPricing < ApplicationRecord
+  # Colunas do modelo antigo de logística única (2026-09-28: a logística passou a ser por campo,
+  # dentro de cada item — FieldCampaign). Ficam no banco até uma migração de limpeza, depois de
+  # validado em produção; o código não lê nem escreve mais nelas.
+  self.ignored_columns += %w[logistics_days vehicles_count fuel_total price_breakdown]
+
   belongs_to :proposal
   has_many :proposal_professionals, dependent: :destroy
   accepts_nested_attributes_for :proposal_professionals, update_only: true
+
+  # Precificação por item (2026-09-28, modelo da planilha real da Papyrus — ver PricingItem,
+  # FieldCampaign, PricingEnterprise e CLAUDE.md seção 5).
+  has_many :pricing_items, -> { order(:position, :id) }, dependent: :destroy, inverse_of: :project_pricing
+  has_many :pricing_enterprises, -> { order(:position, :id) }, dependent: :destroy
+  accepts_nested_attributes_for :pricing_items, update_only: true
+  accepts_nested_attributes_for :pricing_enterprises, update_only: true
 
   # Cronograma (Gantt no .docx, ver ScheduleItem/ScheduleTableBuilder) — não entra no cálculo de
   # preço, só é lido na hora de gerar o documento.
   has_many :schedule_items, -> { order(:position) }, dependent: :destroy
   accepts_nested_attributes_for :schedule_items, update_only: true
 
+  COMMON_SPLITS = { "equal" => "Em partes iguais", "proportional" => "Proporcional ao valor de cada empreendimento" }.freeze
+  PRICE_PRESENTATIONS = {
+    "total" => "Só o preço total",
+    "itens" => "Aberto por item",
+    "empreendimentos" => "Por item, com total de cada empreendimento"
+  }.freeze
+  DEFAULT_ITEM_NAME = "Execução do serviço"
+  EXTERNAL_COSTS_LABEL = "Custos externos (taxas e demais despesas)"
+
   validate :payment_schedule_sums_to_100, if: :will_save_change_to_payment_schedule?
 
   validates :bdi, :tax_multiplier, presence: true, numericality: { greater_than: 0 }
-  validates :distance_km, :rental_per_day, :meal_per_person_per_day, :fuel_total,
+  validates :distance_km, :rental_per_day, :rental_4x4_per_day, :meal_per_person_per_day,
             :fuel_price_per_liter, :vehicle_consumption_km_per_liter, :lodging_per_person_per_night,
+            :toll_price, :wash_price, :uber_price, :mateiro_per_day, :epi_price, :daily_km,
             presence: true, numericality: { greater_than_or_equal_to: 0 }
-  validates :logistics_days, presence: true, numericality: { greater_than_or_equal_to: 0 }
-  validates :vehicles_count, presence: true, numericality: { greater_than_or_equal_to: 1 }
+  validates :common_split, inclusion: { in: COMMON_SPLITS.keys }
+  validates :price_presentation, inclusion: { in: PRICE_PRESENTATIONS.keys }
 
-  # Nº de passageiros por veículo de campo — regra simples pra estimar quantos carros a equipe
-  # precisa (ver #suggested_vehicles_count), não um cadastro de frota/veículo por tipo.
-  PASSENGERS_PER_VEHICLE = 4
-
-  # Acima de um destes, a viagem de carro deixa de fazer sentido — suggest_logistics! não calcula
-  # combustível (fica 0, o consultor decide) e a Tela de Precificação avisa que sugere
-  # deslocamento aéreo (passagem+locação no destino vão em Custos Externos, campo livre já
-  # existente).
+  # Acima de um destes, a viagem de carro deixa de fazer sentido — a Tela de Precificação avisa
+  # que sugere deslocamento aéreo (passagem+locação no destino vão em custos do item).
   LONG_DISTANCE_KM_THRESHOLD = 800
   LONG_DISTANCE_HOURS_THRESHOLD = 10
+
+  # Viagem de ida acima disto já consome o dia: o campo ganha 2 dias de deslocamento (ida e volta),
+  # como na planilha da Papyrus (Lauro de Freitas → Ourolândia, 405 km: 1 dia de campo = 3 diárias).
+  TRAVEL_DAY_HOURS = 3
 
   # Fallback de linha reta quando a Mapbox Directions não responde (sem chave, erro de rede, sem
   # rota) — ROAD_FACTOR aproxima a distância real de estrada a partir da geodésica; velocidade
@@ -34,49 +54,43 @@ class ProjectPricing < ApplicationRecord
   ROAD_FACTOR = 1.3
   AVERAGE_SPEED_KMH = 70.0
 
+  # BDI × impostos — vale pra equipe, logística de campo e custos dos itens (igual à planilha).
+  def multiplier
+    bdi * tax_multiplier
+  end
+
   def professionals_total
     proposal_professionals.sum(&:subtotal)
   end
 
-  # C4 = logística = (hospedagem/pessoa/noite + alimentação/pessoa/dia) × pessoas em campo × dias
-  # + aluguel/veículo/dia × nº de veículos × dias + combustível (2026-09: hospedagem/alimentação
-  # passam a ser POR PESSOA, aluguel continua por VEÍCULO — ver CLAUDE.md seção 5).
+  # C4 = logística dos campos de todos os itens, já com BDI × impostos (2026-09-28: antes era um
+  # bloco único e sem multiplicador).
   def logistics_total
-    logistics_breakdown.values.sum
+    pricing_items.sum(&:campaigns_total)
   end
 
-  # Cada parcela do C4, pra Tela de Precificação mostrar de onde sai o total da logística.
-  def logistics_breakdown
-    people = field_professionals_count
-    {
-      lodging: lodging_per_person_per_night * people * logistics_days,
-      meals: meal_per_person_per_day * people * logistics_days,
-      rental: rental_per_day * vehicles_count * logistics_days,
-      fuel: fuel_total
-    }
+  # Custos fechados dos itens (ART, subcontratado "com logística"...), com BDI × impostos.
+  def item_costs_total
+    pricing_items.sum(&:costs_total)
   end
 
-  # Nº de profissionais desta proposta que vão a campo (diárias > 0) — mínimo 1 pra nunca
-  # zerar hospedagem/alimentação/veículo quando há dias de campo mas a equipe ainda não foi
-  # detalhada (ex.: logo depois de build_base_team!, antes do consultor ajustar horas).
-  def field_professionals_count
-    n = proposal_professionals.where("field_days > 0").count
-    n.zero? ? 1 : n
+  def default_travel_days
+    travel_hours.to_f >= TRAVEL_DAY_HOURS ? 2 : 0
   end
 
   def long_distance?
     distance_km.to_f > LONG_DISTANCE_KM_THRESHOLD || travel_hours.to_f > LONG_DISTANCE_HOURS_THRESHOLD
   end
 
-  # Calcula distância/duração até o projeto (Logistics::DestinationResolver +
-  # Logistics::MapboxDirections, com fallback de linha reta), e a partir disso sugere nº de
-  # veículos e combustível — nunca a hospedagem/alimentação/aluguel por dia, que continuam
-  # digitados pelo consultor (só passam a ser multiplicados certo, ver #logistics_total). Roda
-  # uma vez na criação da proposta (Conversation#ensure_proposal!) e pode ser refeita a qualquer
-  # momento (botão "Recalcular logística" na Tela de Precificação, ou
-  # GenerateProposalDocumentTool#ensure_logistics_suggested! quando o KMZ ainda não tinha
-  # terminado na 1ª tentativa). Só Ruby + HTTP — nunca IA, preço continua sempre determinístico
-  # (CLAUDE.md seção 1).
+  # Item padrão pra linha de equipe sem item (adicionada pela tela, pela IA ou pelos fixos).
+  def default_item
+    pricing_items.first || pricing_items.create!(name: DEFAULT_ITEM_NAME, position: 0)
+  end
+
+  # Distância/duração até o projeto (Logistics::DestinationResolver + Logistics::MapboxDirections,
+  # com fallback de linha reta) — base do combustível e dos dias de deslocamento dos campos. Roda
+  # na criação da proposta, pelo botão "Recalcular" e em GenerateProposalDocumentTool quando o KMZ
+  # terminou depois. Só Ruby + HTTP — nunca IA (CLAUDE.md seção 1).
   def suggest_logistics!
     destination = Logistics::DestinationResolver.call(proposal)
     return unless destination
@@ -85,8 +99,6 @@ class ProjectPricing < ApplicationRecord
       straight_line_estimate(destination)
     self.distance_km = result.distance_km.round(1)
     self.travel_hours = result.duration_hours.round(1)
-    self.vehicles_count = suggested_vehicles_count
-    self.fuel_total = long_distance? ? 0 : estimated_fuel_total
     save!
     recalculate!
   rescue StandardError => e
@@ -116,54 +128,52 @@ class ProjectPricing < ApplicationRecord
     external_costs.each_with_index.reject { |item, _index| item["kind"] == "terceirizado" }
   end
 
-  # Rótulo das linhas de equipe sem etapa (normalmente Diretoria/Coordenação, que atravessam o
-  # projeto inteiro) no preço discriminado.
-  UNSTAGED_LABEL = "Coordenação e gestão do projeto"
-  EXTERNAL_COSTS_LABEL = "Custos externos (ARTs, taxas e demais despesas)"
-  FIELD_LOGISTICS_LABEL = "Logística de campo"
-
-  # Subpreço de cada etapa, pro Quadro de Preço discriminado (2026-09-28). Tudo sai do MESMO
-  # motor do total, nunca da IA: cada etapa soma os subtotais das linhas de equipe dela; a
-  # logística (C4) é repartida entre as etapas na proporção das diárias de campo de cada uma
-  # (quem não vai a campo não carrega logística); custos externos (C5) viram linha própria. A
-  # última linha absorve o arredondamento, então a soma bate centavo a centavo com total_value.
-  # Ordem: etapas na ordem em que aparecem na equipe, linhas sem etapa por último.
-  def price_breakdown_rows
-    lines = proposal_professionals.sort_by(&:id)
-    staged, unstaged = lines.partition { |line| line.stage.to_s.strip.present? }
-    groups = staged.group_by { |line| line.stage.strip }
-    groups[UNSTAGED_LABEL] = unstaged if unstaged.any?
-
-    logistics = logistics_total.to_d
-    field_days = lines.sum(&:field_days).to_d
-    rows = groups.map do |label, group|
-      share = field_days.positive? ? logistics * group.sum(&:field_days) / field_days : 0
-      [ label, group.sum(&:subtotal).to_d + share ]
-    end
-    rows << [ FIELD_LOGISTICS_LABEL, logistics ] if field_days.zero? && logistics.positive?
-    rows << [ EXTERNAL_COSTS_LABEL, external_costs_total.to_d ] if external_costs_total.positive?
-
-    rows = rows.map { |label, value| [ label, value.round(2) ] }
-    rows[-1] = [ rows[-1][0], (total_value.to_d - rows[0..-2].sum { |_, value| value }).round(2) ] if rows.any?
-    rows
-  end
-
-  # Quantas etapas distintas a equipe tem — o quadro só abre com 2 ou mais.
-  def price_stages_count
-    proposal_professionals.filter_map { |line| line.stage.to_s.strip.presence }.uniq.size
-  end
-
-  # C6 = TOTAL = Σ profissionais + logística + externos
+  # C6 = TOTAL = Σ equipe + logística dos campos + custos dos itens (tudo com BDI × impostos) +
+  # custos externos (repasse, sem multiplicador).
   def recalculate!
     # Usa a mesma lista de objetos pra calcular, salvar e somar — carregar a associação de novo
     # (proposal_professionals.sum) logo após o save arriscaria pegar um cache desatualizado sem
     # os subtotais recém-calculados, dependendo do que já tinha sido carregado antes na request.
     lines = proposal_professionals.includes(:professional).to_a
     lines.each { |pp| pp.recalculate_subtotal(bdi: bdi, tax_multiplier: tax_multiplier) }
+    items = pricing_items.reload.includes(:field_campaigns).to_a
     ActiveRecord::Base.transaction do
       lines.each(&:save!)
-      update!(total_value: (lines.sum(&:subtotal) + logistics_total + external_costs_total).round(2))
+      direct = items.sum { |item| item.campaigns_total + item.costs_total }
+      update!(total_value: (lines.sum(&:subtotal) + direct + external_costs_total).round(2))
     end
+  end
+
+  # Valor de cada item (equipe + campos + custos), pro Quadro de Preço aberto e pra tela.
+  # Custos externos (repasse) viram linha própria. A última linha absorve o arredondamento, então a
+  # soma bate centavo a centavo com total_value.
+  def price_rows
+    rows = pricing_items.includes(:field_campaigns, proposal_professionals: :professional).map { |item| [ item.name, item.total.to_d ] }
+    rows << [ EXTERNAL_COSTS_LABEL, external_costs_total.to_d ] if external_costs_total.positive?
+    close_rounding(rows)
+  end
+
+  # Total de cada empreendimento: os próprios itens + a parte dos itens comuns (sem empreendimento,
+  # e os custos externos). Rateio em partes iguais ou proporcional ao valor próprio de cada um
+  # (common_split) — proporcional sem valor próprio nenhum cai pro igual. [[nome, valor], ...]
+  def enterprise_totals
+    enterprises = pricing_enterprises.to_a
+    return [] if enterprises.empty?
+
+    items = pricing_items.includes(:field_campaigns, proposal_professionals: :professional).to_a
+    own = enterprises.to_h { |enterprise| [ enterprise.id, items.select { |i| i.pricing_enterprise_id == enterprise.id }.sum { |i| i.total.to_d } ] }
+    common = items.select { |i| i.pricing_enterprise_id.nil? }.sum { |i| i.total.to_d } + external_costs_total.to_d
+    own_sum = own.values.sum
+
+    rows = enterprises.map do |enterprise|
+      share = if common_split == "proportional" && own_sum.positive?
+        common * own[enterprise.id] / own_sum
+      else
+        common / enterprises.size
+      end
+      [ enterprise.name, own[enterprise.id] + share ]
+    end
+    close_rounding(rows)
   end
 
   # Algum subtotal gravado não bate mais com o valor atual de hora-homem/diária do cadastro
@@ -225,13 +235,10 @@ class ProjectPricing < ApplicationRecord
       errors.add(:payment_schedule, "precisa somar 100% (soma atual: #{payment_percentage_total.to_s('F').sub(/\.0\z/, '').tr('.', ',')}%)")
     end
 
-    def suggested_vehicles_count
-      (field_professionals_count / PASSENGERS_PER_VEHICLE.to_f).ceil
-    end
-
-    # Ida e volta, uma vez, por veículo (convoy viaja junto — cada veículo roda o mesmo trajeto).
-    def estimated_fuel_total
-      ((distance_km * 2 * vehicles_count) / vehicle_consumption_km_per_liter) * fuel_price_per_liter
+    def close_rounding(rows)
+      rows = rows.map { |label, value| [ label, value.round(2) ] }
+      rows[-1] = [ rows[-1][0], (total_value.to_d - rows[0..-2].sum { |_, value| value }).round(2) ] if rows.any?
+      rows
     end
 
     def straight_line_estimate(destination)

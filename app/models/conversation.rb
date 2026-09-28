@@ -765,8 +765,11 @@ class Conversation < ApplicationRecord
 
     def proposal_state_text
       pricing = proposal.project_pricing
-      lines = pricing.proposal_professionals.includes(:professional).map do |pp|
-        "- #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s))"
+      items = pricing.pricing_items.includes(:pricing_enterprise, :field_campaigns, proposal_professionals: :professional).to_a
+      lines = items.map do |item|
+        team = item.proposal_professionals.map { |pp| "    - #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s))" }
+        campaigns = item.field_campaigns.map { |c| "    - campo \"#{c.description}\": #{c.people} pessoa(s), #{c.days} dia(s) em campo, #{c.vehicles} #{c.vehicle_type}" }
+        [ "  Item \"#{item.name}\"#{" (empreendimento #{item.pricing_enterprise.name})" if item.pricing_enterprise}:", *team, *campaigns ].join("\n")
       end.join("\n")
 
       external_costs = pricing.external_costs.map { |c| "#{c['description']} (R$ #{c['value']})" }.join(", ")
@@ -779,9 +782,11 @@ class Conversation < ApplicationRecord
         - Status da proposta: #{proposal.status}#{proposal_reopen_note}
         - Nome do arquivo: #{proposal.docx_filename_override.presence&.then { |n| "definido pelo consultor (\"#{n}\") — a ferramenta já usa esse nome sozinha, não precisa reenviar" } || "padrão do sistema (número + cliente + escopo + revisão)"}
         - Formato do documento: #{proposal.document_split == "separated" ? "técnica e comercial separadas" : "documento único"}
-        - Equipe e horas definidas:
+        - Itens da precificação (equipe e campos de cada um):
         #{lines.presence || "  (nenhuma linha definida ainda)"}
-        - Logística: #{pricing.logistics_days} dias de campo, #{pricing.distance_km} km de distância#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
+        - Empreendimentos: #{pricing.pricing_enterprises.map(&:name).join(", ").presence || "um só"}
+        - Quadro de preço no documento: #{ProjectPricing::PRICE_PRESENTATIONS.fetch(proposal.price_presentation_mode)}
+        - Logística: #{pricing.distance_km} km até o projeto, R$ #{pricing.logistics_total} nos campos#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
         - Custos externos: #{external_costs.presence || "nenhum lançado"}
         - Preço total calculado: R$ #{pricing.total_value}
         #{team_all_zero || !logistics_filled ? proposal_state_zero_warning : ""}

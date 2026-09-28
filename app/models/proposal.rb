@@ -113,26 +113,32 @@ class Proposal < ApplicationRecord
   end
 
   # Linhas do Quadro de Preço (N° | SERVIÇO | PREÇO R$, reintroduzido em 2026-09), já com o N°.
-  # Padrão: 1 linha só, o preço TOTAL. `descricao_fallback` é o texto livre que a IA já escreve
-  # pra outros fins (descricao_servico) — só entra quando não dá pra derivar um nome
-  # determinístico do ato de licenciamento (ver #docx_servico_label).
-  #
-  # Preço discriminado (2026-09-28, VESTAS/conversa 63 — o ET pedia "os valores relativos às
-  # principais etapas e estudos"): com `project_pricing.price_breakdown` ligado e pelo menos 2
-  # etapas, sai uma linha por etapa (ProjectPricing#price_breakdown_rows, calculado em Ruby) e uma
-  # linha TOTAL sem número no fim.
+  # Conforme ProjectPricing#price_presentation (2026-09-28, planilha real da Papyrus):
+  # - "total": 1 linha, o preço total. `descricao_fallback` é o texto livre que a IA já escreve
+  #   (descricao_servico) — só entra quando não dá pra derivar o nome do ato de licenciamento.
+  # - "itens": uma linha por item (ProjectPricing#price_rows, calculado em Ruby) + TOTAL.
+  # - "empreendimentos": as linhas por item + "Total – <empreendimento>" de cada um (rateio dos
+  #   itens comuns, ProjectPricing#enterprise_totals) + TOTAL.
+  # Linhas de total saem sem número (e em negrito, ProposalDocxFiller#fill_table!).
   def docx_price_rows(descricao_fallback: nil)
-    unless price_breakdown_active?
-      return [ [ "1", docx_servico_label(fallback: descricao_fallback), format_currency(project_pricing.total_value) ] ]
-    end
+    total = format_currency(project_pricing.total_value)
+    return [ [ "1", docx_servico_label(fallback: descricao_fallback), total ] ] if price_presentation_mode == "total"
 
-    project_pricing.price_breakdown_rows.each_with_index.map { |(label, value), index| [ (index + 1).to_s, label, format_currency(value) ] } +
-      [ [ "", "TOTAL", format_currency(project_pricing.total_value) ] ]
+    rows = project_pricing.price_rows.each_with_index.map { |(label, value), index| [ (index + 1).to_s, label, format_currency(value) ] }
+    if price_presentation_mode == "empreendimentos"
+      rows += project_pricing.enterprise_totals.map { |name, value| [ "", "TOTAL – #{name}", format_currency(value) ] }
+    end
+    rows + [ [ "", "TOTAL", total ] ]
   end
 
-  # Preço sai discriminado no documento: pedido (flag) E a equipe já tem 2+ etapas.
-  def price_breakdown_active?
-    project_pricing.price_breakdown? && project_pricing.price_stages_count >= 2
+  # Forma do Quadro de Preço que de fato sai: cai pra "total" com um item só, e pra "itens" sem 2+
+  # empreendimentos — nunca um quadro aberto de uma linha só.
+  def price_presentation_mode
+    mode = project_pricing.price_presentation
+    return "total" if mode == "total" || project_pricing.pricing_items.size < 2
+    return "itens" if mode == "empreendimentos" && project_pricing.pricing_enterprises.size < 2
+
+    mode
   end
 
   # Nome do serviço pro Quadro de Preço — deriva do(s) ato(s) de licenciamento já identificados
@@ -235,10 +241,8 @@ class Proposal < ApplicationRecord
   def build_with_ai_suggested_team!
     pricing = create_project_pricing!
     suggestion = fetch_ai_team_suggestion
-    apply_team_lines!(pricing, Array(suggestion["linhas"]))
-    ensure_always_included_lines!(pricing)
+    apply_team_suggestion!(pricing, suggestion)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
-    pricing.update!(price_breakdown: true) if suggestion["preco_discriminado"] == true
 
     finalize!(pricing)
   rescue StandardError => e
@@ -274,10 +278,8 @@ class Proposal < ApplicationRecord
     suggestion = fetch_ai_team_suggestion
     return if suggestion.blank?
 
-    apply_team_lines!(pricing, Array(suggestion["linhas"]))
-    ensure_always_included_lines!(pricing)
+    apply_team_suggestion!(pricing, suggestion)
     update!(document_split: suggestion["documentos_separados"] ? "separated" : "combined")
-    pricing.update!(price_breakdown: true) if suggestion["preco_discriminado"] == true
     pricing.recalculate!
   rescue StandardError => e
     Rails.logger.error("suggest_team_if_missing! falhou para conversation #{conversation_id}: #{e.class} #{e.message}")
@@ -671,33 +673,54 @@ class Proposal < ApplicationRecord
         - "deliverable_name" é o entregável/frente de trabalho da pessoa NESTA proposta (ex.:
           "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Coordenação Geral").
         - Um mesmo profissional pode ter mais de uma linha se entregar frentes distintas.
-        - "etapa" é a ETAPA principal do serviço a que a linha pertence (ex.: "Enquadramento e
-          planejamento", "Campanhas de campo", "Elaboração dos estudos", "Protocolo e
-          acompanhamento"). Use de 3 a 6 etapas no total, com nomes curtos e iguais entre as
-          linhas da mesma etapa — é com elas que o preço pode ser aberto por etapa pro cliente.
-          Diretoria/Coordenação que atravessa o projeto inteiro pode ficar com "etapa" vazia.
         - Esforço em duas quantidades:
           #{EFFORT_UNITS_GUIDE}
           Estime pelo porte e complexidade do escopo. Se realmente não houver base, use 0 (o
           consultor ajusta na Tela de Precificação), mas ainda assim inclua a linha.
 
+        ORGANIZE A PROPOSTA EM ITENS, como a Papyrus faz na planilha de precificação: cada item é
+        uma frente do serviço com a SUA equipe e os SEUS campos (idas a campo). Exemplos reais:
+        "Assessoria Ambiental Estratégica", "Estudo Ambiental (EMI) – BESS Irecê", "Participação
+        em Reunião Pública", "Estudos Arqueológicos", "Inventário Florestal", "Elaboração de Planos
+        e Programas". Use de 1 a 12 itens, conforme o escopo — proposta simples pode ter 1 ou 2.
+        - Diretoria/Coordenação/assessoria que atravessa o projeto inteiro vai num item de gestão
+          (ex.: "Gestão e Coordenação do Projeto").
+        - "campos": cada ida a campo do item, com "descricao" (ex.: "Campo Meio Físico – 01
+          geólogo"), "pessoas" (quantas vão), "dias" (dias EM CAMPO, sem contar a viagem),
+          "veiculos" e "tipo_veiculo" ("carro" ou "4x4" — 4x4 pra área rural/sem estrada boa). Item
+          sem ida a campo fica com "campos": []. Não informe valores em R$: o sistema calcula.
+        - EMPREENDIMENTOS: se a proposta cobre MAIS DE UM empreendimento (ex.: três BESS em
+          municípios diferentes), liste os nomes em "empreendimentos" e, em cada item específico
+          de um deles, informe "empreendimento" com o MESMO nome; itens que valem pra todos ficam
+          com "empreendimento": null (o sistema rateia). Um empreendimento só → "empreendimentos": [].
+
         Diga também se o ET ou o TR exige que a proposta técnica e a comercial sejam apresentadas
         como documentos/envelopes SEPARADOS (comum em licitação) — se nenhum falar nada, considere
         que NÃO (documento único).
 
-        Diga também se o ET ou o TR pede os custos DISCRIMINADOS por etapa/estudo (ex.: "custos
-        discriminados", "valores relativos às principais etapas", "preço por item/fase") em vez
-        de só o preço global — "preco_discriminado": true só quando pedir; senão false.
+        E em "apresentacao_preco", como o ET/TR pede o preço: "total" (preço global — o padrão,
+        quando nada é dito), "itens" (custos discriminados por etapa/estudo/item) ou
+        "empreendimentos" (discriminado e com o valor de cada empreendimento).
         #{price_presentation_context}
 
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
 
         {
-          "linhas": [
-            { "professional_id": 12, "deliverable_name": "Geoprocessamento e Cartografia", "etapa": "Elaboração dos estudos", "man_hours": 40, "field_days": 2 }
+          "empreendimentos": [],
+          "itens": [
+            {
+              "nome": "Diagnóstico do Meio Físico",
+              "empreendimento": null,
+              "equipe": [
+                { "professional_id": 12, "deliverable_name": "Diagnóstico do Meio Físico", "man_hours": 40, "field_days": 2 }
+              ],
+              "campos": [
+                { "descricao": "Campo Meio Físico – 01 geólogo", "pessoas": 1, "dias": 2, "veiculos": 1, "tipo_veiculo": "4x4" }
+              ]
+            }
           ],
-          "preco_discriminado": false,
+          "apresentacao_preco": "total",
           "documentos_separados": false,
           "justificativa_documentos_separados": "..."
         }
@@ -834,11 +857,76 @@ class Proposal < ApplicationRecord
       end.sort_by { |marco| marco["periodo"] }.first(6)
     end
 
+    # Grava a sugestão de equipe da IA no formato por ITEM (2026-09-28): empreendimentos, itens
+    # (com equipe e campos) e a forma do quadro de preço. Aceita também o formato antigo, uma lista
+    # plana em "linhas" (vai tudo pro item padrão). Os fixos que a IA não citou entram no primeiro
+    # item (ensure_always_included_lines!); o item padrão que ficou vazio sai.
+    def apply_team_suggestion!(pricing, suggestion)
+      enterprises = Array(suggestion["empreendimentos"]).filter_map { |name| name.to_s.strip.presence }.uniq.each_with_index.to_h do |name, index|
+        [ name.downcase, pricing.pricing_enterprises.find_or_create_by!(name: name) { |e| e.position = index } ]
+      end
+
+      items = Array(suggestion["itens"]).select { |item| item.is_a?(Hash) }
+      if items.empty?
+        apply_team_lines!(pricing, Array(suggestion["linhas"]), pricing.default_item)
+      else
+        next_position = pricing.pricing_items.maximum(:position).to_i + 1
+        items.each_with_index do |data, index|
+          name = data["nome"].to_s.strip.truncate(120).presence || "Item #{index + 1}"
+          item = pricing.pricing_items.detect { |existing| existing.name.casecmp?(name) } ||
+            pricing.pricing_items.create!(name: name, position: next_position + index)
+          item.update!(pricing_enterprise: enterprises[data["empreendimento"].to_s.strip.downcase])
+          apply_team_lines!(pricing, Array(data["equipe"]), item)
+          apply_campaigns!(pricing, item, Array(data["campos"]))
+        end
+        drop_empty_default_item!(pricing)
+      end
+
+      ensure_always_included_lines!(pricing)
+      presentation = suggestion["apresentacao_preco"].to_s
+      presentation = "itens" if presentation.blank? && suggestion["preco_discriminado"] == true
+      pricing.update!(price_presentation: presentation) if ProjectPricing::PRICE_PRESENTATIONS.key?(presentation) && presentation != "total"
+    end
+
+    # Campos sugeridos pela IA: ela diz quem vai, quantos dias e com que veículo; o resto sai de
+    # regra do sistema — dias de deslocamento pela duração da viagem, 2 pedágios e 1 lavagem por
+    # veículo e 2 corridas de Uber quando há estrada (padrão da planilha da Papyrus).
+    def apply_campaigns!(pricing, item, campaigns)
+      road = pricing.distance_km.positive?
+      campaigns.each_with_index do |data, index|
+        next unless data.is_a?(Hash)
+
+        vehicles = [ data["veiculos"].to_i, 1 ].max
+        item.field_campaigns.create!(
+          description: data["descricao"].to_s.strip.truncate(120).presence || "Campo",
+          people: [ data["pessoas"].to_i, 1 ].max,
+          days: [ data["dias"].to_f, 0 ].max,
+          travel_days: pricing.default_travel_days,
+          vehicles: vehicles,
+          vehicle_type: FieldCampaign::VEHICLE_TYPES.key?(data["tipo_veiculo"].to_s) ? data["tipo_veiculo"].to_s : "carro",
+          tolls: road ? 2 * vehicles : 0,
+          washes: vehicles,
+          uber_trips: road ? 2 : 0,
+          position: index
+        )
+      end
+    end
+
+    def drop_empty_default_item!(pricing)
+      pricing.pricing_items.reload.each do |item|
+        next unless item.name == ProjectPricing::DEFAULT_ITEM_NAME && pricing.pricing_items.size > 1
+        next if item.proposal_professionals.exists? || item.field_campaigns.exists? || item.costs.present?
+
+        item.destroy!
+      end
+      pricing.pricing_items.reset
+    end
+
     # Valida cada linha contra o cadastro (professional_id ativo e real; entregável não vazio) e
     # descarta duplicata (mesmo profissional + mesmo entregável). Linha de um profissional FIXO
     # reaproveita a linha-placeholder dele (papel como entregável, 0h — deixada por
-    # build_base_team!) em vez de criar outra ao lado.
-    def apply_team_lines!(pricing, lines)
+    # build_base_team!) em vez de criar outra ao lado — e passa pro item da sugestão.
+    def apply_team_lines!(pricing, lines, item)
       valid = Professional.active.index_by(&:id)
       seen = pricing.proposal_professionals.pluck(:professional_id, :deliverable_name)
         .map { |id, name| [ id, name.to_s.strip.downcase ] }.to_set
@@ -852,7 +940,7 @@ class Proposal < ApplicationRecord
         next if seen.include?(key)
 
         seen << key
-        attrs = { deliverable_name: deliverable, stage: line["etapa"].to_s.strip.truncate(80).presence,
+        attrs = { deliverable_name: deliverable, pricing_item: item,
                   man_hours: effort(line["man_hours"]), field_days: effort(line["field_days"]) }
         placeholder = professional.always_included && pricing.proposal_professionals
           .find_by(professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0)

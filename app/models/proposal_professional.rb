@@ -1,6 +1,16 @@
 class ProposalProfessional < ApplicationRecord
+  # `stage` (rótulo de etapa em texto, 2026-09-28 manhã) virou PricingItem na mesma tarde; a coluna
+  # fica no banco até a migração de limpeza.
+  self.ignored_columns += %w[stage]
+
   belongs_to :project_pricing
   belongs_to :professional
+  belongs_to :pricing_item, optional: true
+
+  # Toda linha pertence a um item — sem item informado, cai no primeiro da proposta.
+  # (Checa o id antes pra não carregar o item de cada linha a cada save — recalculate! salva todas.)
+  before_validation { self.pricing_item = project_pricing&.default_item if pricing_item_id.nil? && pricing_item.nil? }
+  validate :item_belongs_to_same_pricing, if: :pricing_item_id_changed?
 
   validates :deliverable_name, presence: true
   validates :man_hours, :field_days, presence: true, numericality: { greater_than_or_equal_to: 0 }
@@ -24,4 +34,11 @@ class ProposalProfessional < ApplicationRecord
     c2 = field_days * professional.rate_daily
     ((c1 + c2) * bdi * tax_multiplier).round(2)
   end
+
+  private
+    def item_belongs_to_same_pricing
+      return if pricing_item.nil? || pricing_item.project_pricing_id == project_pricing_id
+
+      errors.add(:pricing_item, "não é desta proposta")
+    end
 end

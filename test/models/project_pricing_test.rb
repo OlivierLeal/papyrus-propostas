@@ -6,39 +6,76 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal 15000.0 + 28260.0, pricing.professionals_total
   end
 
-  # priced_pricing tem 1 profissional em campo (biologa, field_days > 0) e vehicles_count
-  # default (1) — por isso o total bate igual ao formato antigo (150+80)*5+500, mesmo a fórmula
-  # agora multiplicando por pessoas/veículos (ver os testes específicos abaixo pra >1 de cada).
-  test "logistics_total combines per-person lodging/meals, per-vehicle rental over the days, plus fuel" do
+  # A fixture tem 1 campo com custo direto de R$ 1.100 (ver field_campaigns.yml) — × BDI 1,20 ×
+  # impostos 1,25 = R$ 1.650 (2026-09-28: a logística passou a levar o multiplicador, como na
+  # planilha da Papyrus).
+  test "logistics_total is the field campaigns of every item, with BDI × taxes" do
     pricing = project_pricings(:priced_pricing)
     assert_equal 1650.0, pricing.logistics_total
   end
 
-  test "field_professionals_count counts only lines with field_days > 0, minimum 1" do
+  # Conferido linha a linha contra a planilha real 26098_Newave Energia_BESS_Rev00.xlsx
+  # (Lauro de Freitas → Ourolândia, 405 km; BDI 1,3 × impostos 1,25; 4x4 R$ 750/dia).
+  test "field campaign cost matches the Papyrus spreadsheet (Físico and Socioeconômico blocks)" do
     pricing = project_pricings(:priced_pricing)
-    assert_equal 1, pricing.field_professionals_count # só a bióloga (field_days: 48)
+    pricing.assign_attributes(distance_km: 405, daily_km: 100, bdi: 1.3, tax_multiplier: 1.25, rental_4x4_per_day: 750,
+      fuel_price_per_liter: 8, vehicle_consumption_km_per_liter: 8, meal_per_person_per_day: 100,
+      lodging_per_person_per_night: 220, toll_price: 30, wash_price: 80, uber_price: 70)
 
-    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(field_days: 10)
-    assert_equal 2, pricing.field_professionals_count
+    fisico = FieldCampaign.new(description: "Físico – 01 geólogo", people: 1, days: 1, travel_days: 2, vehicles: 1,
+      vehicle_type: "4x4", tolls: 2, washes: 1, uber_trips: 2)
+    with_multiplier = fisico.breakdown(pricing).transform_values { |value| (value * pricing.multiplier).round(2) }
+    assert_equal 3656.25, with_multiplier[:vehicle]   # Transporte 3 × 1 × 750
+    assert_equal 1478.75, with_multiplier[:fuel]      # Gasolina 113,75 L × 8
+    assert_equal 487.5, with_multiplier[:meals]       # Alimentação 3 × 100
+    assert_equal 715.0, with_multiplier[:lodging]     # Hospedagem 2 × 220
+    assert_equal 97.5 + 130 + 227.5, with_multiplier[:extras] # pedágio + lavagem + Uber
 
-    pricing.proposal_professionals.update_all(field_days: 0)
-    assert_equal 1, pricing.field_professionals_count # nunca zero
+    socio = FieldCampaign.new(description: "Sócio", people: 2, days: 2, travel_days: 2, vehicles: 1, vehicle_type: "4x4")
+    socio_breakdown = socio.breakdown(pricing).transform_values { |value| (value * pricing.multiplier).round(2) }
+    assert_equal [ 4875.0, 1641.25, 1300.0, 2145.0 ], socio_breakdown.values_at(:vehicle, :fuel, :meals, :lodging)
   end
 
-  test "logistics_total multiplies meals/lodging by the number of field professionals" do
+  test "an item sums its team, campaigns and closed costs; the total adds the external costs" do
     pricing = project_pricings(:priced_pricing)
-    pricing.update!(lodging_per_person_per_night: 100, meal_per_person_per_day: 50, rental_per_day: 0, fuel_total: 0)
-    pricing.proposal_professionals.find_by(deliverable_name: "Coordenação geral").update!(field_days: 10)
-    # 2 pessoas em campo agora (coordenação + bióloga)
+    item = pricing_items(:servico_item)
+    item.update!(costs: [ { "description" => "ART", "quantity" => 2, "unit_value" => 300 } ])
+    pricing.update!(external_costs: [ { "description" => "Taxa", "value" => 100 } ])
+    pricing.recalculate!
 
-    assert_equal (100 + 50) * 2 * 5, pricing.logistics_total
+    assert_equal 900.0, item.reload.costs_total # 600 × 1,5
+    assert_equal 43260 + 1650 + 900, item.total
+    assert_equal 43260 + 1650 + 900 + 100, pricing.reload.total_value
   end
 
-  test "logistics_total multiplies vehicle rental by vehicles_count, not by people" do
+  test "price_rows: one line per item plus the external costs, summing to the total" do
     pricing = project_pricings(:priced_pricing)
-    pricing.update!(rental_per_day: 200, vehicles_count: 3, lodging_per_person_per_night: 0, meal_per_person_per_day: 0, fuel_total: 0)
+    campo = pricing.pricing_items.create!(name: "Campanhas de campo", position: 1)
+    proposal_professionals(:fauna_flora_line).update!(pricing_item: campo)
+    pricing.update!(external_costs: [ { "description" => "ART", "value" => 99.99 } ])
+    pricing.recalculate!
 
-    assert_equal 200 * 3 * 5, pricing.logistics_total
+    rows = pricing.reload.price_rows
+    assert_equal [ "Execução do serviço", "Campanhas de campo", ProjectPricing::EXTERNAL_COSTS_LABEL ], rows.map(&:first)
+    assert_equal [ 15000 + 1650, 28260 ], rows.first(2).map(&:last)
+    assert_equal pricing.total_value, rows.sum(&:last)
+  end
+
+  test "enterprise_totals: own items plus the common ones split equally or proportionally" do
+    pricing = project_pricings(:priced_pricing)
+    irece = pricing.pricing_enterprises.create!(name: "Irecê")
+    brumado = pricing.pricing_enterprises.create!(name: "Brumado", position: 1)
+    common = pricing_items(:servico_item) # 15.000 (coordenação) + 1.650 (campo) = 16.650
+    own_irece = pricing.pricing_items.create!(name: "EMI Irecê", pricing_enterprise: irece, position: 1)
+    proposal_professionals(:fauna_flora_line).update!(pricing_item: own_irece) # 28.260
+    pricing.recalculate!
+
+    assert_equal [ [ "Irecê", 28260 + 8325 ], [ "Brumado", 8325 ] ], pricing.reload.enterprise_totals
+
+    pricing.update!(common_split: "proportional")
+    assert_equal [ [ "Irecê", 28260 + 16650 ], [ "Brumado", 0 ] ], pricing.enterprise_totals
+    assert_equal pricing.total_value, pricing.enterprise_totals.sum(&:last)
+    assert common.persisted?
   end
 
   test "long_distance? is true above the km or hour threshold" do
@@ -55,7 +92,7 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_not pricing.long_distance?
   end
 
-  test "suggest_logistics! fills distance/travel_hours/vehicles/fuel from the resolved destination" do
+  test "suggest_logistics! fills distance/travel_hours from the resolved destination" do
     pricing = project_pricings(:priced_pricing)
     destination = KmzGeometryExtractor::FACTORY.point(-39.5, -14.0)
     fake_result = Logistics::MapboxDirections::Result.new(distance_km: 300.0, duration_hours: 5.0)
@@ -67,23 +104,7 @@ class ProjectPricingTest < ActiveSupport::TestCase
 
     assert_equal 300.0, pricing.reload.distance_km
     assert_equal 5.0, pricing.travel_hours
-    assert_equal 1, pricing.vehicles_count # 1 pessoa em campo, 4 por veículo
-    expected_fuel = ((300.0 * 2 * 1) / pricing.vehicle_consumption_km_per_liter) * pricing.fuel_price_per_liter
-    assert_equal expected_fuel.round(2), pricing.fuel_total.round(2)
-  end
-
-  test "suggest_logistics! does not compute fuel when the distance is long enough to suggest flying" do
-    pricing = project_pricings(:priced_pricing)
-    destination = KmzGeometryExtractor::FACTORY.point(-39.5, -14.0)
-    fake_result = Logistics::MapboxDirections::Result.new(distance_km: 2000.0, duration_hours: 20.0)
-    fake_directions = fake_mapbox_directions(fake_result)
-
-    stub_class_method(Logistics::DestinationResolver, :call, ->(_proposal) { destination }) do
-      stub_class_method(Logistics::MapboxDirections, :new, ->(*) { fake_directions }) { pricing.suggest_logistics! }
-    end
-
-    assert pricing.reload.long_distance?
-    assert_equal 0, pricing.fuel_total
+    assert_equal 2, pricing.default_travel_days # viagem de 5h: campo novo já vem com ida e volta
   end
 
   test "suggest_logistics! does nothing when no destination can be resolved" do
@@ -173,13 +194,6 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_not pricing.valid?
   end
 
-  test "requires vehicles_count to be at least 1" do
-    pricing = project_pricings(:priced_pricing)
-    pricing.vehicles_count = 0
-
-    assert_not pricing.valid?
-  end
-
   test "requires non-negative fuel price, vehicle consumption and lodging rate" do
     pricing = project_pricings(:priced_pricing)
 
@@ -253,19 +267,6 @@ class ProjectPricingTest < ActiveSupport::TestCase
     first = pricing.payment_schedule_amounts.first
     assert_equal "2026-03-25", first["date"]
     assert first["amount"].positive?
-  end
-
-  test "price_breakdown_rows: logística repartida pelas diárias, externos em linha própria, soma bate com o total" do
-    pricing = project_pricings(:priced_pricing)
-    proposal_professionals(:coordenacao_line).update!(stage: nil)
-    proposal_professionals(:fauna_flora_line).update!(stage: "Campanhas de campo")
-    pricing.update!(external_costs: [ { "description" => "ART", "value" => 99.99 } ])
-    pricing.recalculate!
-
-    rows = pricing.reload.price_breakdown_rows
-    assert_equal [ "Campanhas de campo", ProjectPricing::UNSTAGED_LABEL, ProjectPricing::EXTERNAL_COSTS_LABEL ], rows.map(&:first)
-    assert_equal pricing.total_value, rows.sum(&:last)
-    assert_equal 99.99.to_d, rows.last.last
   end
 
   private

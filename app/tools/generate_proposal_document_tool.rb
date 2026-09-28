@@ -195,12 +195,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "especificamente. Formato AAAA-MM-DD.",
     required: false
 
-  param :preco_discriminado, type: "boolean", required: false,
-    desc: "true quando o ET/TR ou o consultor pedir o preço ABERTO por etapa/estudo (ex.: \"custos " \
-          "discriminados\", \"valor de cada etapa\", \"subpreços dos marcos\") em vez de só o total; false " \
-          "quando o consultor pedir pra voltar ao preço total único. Fora disso, NÃO envie (a escolha já " \
-          "feita continua valendo). Os valores de cada etapa são calculados pelo sistema a partir da " \
-          "equipe — você nunca escreve valor nenhum."
+  param :apresentacao_preco, required: false,
+    desc: "Como o Quadro de Preço sai: \"total\" (só o preço global), \"itens\" (aberto por item/etapa, " \
+          "quando o ET/TR ou o consultor pedir custos discriminados) ou \"empreendimentos\" (por item e com o " \
+          "total de cada empreendimento, quando a proposta cobre mais de um). Só envie quando o consultor pedir " \
+          "uma mudança no chat — senão a escolha já feita continua valendo. Os valores são sempre calculados " \
+          "pelo sistema a partir dos itens; você nunca escreve valor nenhum."
 
   param :exportar_cronograma_ms_project, type: "boolean", required: false,
     desc: "true SOMENTE em dois casos: (1) o consultor pediu explicitamente no chat o cronograma em formato " \
@@ -303,7 +303,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # 2026-09, pedido do consultor: antes só o ET/TR (na criação da proposta) ou a tela decidiam
     # se o documento sai combinado ou separado — pedir a mudança no CHAT não tinha efeito nenhum.
     apply_document_split_override!(args[:formato_documento])
-    apply_price_breakdown_override!(args[:preco_discriminado])
+    apply_price_presentation_override!(args[:apresentacao_preco] || ("itens" if args[:preco_discriminado]))
 
     # Guarda o ÚLTIMO conjunto de parâmetros de conteúdo desta geração — usado por
     # .replay_pending_regeneration! pra remontar o .docx sozinho, sem IA, quando o cronograma/
@@ -784,10 +784,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     def schedule_message(schedule_filenames, defaulted_schedule_types, schedule_background_task, failed_schedule_types = [], team_background_task: nil)
       parts = []
-      if @proposal.project_pricing&.price_breakdown? && !@proposal.price_breakdown_active? && team_background_task != :team
-        parts << " O preço discriminado por etapa foi pedido, mas a equipe ainda não tem pelo menos 2 " \
-          "etapas definidas — por isso o quadro saiu com o preço total. Defina a etapa de cada linha " \
-          "na Tela de Precificação (coluna Etapa) e gere de novo."
+      pricing = @proposal.project_pricing
+      if pricing && pricing.price_presentation != "total" && @proposal.price_presentation_mode != pricing.price_presentation && team_background_task != :team
+        parts << if pricing.price_presentation == "empreendimentos" && pricing.pricing_items.size >= 2
+          " O preço por empreendimento foi pedido, mas a proposta tem menos de 2 empreendimentos " \
+            "cadastrados — o quadro saiu aberto só por item. Cadastre os empreendimentos na Tela de " \
+            "Precificação e gere de novo."
+        else
+          " O preço discriminado foi pedido, mas a proposta ainda tem um item só — por isso o quadro " \
+            "saiu com o preço total. Divida o serviço em itens na Tela de Precificação e gere de novo."
+        end
       end
       if team_background_task == :team
         parts << " Estou sugerindo a equipe técnica desta proposta em segundo plano — quando " \
@@ -910,12 +916,14 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # docx_filename_override) — a IA só passa o parâmetro quando ele disse algo explicitamente,
     # nunca inventa. Formato livre tolerado (Date.parse aceita "2026-10-15" e várias variações);
     # data ilegível é ignorada em silêncio, não derruba a geração.
-    # Preço discriminado por etapa (2026-09-28) — só muda quando a IA manda o parâmetro; ausente
-    # mantém o que já foi decidido (pela sugestão de equipe ou pela Tela de Precificação).
-    def apply_price_breakdown_override!(value)
-      return if value.nil?
+    # Forma do Quadro de Preço (2026-09-28) — só muda quando a IA manda o parâmetro; ausente mantém
+    # o que já foi decidido (sugestão de equipe ou Tela de Precificação). `preco_discriminado`
+    # (parâmetro da versão anterior, pode estar no content_json de um replay) vale como "itens".
+    def apply_price_presentation_override!(value)
+      value = value.to_s.strip.downcase
+      return unless ProjectPricing::PRICE_PRESENTATIONS.key?(value)
 
-      @proposal.project_pricing&.update!(price_breakdown: ActiveModel::Type::Boolean.new.cast(value) == true)
+      @proposal.project_pricing&.update!(price_presentation: value)
     end
 
     def apply_schedule_start_date_overrides!(args)
