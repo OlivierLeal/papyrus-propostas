@@ -1345,6 +1345,20 @@ semanal"). Duas mudanças, sem flag nova (vale pros dois fluxos — geração no
   Sr. X") a partir do e-mail do cliente anexado como complementar, e o achado "capa" / "dados
   bancários" (o consultor pediu pra deixar de fora desta rodada).
 
+**Cabeçalho do destinatário: nome do cliente e tratamento do contato (2026-09-28, pedido da
+Charlene com print "o certo é assim").**
+- **Nome do cliente** ("A / NOME DO CLIENTE"): o modelo usava versalete (`<w:smallCaps/>`), que só
+  simula maiúscula por cima do texto como ele veio, e o texto vinha sem acento ("Comercio e
+  Exportacao"). Saiu o versalete dessa linha; `NOME_CLIENTE` é passado com `.upcase` (mantém acento:
+  "COMÉRCIO E EXPORTAÇÃO"); o `param :nome_cliente` pede a razão social exatamente como nos
+  documentos, acentuada. `NOME_CLIENTE_ASSINATURA` não mudou.
+- **Tratamento Sr./Sra.**: o modelo tinha "Att.: Sr." e "Prezado Sr.," fixos (errado pra contato
+  mulher, e "Sr. Sr." quando a IA mandava o tratamento junto do nome). Agora é "Att.:
+  {{CONTATO_CLIENTE}}" e "{{SAUDACAO}},", montados por
+  `GenerateProposalDocumentTool#contact_greeting` a partir do novo `param :tratamento_contato`
+  ("Sr."/"Sra.") ou do tratamento escrito no próprio nome. Sem contato ("A confirmar") → "Prezados
+  Senhores". Tratamento não informado → "Sr." (comportamento antigo).
+
 **"Papyrus" sempre maiúsculo e em negrito, em TODO o corpo do documento (2026-09, pedido do
 consultor).** Até aqui, "PAPYRUS" em negrito só existia em pedaços fixos do modelo, editados um
 por um na mão (ver "CONTRATADA → PAPYRUS em negrito" acima) — o texto que a IA escreve nos

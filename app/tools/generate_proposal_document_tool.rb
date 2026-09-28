@@ -76,8 +76,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     desta ferramenta.
   DESC
 
-  param :nome_cliente, desc: "Razão social do cliente/contratante"
-  param :contato_cliente, desc: "Nome da pessoa de contato no cliente, ou \"A confirmar\" se não souber"
+  param :nome_cliente, desc: "Razão social do cliente/contratante, EXATAMENTE como aparece no ET/documentos, " \
+    "com a acentuação correta (ex.: \"Comércio e Exportação Mineração Bahia Quartzo Ltda\", nunca " \
+    "\"Comercio e Exportacao\"). O sistema coloca em maiúsculas sozinho no cabeçalho."
+  param :contato_cliente, desc: "Nome da pessoa de contato no cliente, SEM tratamento (ex.: \"Lincoln Juvenal\"), " \
+    "ou \"A confirmar\" se não souber"
+  param :tratamento_contato,
+    desc: "\"Sr.\" ou \"Sra.\" para a pessoa de contato — deduza pelo nome ou por como o ET/e-mail se refere a " \
+          "ela. Define \"Att.: Sr./Sra. Nome\" e a saudação \"Prezado Sr.\"/\"Prezada Sra.\". Deixe de fora se " \
+          "não houver contato definido.",
+    required: false
   param :descricao_servico, desc: "Descrição curta do serviço (ex.: \"elaboração de EIA/RIMA do Parque Eólico X\")"
   param :municipios, desc: "Município(s) do empreendimento"
   param :estado, desc: "Sigla do estado (ex.: BA)"
@@ -377,6 +385,30 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
+    # "Att.: Sr. Lincoln Juvenal" + "Prezado Sr." / "Att.: Sra. Maria" + "Prezada Sra." (2026-09-28,
+    # pedido do consultor — o modelo tinha "Sr." e "Prezado Sr." fixos, errados pra contato mulher).
+    # Sem contato definido: "A confirmar" + "Prezados Senhores". Tratamento não informado cai no
+    # "Sr." de sempre (o comportamento antigo do modelo). Tratamento escrito no nome ("Sra. Maria")
+    # também vale, e nunca duplica.
+    CONTACT_TITLE = /\A\s*(sr|sra|srª|dr|dra|eng|engª)\.?\s+/i
+    GREETINGS = { "Sr." => "Prezado Sr.", "Sra." => "Prezada Sra." }.freeze
+
+    def contact_greeting(args)
+      raw = args[:contato_cliente].to_s.strip
+      name = raw.sub(CONTACT_TITLE, "").strip
+      return [ "A confirmar", "Prezados Senhores" ] if name.blank? || name.match?(/\Aa confirmar\z/i)
+
+      title = normalize_title(args[:tratamento_contato]) || normalize_title(raw[CONTACT_TITLE, 1]) || "Sr."
+      [ "#{title} #{name}", GREETINGS.fetch(title) ]
+    end
+
+    def normalize_title(value)
+      case value.to_s.strip.downcase.delete(".")
+      when "sr", "senhor", "dr", "eng" then "Sr."
+      when "sra", "srª", "senhora", "dra", "engª" then "Sra."
+      end
+    end
+
     # A mensagem antiga ("falta o tipo de estudo ser identificado (ET ainda em processamento) ou a
     # revisão ser concluída") juntava duas causas diferentes e apontava pra uma terceira que
     # normalmente já não é verdade. Na conversa 31 (produção) o ET estava "done" havia 15 minutos e
@@ -465,8 +497,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "TITULO_LINHA2" => "TÉCNICA E",
         "TITULO_LINHA3" => "COMERCIAL",
         "DATA_EMISSAO_INICIAL" => Date.current.strftime("%d/%m/%Y"),
-        "NOME_CLIENTE" => args[:nome_cliente],
-        "CONTATO_CLIENTE" => args[:contato_cliente],
+        # Cabeçalho "A / NOME DO CLIENTE": maiúsculas DE VERDADE, com acento (2026-09-28, pedido da
+        # Charlene com print: o modelo usava versalete, que só simula maiúscula por cima do texto
+        # como ele veio — "Comercio e Exportacao" em vez de "COMÉRCIO E EXPORTAÇÃO").
+        "NOME_CLIENTE" => args[:nome_cliente].to_s.upcase,
+        "CONTATO_CLIENTE" => contact_greeting(args).first,
+        "SAUDACAO" => contact_greeting(args).last,
         "DESCRICAO_SERVICO" => args[:descricao_servico],
         "MUNICIPIOS" => args[:municipios],
         "ESTADO" => args[:estado],

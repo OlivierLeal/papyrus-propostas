@@ -60,6 +60,39 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO" # seção comercial sai igual, mesmo em draft
   end
 
+  # 2026-09-28, pedido da Charlene com print: o nome do cliente no cabeçalho sai em MAIÚSCULAS de
+  # verdade, com acento — o modelo usava versalete, que só simulava maiúscula por cima do texto.
+  test "nome do cliente no cabeçalho sai em maiúsculas de verdade, com acento, e sem versalete" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(nome_cliente: "Comércio e Exportação Mineração Bahia Quartzo Ltda"))
+
+    document = @proposal.reload.generated_documents.first
+    assert_includes document_texts(document), "COMÉRCIO E EXPORTAÇÃO MINERAÇÃO BAHIA QUARTZO LTDA"
+    header = document_xml(document)[/<w:p [^>]*>(?:(?!<\/w:p>).)*COMÉRCIO E EXPORTAÇÃO(?:(?!<\/w:p>).)*<\/w:p>/m]
+    assert_not_includes header, "smallCaps"
+  end
+
+  # 2026-09-28: o modelo tinha "Att.: Sr." e "Prezado Sr.," fixos — errado pra contato mulher, e
+  # "Sr. Sr." quando a IA mandava o tratamento junto do nome.
+  test "tratamento do contato: Sr., Sra., escrito no nome, e sem contato" do
+    {
+      { contato_cliente: "Lincoln Juvenal", tratamento_contato: "Sr." } => [ "Att.: Sr. Lincoln Juvenal", "Prezado Sr.," ],
+      { contato_cliente: "Maria Souza", tratamento_contato: "Sra." } => [ "Att.: Sra. Maria Souza", "Prezada Sra.," ],
+      { contato_cliente: "Sra. Maria Souza" } => [ "Att.: Sra. Maria Souza", "Prezada Sra.," ],
+      { contato_cliente: "Sr. Lincoln Juvenal", tratamento_contato: "Sr." } => [ "Att.: Sr. Lincoln Juvenal", "Prezado Sr.," ],
+      { contato_cliente: "A confirmar" } => [ "Att.: A confirmar", "Prezados Senhores," ]
+    }.each do |contact_args, (att, greeting)|
+      @proposal.generated_documents.purge
+      GenerateProposalDocumentTool.new(conversation: @proposal.conversation).execute(**@args.except(:tratamento_contato).merge(contact_args))
+
+      texts = document_texts(@proposal.reload.generated_documents.first)
+      assert_includes texts, att, contact_args.inspect
+      assert_includes texts, greeting, contact_args.inspect
+      assert_not texts.join(" ").include?("Sr. Sr."), contact_args.inspect
+    end
+  end
+
   test "does not warn about price review once the proposal is priced/approved" do
     @proposal.update!(status: "priced", document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
