@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -453,7 +453,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_120000) do
   end
 
   create_table "project_pricings", force: :cascade do |t|
-    t.decimal "bdi", precision: 6, scale: 4, default: "1.2", null: false
+    t.decimal "bdi", precision: 6, scale: 4, default: "1.3", null: false
     t.string "common_split", default: "equal", null: false
     t.datetime "created_at", null: false
     t.decimal "daily_km", precision: 10, scale: 2, default: "100.0", null: false
