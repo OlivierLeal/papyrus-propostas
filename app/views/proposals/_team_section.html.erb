@@ -1,5 +1,6 @@
 <%# Equipe da proposta. locals: form (form principal, #pricing-form), pricing, editable,
     conversation, professionals (ativos, pra busca de "Adicionar à equipe"). %>
+<% days_factors = pricing.days_factors %>
 <% lines = pricing.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, line.id ] } %>
 <% sem_valor = lines.map(&:professional).uniq.select { |pro| pro.rate_man_hour.zero? && pro.rate_daily.zero? } %>
 <% item_options = pricing.pricing_items.map { |item| [ item.name, item.id ] } %>
@@ -80,6 +81,9 @@
               <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
                     class: "input input-sm w-20 text-right tabular-nums" %>
               <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
+              <% extra = line.commute_extra_days(days_factors[line.pricing_item_id]) %>
+              <%= tag.div("+#{decimal_label(extra)} desloc.", class: "text-xs mt-0.5 whitespace-nowrap text-info", hidden: !extra.positive?,
+                    data: { role: "commute-extra" }, title: "Hospedagem longe da área alonga os campos do item — as diárias crescem na mesma proporção") %>
             </td>
             <td class="text-right font-medium text-base-content tabular-nums whitespace-nowrap pt-5" data-role="subtotal"><%= brl(line.subtotal) %></td>
             <td class="text-right pt-4">

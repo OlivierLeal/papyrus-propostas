@@ -29,6 +29,8 @@ class ProposalsController < ApplicationController
       pricing = @proposal.project_pricing
 
       if pricing.update(pricing_params) && @proposal.update(document_split_params)
+        # Local do projeto mudou na tela: refaz distância/dias de viagem (suggest_logistics! já recalcula).
+        pricing.suggest_logistics! if pricing.saved_change_to_ibge_municipality_id?
         anchor = PricingStructure.new(pricing).apply(params[:structure_action])
         pricing.recalculate!
         @proposal.update!(status: "priced")
@@ -150,7 +152,7 @@ class ProposalsController < ApplicationController
 
     def pricing_params
       params.require(:project_pricing).permit(
-        :bdi, :tax_multiplier, :distance_km, :travel_hours, :daily_km,
+        :bdi, :tax_multiplier, :distance_km, :travel_hours, :daily_km, :municipality_query,
         :rental_per_day, :rental_4x4_per_day, :meal_per_person_per_day, :lodging_per_person_per_night,
         :fuel_price_per_liter, :vehicle_consumption_km_per_liter, :toll_price, :wash_price,
         :uber_price, :mateiro_per_day, :epi_price, :common_split, :price_presentation,
@@ -162,7 +164,8 @@ class ProposalsController < ApplicationController
         pricing_items_attributes: [
           :id, :name, :pricing_enterprise_id, { cost_items: %i[ description quantity unit_value ] },
           { field_campaigns_attributes: %i[ id description people days travel_days vehicles vehicle_type
-                                            tolls washes uber_trips mateiro_days epi_count ] }
+                                            tolls washes uber_trips mateiro_days epi_count municipality_query
+                                            lodging_mode lodging_name lodging_price_per_night commute_km commute_hours ] }
         ],
         schedule_items_attributes: %i[ id phase_name activity_name start_period duration_periods milestone ]
       )

@@ -1,4 +1,8 @@
 class ProjectPricing < ApplicationRecord
+  # Local do projeto informado pelo consultor (tela ou chat) — vence KMZ e ET no destino da
+  # logística (Logistics::DestinationResolver).
+  include MunicipalityQuery
+
   # Colunas do modelo antigo de logística única (2026-09-28: a logística passou a ser por campo,
   # dentro de cada item — FieldCampaign). Ficam no banco até uma migração de limpeza, depois de
   # validado em produção; o código não lê nem escreve mais nelas.
@@ -95,8 +99,7 @@ class ProjectPricing < ApplicationRecord
     destination = Logistics::DestinationResolver.call(proposal)
     return unless destination
 
-    result = Logistics::MapboxDirections.new(Logistics::DestinationResolver::PAPYRUS_HQ_POINT, destination).fetch ||
-      straight_line_estimate(destination)
+    result = Logistics::Route.between(Logistics::DestinationResolver::PAPYRUS_HQ_POINT, destination)
     self.distance_km = result.distance_km.round(1)
     self.travel_hours = result.duration_hours.round(1)
     save!
@@ -135,8 +138,9 @@ class ProjectPricing < ApplicationRecord
     # (proposal_professionals.sum) logo após o save arriscaria pegar um cache desatualizado sem
     # os subtotais recém-calculados, dependendo do que já tinha sido carregado antes na request.
     lines = proposal_professionals.includes(:professional).to_a
-    lines.each { |pp| pp.recalculate_subtotal(bdi: bdi, tax_multiplier: tax_multiplier) }
     items = pricing_items.reload.includes(:field_campaigns).to_a
+    factors = items.to_h { |item| [ item.id, item.days_factor ] }
+    lines.each { |pp| pp.recalculate_subtotal(bdi: bdi, tax_multiplier: tax_multiplier, days_factor: factors[pp.pricing_item_id]) }
     ActiveRecord::Base.transaction do
       lines.each(&:save!)
       direct = items.sum { |item| item.campaigns_total + item.costs_total }
@@ -179,9 +183,15 @@ class ProjectPricing < ApplicationRecord
   # Algum subtotal gravado não bate mais com o valor atual de hora-homem/diária do cadastro
   # (ex.: taxa preenchida em Configurações depois de a proposta existir).
   def stale_subtotals?
+    factors = days_factors
     proposal_professionals.includes(:professional).any? do |pp|
-      pp.subtotal != pp.expected_subtotal(bdi: bdi, tax_multiplier: tax_multiplier)
+      pp.subtotal != pp.expected_subtotal(bdi: bdi, tax_multiplier: tax_multiplier, days_factor: factors[pp.pricing_item_id])
     end
+  end
+
+  # PricingItem#days_factor de cada item, por id — pra passar pronto às linhas da equipe.
+  def days_factors
+    pricing_items.includes(:field_campaigns).to_h { |item| [ item.id, item.days_factor ] }
   end
 
   # Valor de cada parcela. A última absorve a diferença de arredondamento, pra soma das parcelas
@@ -239,10 +249,5 @@ class ProjectPricing < ApplicationRecord
       rows = rows.map { |label, value| [ label, value.round(2) ] }
       rows[-1] = [ rows[-1][0], (total_value.to_d - rows[0..-2].sum { |_, value| value }).round(2) ] if rows.any?
       rows
-    end
-
-    def straight_line_estimate(destination)
-      distance_km = Logistics::DestinationResolver::PAPYRUS_HQ_POINT.distance(destination) / 1000.0 * ROAD_FACTOR
-      Logistics::MapboxDirections::Result.new(distance_km: distance_km, duration_hours: distance_km / AVERAGE_SPEED_KMH)
     end
 end

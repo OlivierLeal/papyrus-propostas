@@ -75,6 +75,10 @@ class ProcessEtJob < ApplicationJob
         Campos de lista (diagnosticos, condicionantes, ressalvas, produtos, municipios) devem virar
         UM ACHADO POR ITEM, cada um com o seu próprio trecho — não junte tudo num valor só.
 
+        Em "municipios", escreva cada município no formato "Nome/UF" (ex.: "Remanso/BA"), com a UF
+        quando o documento disser ou deixar claro o estado; para fazenda ou localidade rural, use o
+        município onde ela fica. É daí que o sistema calcula a logística quando não há KMZ.
+
         "natureza" é uma de:
         - "fato": está escrito no documento. Só use quando o trecho comprovar o valor.
         - "inferencia": você concluiu juntando informações, mas o documento não diz isso com todas

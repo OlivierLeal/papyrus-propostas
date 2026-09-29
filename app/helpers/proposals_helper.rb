@@ -29,4 +29,42 @@ module ProposalsHelper
     tag.button(label, type: "submit", name: "structure_action", value: value, class: css, disabled: !editable,
       data: ({ turbo_confirm: confirm } if confirm))
   end
+
+  # Sugestões pro campo de município (datalist): municípios do KMZ e os citados nos achados.
+  def municipality_suggestions(conversation)
+    from_kmz = Array(conversation.geospatial_result&.municipalities).map { |m| "#{m['name']}/#{m['uf']}" }
+    from_findings = conversation.project_findings.active.where(field: "municipios").pluck(:value)
+    (from_kmz + from_findings).map(&:strip).compact_blank.uniq.first(30)
+  end
+
+  # 2.25 → "2h15"; 0.5 → "30 min"
+  def hours_label(hours)
+    minutes = (hours.to_f * 60).round
+    return "#{minutes} min" if minutes < 60
+
+    "#{minutes / 60}h#{(minutes % 60).nonzero?&.to_s&.rjust(2, '0')}"
+  end
+
+  def decimal_label(value)
+    number_with_delimiter(value.to_f.round(1), delimiter: ".", separator: ",").sub(/,0\z/, "")
+  end
+
+  # Texto do deslocamento diário até a hospedagem — mesma conta de FieldCampaign#effective_days
+  # (o pricing_preview_controller.js refaz ao vivo, mesmo texto).
+  def commute_note(campaign, pricing)
+    notes = []
+    if campaign.daily_commute_hours.positive?
+      text = "Deslocamento de #{hours_label(campaign.commute_hours)} por trecho: #{decimal_label(campaign.productive_hours)}h úteis na jornada de " \
+             "#{FieldCampaign::WORKDAY_HOURS}h → #{decimal_label(campaign.days)} → #{decimal_label(campaign.effective_days)} dias em campo"
+      text += " (+#{decimal_label(campaign.extra_days)}; as diárias da equipe do item crescem junto)" if campaign.extra_days.positive?
+      notes << tag.span("#{text}.", class: "text-base-content/60")
+    end
+    if campaign.commute_warning?
+      notes << tag.span(" Mais de #{FieldCampaign::COMMUTE_WARNING_HOURS}h por trecho — ir e voltar todo dia é inviável; procure hospedagem mais perto da área ou alojamento.", class: "text-warning")
+    end
+    if campaign.lodging_pending?
+      notes << tag.span(" Hospedagem não escolhida — usando #{brl(pricing.lodging_per_person_per_night)}/noite padrão.", class: "text-warning")
+    end
+    safe_join(notes)
+  end
 end

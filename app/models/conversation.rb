@@ -742,6 +742,7 @@ class Conversation < ApplicationRecord
       <<~TEXT
         #{PROPOSAL_STATE_MARKER} (gerado pelo sistema, sempre reflete o estado real — não pergunte
         isso ao consultor, apenas use como fato já resolvido):
+        - Local da logística: #{logistics_location_text(Logistics::DestinationResolver.for_conversation(self))}
         - A proposta AINDA NÃO FOI CRIADA no sistema, mas isso NÃO bloqueia pedir a técnica — a
           ferramenta generate_proposal_document cria a proposta sozinha (com a equipe já sugerida
           pela IA) na hora que você a chama de verdade, sem precisar que o consultor clique em nada
@@ -750,6 +751,27 @@ class Conversation < ApplicationRecord
           uma proposta pode ter vários, ou nenhum (proposta de acompanhamento); não existe
           pendência aqui: chame a ferramenta (não invente "clique em Avançar para Precificação").
       TEXT
+    end
+
+    # De onde vem o destino da logística (Logistics::DestinationResolver) — sem ele não há distância,
+    # combustível nem busca de hospedagem, e a IA precisa saber que pode resolver isso pelo chat.
+    def logistics_location_text(destination)
+      return "#{destination.label} (fonte: #{destination.source})" if destination
+
+      "NÃO DEFINIDO — sem KMZ e sem município inequívoco (com UF) nos documentos. Se o ET/TR, um " \
+        "complementar ou o consultor indicar onde fica o projeto, chame set_project_location com " \
+        "\"Município/UF\"; se não souber o município ou a UF com segurança, pergunte ao consultor."
+    end
+
+    def campaign_lodging_text(campaign)
+      label = case campaign.lodging_mode
+      when "hotel" then "#{campaign.lodging_name}#{" (#{campaign.lodging_city})" if campaign.lodging_city.present?}, R$ #{campaign.lodging_price_per_night}/noite"
+      when "alojamento" then "#{campaign.lodging_name}, R$ #{campaign.lodging_price_per_night}/noite"
+      when "cliente" then "fornecida pelo cliente"
+      else "a definir na Tela de Precificação (usando o valor padrão)"
+      end
+      label += ", #{campaign.commute_hours}h por trecho até a área" if campaign.commute_hours.positive?
+      label
     end
 
     # Proposta aprovada e reaberta pra ajuste (Proposal#reopen!) — a IA precisa saber que ela voltou a
@@ -765,10 +787,14 @@ class Conversation < ApplicationRecord
 
     def proposal_state_text
       pricing = proposal.project_pricing
-      items = pricing.pricing_items.includes(:pricing_enterprise, :field_campaigns, proposal_professionals: :professional).to_a
+      items = pricing.pricing_items.includes(:pricing_enterprise, field_campaigns: :ibge_municipality, proposal_professionals: :professional).to_a
       lines = items.map do |item|
-        team = item.proposal_professionals.map { |pp| "    - #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s))" }
-        campaigns = item.field_campaigns.map { |c| "    - campo \"#{c.description}\": #{c.people} pessoa(s), #{c.days} dia(s) em campo, #{c.vehicles} #{c.vehicle_type}" }
+        factor = item.days_factor
+        team = item.proposal_professionals.map do |pp|
+          extra = pp.commute_extra_days(factor)
+          "    - #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s)#{" + #{extra} por deslocamento até a hospedagem" if extra.positive?})"
+        end
+        campaigns = item.field_campaigns.map { |c| "    - campo \"#{c.description}\": #{c.people} pessoa(s), #{c.days} dia(s) em campo#{" (#{c.effective_days} com o deslocamento diário)" if c.extra_days.positive?}, #{c.vehicles} #{c.vehicle_type}#{", local #{c.ibge_municipality.label}" if c.ibge_municipality}, hospedagem: #{campaign_lodging_text(c)}" }
         [ "  Item \"#{item.name}\"#{" (empreendimento #{item.pricing_enterprise.name})" if item.pricing_enterprise}:", *team, *campaigns ].join("\n")
       end.join("\n")
 
@@ -786,6 +812,7 @@ class Conversation < ApplicationRecord
         #{lines.presence || "  (nenhuma linha definida ainda)"}
         - Empreendimentos: #{pricing.pricing_enterprises.map(&:name).join(", ").presence || "um só"}
         - Quadro de preço no documento: #{ProjectPricing::PRICE_PRESENTATIONS.fetch(proposal.price_presentation_mode)}
+        - Local da logística: #{logistics_location_text(Logistics::DestinationResolver.resolve(proposal))}
         - Logística: #{pricing.distance_km} km até o projeto, R$ #{pricing.logistics_total} nos campos#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
         - Custos externos: #{external_costs.presence || "nenhum lançado"}
         - Preço total calculado: R$ #{pricing.total_value}

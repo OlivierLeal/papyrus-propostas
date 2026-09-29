@@ -1,0 +1,115 @@
+<%# Local e hospedagem de um campo (2026-09-29): município próprio, hospedagem escolhida (busca na
+    Stay22, alojamento digitado ou fornecida pelo cliente) e deslocamento diário até a área, que
+    alonga os dias de campo (FieldCampaign#effective_days). Buscar/escolher são structure_action
+    (PricingStructure) — salvam o que foi digitado antes, sem form aninhado.
+    locals: campaign_form, campaign, pricing, editable %>
+<% mode_options = [ [ "A definir (valor padrão)", "" ] ] + FieldCampaign::LODGING_MODES.map { |key, label| [ label, key ] } %>
+<div class="mt-3 pt-3 border-t border-base-300 grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)]">
+  <div>
+    <label class="flex flex-col gap-0.5 text-[11px] text-base-content/60">
+      Local do campo
+      <%= campaign_form.text_field :municipality_query, disabled: !editable, autocomplete: "off", list: "municipios-proposta",
+            placeholder: "Mesmo do projeto", class: "input input-xs w-full" %>
+    </label>
+    <p class="text-[11px] text-base-content/50 mt-1">
+      <% if campaign.distance_km %>
+        Sede → local: <%= decimal_label(campaign.distance_km) %> km (~<%= hours_label(campaign.travel_hours) %>).
+      <% else %>
+        Usa o local e a distância do projeto.
+      <% end %>
+    </p>
+  </div>
+
+  <div>
+    <div class="flex flex-wrap items-end gap-x-3 gap-y-2">
+      <label class="flex flex-col gap-0.5 text-[11px] text-base-content/60">
+        Hospedagem
+        <%= campaign_form.select :lodging_mode, mode_options, {}, disabled: !editable, class: "select select-xs w-52", data: { field: "lodging_mode" } %>
+      </label>
+      <label class="flex flex-col gap-0.5 text-[11px] text-base-content/60">
+        Nome / descrição
+        <%= campaign_form.text_field :lodging_name, disabled: !editable, autocomplete: "off", placeholder: "Ex.: casa alugada na vila", class: "input input-xs w-48" %>
+      </label>
+      <label class="flex flex-col gap-0.5 text-[11px] text-base-content/60">
+        R$/noite (pessoa)
+        <%= campaign_form.number_field :lodging_price_per_night, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+              class: "input input-xs w-24 text-right", data: { field: "lodging_price_per_night" } %>
+      </label>
+      <label class="flex flex-col gap-0.5 text-[11px] text-base-content/60">
+        Até a área (km)
+        <%= campaign_form.number_field :commute_km, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+              class: "input input-xs w-20 text-right", data: { field: "commute_km" } %>
+      </label>
+      <label class="flex flex-col gap-0.5 text-[11px] text-base-content/60">
+        Até a área (h/trecho)
+        <%= campaign_form.number_field :commute_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+              class: "input input-xs w-20 text-right", data: { field: "commute_hours" } %>
+      </label>
+      <% if editable %>
+        <%= structure_button("Buscar hospedagem", "search_lodging:#{campaign.id}", editable: editable, css: "btn btn-outline btn-primary btn-xs") %>
+      <% end %>
+    </div>
+
+    <p class="text-[11px] mt-2" data-role="commute-note"
+       data-workday="<%= FieldCampaign::WORKDAY_HOURS %>" data-tolerance="<%= FieldCampaign::COMMUTE_TOLERANCE_HOURS %>"
+       data-warning="<%= FieldCampaign::COMMUTE_WARNING_HOURS %>" data-min-productive="<%= FieldCampaign::MIN_PRODUCTIVE_HOURS %>"><%= commute_note(campaign, pricing) %></p>
+
+    <% if campaign.lodging_mode == "hotel" && campaign.lodging_url.present? %>
+      <p class="text-[11px] text-base-content/60 mt-1">
+        Escolhida: <%= link_to campaign.lodging_name, campaign.lodging_url, target: "_blank", rel: "noopener", class: "link link-primary" %>
+        <%= "(#{campaign.lodging_city})" if campaign.lodging_city.present? %> —
+        <% if campaign.precise_area?(pricing) %>
+          trajeto até a área do KMZ calculado por estrada.
+        <% elsif campaign.commute_km.zero? %>
+          na própria cidade do local; sem KMZ não dá pra saber a distância até a área de trabalho — informe acima se souber.
+        <% else %>
+          trajeto estimado até o centro do município (sem KMZ) — ajuste se a área de trabalho ficar em outro ponto.
+        <% end %>
+      </p>
+    <% end %>
+
+    <% if campaign.lodging_searched_at %>
+      <div class="mt-2">
+        <p class="text-[11px] text-base-content/50">
+          Busca de <%= l(campaign.lodging_searched_at, format: "%d/%m %H:%M") %> (Stay22/Booking, 1 adulto, preço médio por noite).
+          Distância e tempo até a área são estimativas — ao escolher, o sistema calcula a rota.
+        </p>
+        <% if campaign.lodging_search_note.present? %>
+          <p class="text-[11px] text-warning mt-0.5"><%= campaign.lodging_search_note %></p>
+        <% end %>
+        <% if campaign.lodging_options.any? %>
+          <div class="overflow-x-auto mt-1 max-h-72 overflow-y-auto rounded-box border border-base-300">
+            <table class="table table-xs">
+              <thead>
+                <tr class="text-[11px] uppercase text-base-content/50"><th>Hospedagem</th><th>Cidade</th><th class="text-right">R$/noite</th><th class="text-right">Até a área</th><th></th></tr>
+              </thead>
+              <tbody>
+                <% campaign.lodging_options.each do |option| %>
+                  <% chosen = campaign.lodging_mode == "hotel" && campaign.lodging_url == option["url"] %>
+                  <tr class="<%= "bg-primary/5" if chosen %>">
+                    <td class="min-w-48">
+                      <%= link_to option["name"], option["url"], target: "_blank", rel: "noopener", class: "link link-hover" %>
+                      <% if option["kind"].present? %><span class="text-base-content/40">· <%= option["kind"] == "Hotel" ? "Hotel" : "Hospedagem" %></span><% end %>
+                    </td>
+                    <td class="whitespace-nowrap"><%= option["city"] %></td>
+                    <td class="text-right tabular-nums"><%= brl(option["price_per_night"]) %></td>
+                    <td class="text-right tabular-nums whitespace-nowrap <%= "text-warning" if option["commute_hours"].to_f > FieldCampaign::COMMUTE_WARNING_HOURS %>">
+                      ~<%= decimal_label(option["commute_km"]) %> km · <%= hours_label(option["commute_hours"]) %>
+                    </td>
+                    <td class="text-right">
+                      <% if chosen %>
+                        <span class="badge badge-soft badge-primary badge-xs">Escolhida</span>
+                      <% elsif editable %>
+                        <%= structure_button("Escolher", "choose_lodging:#{campaign.id}:#{option['id']}", editable: editable) %>
+                      <% end %>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>

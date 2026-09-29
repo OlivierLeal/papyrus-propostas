@@ -54,6 +54,49 @@ class Logistics::DestinationResolverTest < ActiveSupport::TestCase
     assert_nil Logistics::DestinationResolver.call(proposal)
   end
 
+  # Sem KMZ (2026-09-29): o local vem do ET/TR/chat, via achados "municipios".
+  test "without KMZ, uses an unambiguous municipality from the findings" do
+    create_municipality(name: "Remanso", uf: "BA", lon: -42.2, lat: -9.7)
+    conversation = conversations(:reviewing_conversation)
+    conversation.project_findings.create!(field: "municipios", value: "Remanso/BA", nature: "fato", source_kind: "et")
+
+    destination = Logistics::DestinationResolver.resolve(Proposal.new(conversation: conversation))
+
+    assert_equal "Remanso/BA", destination.label
+    assert_equal "Pedido Técnico do Estudo (ET)", destination.source
+  end
+
+  test "ignores an ambiguous municipality name without UF" do
+    create_municipality(name: "Bom Jesus", uf: "PI", lon: -44.4, lat: -9.1)
+    create_municipality(name: "Bom Jesus", uf: "RS", lon: -50.4, lat: -28.7)
+    conversation = conversations(:reviewing_conversation)
+    conversation.project_findings.create!(field: "municipios", value: "Bom Jesus", nature: "fato", source_kind: "et")
+
+    assert_nil Logistics::DestinationResolver.call(Proposal.new(conversation: conversation))
+  end
+
+  test "the consultant's finding wins over the ET's" do
+    create_municipality(name: "Remanso", uf: "BA", lon: -42.2, lat: -9.7)
+    create_municipality(name: "Irecê", uf: "BA", lon: -41.9, lat: -11.3)
+    conversation = conversations(:reviewing_conversation)
+    conversation.project_findings.create!(field: "municipios", value: "Remanso/BA", nature: "fato", source_kind: "et")
+    conversation.project_findings.create!(field: "municipios", value: "Irecê/BA", nature: "fato", source_kind: "consultor")
+
+    assert_equal "Irecê/BA", Logistics::DestinationResolver.resolve(Proposal.new(conversation: conversation)).label
+  end
+
+  test "the project location typed by the consultant wins over the KMZ" do
+    irece = create_municipality(name: "Irecê", uf: "BA", lon: -41.9, lat: -11.3)
+    proposal = proposals(:priced_proposal)
+    proposal.conversation.create_geospatial_result!(geometry_type: "polygon", centroid: FACTORY.point(-39.5, -14.0))
+    proposal.project_pricing.update!(ibge_municipality: irece)
+
+    destination = Logistics::DestinationResolver.resolve(proposal)
+
+    assert_equal "Irecê/BA", destination.label
+    assert_equal "informado pelo consultor", destination.source
+  end
+
   private
     def square(lon0, lat0, size)
       ring = [

@@ -44,7 +44,8 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     # A de memória (RememberForFutureProposalsTool) e a de aprender com versão revisada
     # (LearnFromRevisedProposalTool) valem em qualquer conversa: o consultor pode corrigir a IA
     # ou anexar uma versão final revisada a qualquer momento.
-    assert_equal [ GenerateProposalDocumentTool, RememberForFutureProposalsTool, LearnFromRevisedProposalTool ], with_tool_calls
+    # SetProjectLocationTool também: o local pode ser definido antes de a proposta existir.
+    assert_equal [ GenerateProposalDocumentTool, SetProjectLocationTool, RememberForFutureProposalsTool, LearnFromRevisedProposalTool ], with_tool_calls
   end
 
   test "registers both the document-generation and external-cost tools when there is a proposal" do

@@ -2,7 +2,7 @@
     Tudo dentro do #pricing-form; adicionar/remover são botões name="structure_action" (ver
     PricingStructure) — salvam o que foi digitado antes, sem form aninhado.
     locals: form, pricing, editable %>
-<% items = pricing.pricing_items.includes(:field_campaigns, proposal_professionals: :professional).to_a %>
+<% items = pricing.pricing_items.includes({ field_campaigns: :ibge_municipality }, proposal_professionals: :professional).to_a %>
 <% enterprises = pricing.pricing_enterprises.to_a %>
 <% enterprise_options = [ [ "Comum a todos", "" ] ] + enterprises.map { |enterprise| [ enterprise.name, enterprise.id ] } %>
 
@@ -18,6 +18,17 @@
       <%= structure_button("+ Item", "add_item", editable: editable, css: "btn btn-outline btn-primary btn-sm") %>
     <% end %>
   </div>
+
+  <% pending = items.flat_map(&:field_campaigns).select(&:lodging_pending?) %>
+  <% if pending.any? %>
+    <div class="mx-6 mb-4 alert alert-warning alert-soft text-xs py-2">
+      <span>
+        <%= pending.size == 1 ? "1 campo com pernoite está" : "#{pending.size} campos com pernoite estão" %> sem hospedagem escolhida
+        (<%= pending.map(&:description).to_sentence %>) — usando o valor padrão de <%= brl(pricing.lodging_per_person_per_night) %>/noite.
+        Busque e escolha a hospedagem, informe um alojamento ou marque como fornecida pelo cliente.
+      </span>
+    </div>
+  <% end %>
 
   <%# Empreendimentos %>
   <div id="empreendimentos" class="border-t border-base-300 px-6 py-4 bg-base-200/30">
@@ -105,7 +116,9 @@
           <% if item.field_campaigns.any? %>
             <div class="flex flex-col gap-2 mt-2">
               <%= item_form.fields_for :field_campaigns, item.field_campaigns do |campaign_form| %>
-                <div class="rounded-box border border-base-300 p-3" data-pricing-preview-target="campaign" data-item-id="<%= item.id %>">
+                <% campaign = campaign_form.object %>
+                <div id="campo-<%= campaign.id %>" class="rounded-box border border-base-300 p-3 scroll-mt-20" data-pricing-preview-target="campaign"
+                     data-item-id="<%= item.id %>" data-distance-km="<%= campaign.distance_km&.to_f %>">
                   <%= campaign_form.hidden_field :id %>
                   <div class="flex items-center gap-2">
                     <%= campaign_form.text_field :description, disabled: !editable, required: true, class: "input input-sm grow", aria: { label: "Descrição do campo" } %>
@@ -133,12 +146,14 @@
                       </label>
                     <% end %>
                   </div>
+                  <%= render "campaign_lodging", campaign_form: campaign_form, campaign: campaign, pricing: pricing, editable: editable %>
                 </div>
               <% end %>
             </div>
             <p class="text-[11px] text-base-content/50 mt-1">
-              Custo = veículos × (dias em campo + viagem) × diária do veículo + combustível (<%= number_with_delimiter(pricing.distance_km, delimiter: ".", separator: ",") %> km ida e volta + <%= number_with_delimiter(pricing.daily_km.to_f, delimiter: ".", separator: ",") %> km/dia em campo)
+              Custo = veículos × (dias em campo + viagem) × diária do veículo + combustível (distância da sede ida e volta + <%= number_with_delimiter(pricing.daily_km.to_f, delimiter: ".", separator: ",") %> km/dia em campo + ida e volta diária até a hospedagem)
               + alimentação por pessoa-dia + hospedagem por pessoa-noite + extras, × BDI × impostos.
+              Deslocamento acima de <%= hours_label(FieldCampaign::COMMUTE_TOLERANCE_HOURS) %> por trecho tira horas da jornada de <%= FieldCampaign::WORKDAY_HOURS %>h e alonga os dias em campo (e as diárias da equipe do item).
             </p>
           <% else %>
             <p class="text-xs text-base-content/50 mt-1">Sem ida a campo.</p>

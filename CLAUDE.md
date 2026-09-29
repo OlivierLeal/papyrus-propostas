@@ -103,7 +103,7 @@ chips aparecem juntos; remover um mantém o outro.
 | IA / LLM | Claude API (Anthropic) via gem `ruby_llm` — lê PDF/DOCX nativamente |
 | Geoespacial | RGeo + GDAL para parsing de KMZ/KML e cálculos; PostGIS para queries de sobreposição |
 | Mapas | Mapbox Static API — gera imagem estática do polígono para inserir no PDF |
-| Hospedagem | Stay22 API (`api.stay22.com/v2/accommodations`) — busca opções de acomodação pelo município identificado no ET/TR; consultor escolhe a melhor opção no chat (ver seção 5) |
+| Hospedagem | Stay22 API (`api.stay22.com/v2/accommodations`, header `X-API-Key`, preços da Booking) — busca hospedagem por CAMPO em volta da área (e das cidades vizinhas, raio da Stay22 vai só até ~100 km); consultor escolhe na Tela de Precificação (ver seção 5, "Hospedagem por campo") |
 | Geração de documento | **DOCX** (não PDF — decisão revista), preenchendo um modelo `.docx` real da Papyrus via manipulação direta do XML interno (gem `rubyzip`, já dependência do projeto pelo KMZ) — ver seção 8 |
 | Infra | VPS (Hostinger), deploy via Kamal ou Docker, CI/CD via GitHub Actions |
 
@@ -230,7 +230,7 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
    - `C5` = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta em `external_costs` (jsonb)
    - `C6` = TOTAL = Σ profissionais + logística + externos
 4. Parâmetros do sistema: tabela de profissionais com taxa/dia por escritório e campo (`professionals`); BDI e impostos (`tax_multiplier`) editáveis por proposta em `project_pricings` (defaults 1.20/1.25). **Não existe mais uma tabela de configuração de logística** (`logistics_configs` foi removida) — os parâmetros de logística (distância, dias de campo, nº de veículos, aluguel/veículo/dia, alimentação/pessoa/dia, hospedagem/pessoa/noite, preço do combustível, consumo do veículo) são campos digitados/editáveis direto na Tela de Precificação por proposta, com distância/veículos/combustível **sugeridos automaticamente** (ver abaixo).
-5. **Hospedagem**: desde 2026-09, entra no cálculo automático via uma diária média configurável por pessoa (`lodging_per_person_per_night`) — não depende do Stay22 (ver abaixo, ainda greenfield). O Stay22 continua fora de escopo (chave de API pendente); quando existir, é uma segunda fonte de referência pro consultor ajustar essa diária, não substitui o campo.
+5. **Hospedagem**: escolhida POR CAMPO desde 2026-09-29 (ver "Hospedagem por campo" abaixo) — hotel da busca na Stay22, alojamento/casa digitado, ou fornecida pelo cliente. `lodging_per_person_per_night` virou só o valor PADRÃO pra campo sem escolha (a tela avisa).
 6. Saídas: tabela de preço auditável por linha, cronograma de desembolso por parcelas (`payment_schedule_amounts`, default 30/60/5/5), dados prontos para o PDF. Proposta só é editável enquanto `status != "approved"`; aprovar (`proposals#approve`) trava os campos e conclui a conversa.
 
 **Precificação por ITEM, com logística por campo e vários empreendimentos (2026-09-28, a partir da
@@ -315,6 +315,53 @@ HTTP à Mapbox Directions, nunca inferência de IA sobre dinheiro.
   muito distante (Manaus/AM) → 4.884,7km/78,5h, `long_distance?` true, `fuel_total` zerado; sem
   `MAPBOX_API_KEY`, cai pro fallback de linha reta sem erro (394,8km pro mesmo ponto que deu
   498,7km por estrada — a subestimativa esperada do fallback).
+
+**Hospedagem por campo, local por campo e deslocamento diário (2026-09-29, pedido do consultor:
+"ver hospedagem com Stay22, aluguel de carro e tudo mais"; "áreas remotas não vão ter hospedagem";
+"quero que eles escolham a hospedagem"; "sem KMZ o local vem do ET ou do chat").**
+- **Local do projeto sem KMZ** — `Logistics::DestinationResolver.resolve` devolve `Destination(point,
+  label, source)`, nesta ordem: `project_pricings.ibge_municipality` (digitado na tela ou dito no chat)
+  → centroide do KMZ → município do KMZ → achados `"municipios"` (ET/TR/complementar/consultor) que
+  `IbgeMunicipality.lookup` resolve SEM ambiguidade ("Nome/UF", "Nome (UF)" ou nome único no país).
+  Consultor: vale o mais recente; documento: o primeiro citado. ET/TR agora pedem `municipios` como
+  "Nome/UF". Medido no dev: 12 de 14 conversas sem KMZ passaram a ter local (as 2 que sobram só dizem
+  "Bahia"/"offshore").
+- **`SetProjectLocationTool`** (chat da proposta, sempre registrada): a IA interpreta o texto ("zona rural
+  de Morro do Chapéu") e passa `"Município/UF"` (+ `campo` opcional); o sistema resolve no IBGE (nome
+  ambíguo → erro listando as UFs), grava achado `municipios`/`consultor` (vale mesmo antes da proposta
+  existir) e, com proposta, `project_pricings.ibge_municipality` + `suggest_logistics!`. O snapshot mostra
+  "Local da logística: X (fonte)" ou "NÃO DEFINIDO — chame set_project_location". Verificado ao vivo
+  (Bedrock): a IA chamou sozinha e a distância foi recalculada.
+- **`FieldCampaign` ganhou local e hospedagem**: `ibge_municipality` (em branco = local do projeto;
+  mudar recalcula sede→local via `Logistics::Route`, sugere dias de viagem e descarta a busca/hotel
+  anteriores), `lodging_mode` (`nil` = a definir/valor padrão, `hotel`, `alojamento` com nome+valor,
+  `cliente` = zero), `lodging_options` (última busca), `commute_km`/`commute_hours` (por trecho,
+  hospedagem → área, editáveis). `MunicipalityQuery` (concern) trata o texto digitado nos dois models;
+  município não encontrado é erro de validação.
+- **Busca (`Lodging::Search`, botão "Buscar hospedagem" = `structure_action search_lodging:ID`)**: 30 km →
+  100 km (máximo da Stay22) → cidades entre 100 e 250 km (`IbgeMunicipality.nearest_centroids`, em
+  threads). 3 noites a partir do início do cronograma (ou do mês que vem), 1 adulto, preço/noite = menor
+  fornecedor ÷ noites. Distância até a área é ESTIMADA (linha reta × 1,3); ao escolher
+  (`choose_lodging:ID:OPÇÃO`) calcula a rota real. **Sem KMZ a área é o centroide do município** — hotel
+  na própria cidade fica com deslocamento 0 (achado ao vivo: pousada no centro de Remanso dava 1h12 até
+  o centroide) e a tela diz que é estimativa.
+- **Deslocamento diário alonga o campo** (`FieldCampaign#effective_days`, jornada `WORKDAY_HOURS = 8`):
+  acima de `COMMUTE_TOLERANCE_HOURS` (30 min por trecho), horas úteis = 8 − ida e volta, dias = ⌈dias ×
+  8 ÷ horas úteis⌉ (5 dias a 2h/trecho → 10). Veículo, alimentação e hospedagem usam os dias ajustados;
+  combustível soma `2 × commute_km` por dia. Acima de `COMMUTE_WARNING_HOURS` (2h, decisão do consultor)
+  a tela diz que é inviável. **As diárias da equipe do item crescem junto** (decisão do consultor):
+  `PricingItem#days_factor` (Σ dias ajustados ÷ Σ planejados) → `ProposalProfessional#commute_extra_days`
+  = diárias × (fator − 1), pra cima em meia diária; `field_days` continua sendo o PLANEJADO, o acréscimo é
+  derivado (aparece "+N desloc." na linha). `recalculate!`/`stale_subtotals?` passam o fator pronto
+  (`ProjectPricing#days_factors`) — sem preload de `pricing_item` por linha (Bullet).
+- **Fornecida pelo cliente** vira obrigação da CONTRATANTE no `.docx` por regra do sistema
+  (`GenerateProposalDocumentTool::LODGING_OBLIGATION`), nunca dependendo da IA.
+- Prévia ao vivo refaz tudo em JS (`pricing_preview_controller.js`: `effectiveDays`, `lodgingRate`,
+  `updateCommuteNote`, fator por item antes das linhas); `test/system/pricing_preview_test.rb` trava que
+  bate com o servidor.
+- **Ainda não feito**: aluguel de carro continua com diária digitada (não existe API pública de locadora
+  — ideia: tabela de referência por região mantida pela Papyrus); preço do combustível pela ANP por
+  município (dado público semanal) ainda não integrado.
 
 **Busca de profissional na Tela de Precificação, em vez de `<select>` longo (2026-09, pedido do
 consultor a partir de uma referência de outro app — "algo mais esperto pra puxar os
@@ -2362,7 +2409,7 @@ o código da aplicação executa a busca. Cobre exatamente o buraco que o CAL de
   FIELDS`, decidindo se ele é `comparable:` (entra na detecção de divergência) — lista acumulativa
   nunca é. Decisão do consultor sobre divergência é sempre um achado novo, nunca um update no que
   o documento disse.
-- Stay22 (hospedagem, ver seção 5): chave de API pendente — configurar em `.env`/`ANTHROPIC`-style (`STAY22_API_KEY`) ou `Rails.application.credentials`, nunca hardcoded. Enquanto a chave não estiver configurada, a integração fica com o job/estrutura prontos mas sem chamada real, mesmo padrão usado para Anthropic/Mapbox.
+- Stay22 (hospedagem, ver seção 5): chave em `STAY22_API_KEY` no `.env`, enviada no header `X-API-Key` (Bearer e query param dão 401). `Lodging::Stay22Client.configured?` — sem chave, a busca avisa e o campo segue com alojamento digitado/valor padrão.
 - CAL/Ius Natura (normas legais, ver seção 11.2): credenciais em `CAL_EMAIL`/`CAL_PASSWORD` no `.env`, nunca hardcoded — não é chave de API, é login real (usuário/senha) da conta que a Papyrus assina. `Cal::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22.
 - Busca na internet (Tavily, ver seção 11.3): chave em `TAVILY_API_KEY` no `.env`, nunca hardcoded. `WebSearch::Client.configured?` decide se a ferramenta é registrada, mesmo padrão de "sem credencial, sem ferramenta" do Stay22/CAL.
 - **Pacotes de sistema no servidor (VPS Ubuntu, deploy manual)**: além de Ruby/Postgres/PostGIS,

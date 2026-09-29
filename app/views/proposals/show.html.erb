@@ -63,6 +63,9 @@
     <div class="flex flex-col gap-6 min-w-0">
       <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, id: "pricing-form", class: "flex flex-col gap-6" do |form| %>
         <%= render "team_section", form: form, pricing: pricing, editable: editable, conversation: @conversation, professionals: @professionals %>
+        <datalist id="municipios-proposta">
+          <% municipality_suggestions(@conversation).each do |label| %><option value="<%= label %>"></option><% end %>
+        </datalist>
         <%= render "items_section", form: form, pricing: pricing, editable: editable %>
         <%= render "parameters_section", form: form, pricing: pricing, editable: editable %>
         <%= render "payment_section", form: form, pricing: pricing, proposal: @proposal, editable: editable %>

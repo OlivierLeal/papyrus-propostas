@@ -21,6 +21,13 @@ class PricingItem < ApplicationRecord
     field_campaigns.sum { |campaign| campaign.cost(project_pricing) }
   end
 
+  # Quanto os campos do item cresceram por deslocamento até a hospedagem (dias ajustados ÷
+  # planejados; 1 = nada) — ProposalProfessional#commute_extra_days alonga as diárias da equipe.
+  def days_factor
+    planned = field_campaigns.sum(&:days)
+    planned.positive? ? field_campaigns.sum(&:effective_days) / planned : 1.to_d
+  end
+
   def campaigns_total
     (campaigns_cost * project_pricing.multiplier).round(2)
   end

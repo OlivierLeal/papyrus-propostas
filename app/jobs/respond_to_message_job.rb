@@ -12,6 +12,7 @@ class RespondToMessageJob < ApplicationJob
     # proposal!), então não depende mais do consultor clicar em "Avançar para Precificação" antes.
     conversation.with_tool(GenerateProposalDocumentTool.new(conversation: conversation))
     conversation.with_tool(AddExternalCostTool.new(proposal: conversation.proposal)) if conversation.proposal
+    conversation.with_tool(SetProjectLocationTool.new(conversation: conversation))
     # Inserir só a seção de cronograma num .docx finalizado que o consultor anexou (proposta
     # gerada pelo sistema e revisada por fora — ver CLAUDE.md seção 8).
     conversation.with_tool(InsertScheduleSectionTool.new(proposal: conversation.proposal)) if conversation.proposal

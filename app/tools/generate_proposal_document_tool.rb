@@ -541,7 +541,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "ITENS_NAO_PREVISTOS" => build_itens_nao_previstos(args),
         "PRAZO_EXECUCAO" => prazo_execucao_value(args),
         "PRECO_TOTAL" => @proposal.docx_total_price,
-        "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(args[:obrigacoes_contratante_adicionais]),
+        "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(Array(args[:obrigacoes_contratante_adicionais]) + lodging_obligations),
         "OBRIGACOES_PAPYRUS_ADICIONAIS" => join_lines(args[:obrigacoes_papyrus_adicionais])
       }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }
     end
@@ -634,6 +634,20 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # Cada item vira um parágrafo/item de lista próprio no modelo (ver expand_into_paragraphs!);
     # lista vazia devolve "" — junto com remove_paragraph_if_blank, isso some o item de lista
     # inteiro, em vez de deixar um "●" sem texto na maioria das propostas (que não tem nada extra).
+    # Campo com hospedagem "fornecida pelo cliente" (FieldCampaign#lodging_mode, escolha do consultor
+    # na Tela de Precificação): a precificação saiu sem hotel pra esse campo, então o documento tem
+    # que deixar isso como obrigação da contratante — senão a PAPYRUS fica descoberta se o cliente
+    # mudar de ideia. Regra do sistema, não da IA.
+    LODGING_OBLIGATION = "Fornecer alojamento à equipe da PAPYRUS durante as atividades de campo, sem custo para a PAPYRUS."
+
+    def lodging_obligations
+      pricing = @proposal&.project_pricing
+      return [] unless pricing
+
+      provided = FieldCampaign.joins(:pricing_item).where(pricing_items: { project_pricing_id: pricing.id }, lodging_mode: "cliente").exists?
+      provided ? [ LODGING_OBLIGATION ] : []
+    end
+
     def join_lines(items)
       Array(items).map { |item| item.to_s.strip }.compact_blank.join("\n")
     end

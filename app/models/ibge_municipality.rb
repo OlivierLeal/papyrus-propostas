@@ -23,4 +23,38 @@ class IbgeMunicipality < ApplicationRecord
 
     KmzGeometryExtractor::FACTORY.point(lon, lat)
   end
+
+  def label
+    "#{name}/#{uf}"
+  end
+
+  # "Remanso/BA", "Remanso - BA", "Remanso, BA", "Petrópolis (RJ) — texto solto" ou só "Remanso"
+  # (quando o nome é único no país). Sem diferenciar acento nem caixa. Nome repetido sem UF é
+  # ambíguo → nil.
+  def self.lookup(text)
+    text = text.to_s.strip
+    match = text.match(/\A(.+?)\s*[\/,\-–]\s*([A-Za-z]{2})\z/) || text.match(/\A([^(]+?)\s*\(([A-Za-z]{2})\)/)
+    name, uf = match ? [ match[1], match[2].upcase ] : [ text, nil ]
+    key = normalize(name)
+    scope = uf ? where(uf: uf) : all
+    found = scope.pluck(:id, :name).select { |_id, candidate| normalize(candidate) == key }
+    found.size == 1 ? find(found.first.first) : nil
+  end
+
+  def self.normalize(name)
+    I18n.transliterate(name.to_s).downcase.gsub(/[^a-z0-9]+/, " ").strip
+  end
+
+  # Municípios cujo centro está entre min_km e max_km de um ponto, do mais perto pro mais longe —
+  # Lodging::Search usa pra buscar hospedagem além do raio máximo da Stay22 (~100 km).
+  def self.nearest_centroids(point, min_km:, max_km:, limit:)
+    sql_point = "ST_SetSRID(ST_MakePoint(#{point.x.to_f}, #{point.y.to_f}), 4326)::geography"
+    distance = "ST_Distance(ST_Centroid(geom::geometry)::geography, #{sql_point})"
+    where("ST_DWithin(geom, #{sql_point}, ?)", max_km * 1000)
+      .where("#{distance} >= ?", min_km * 1000)
+      .order(Arel.sql(distance))
+      .limit(limit)
+      .pluck(:name, :uf, Arel.sql("ST_X(ST_Centroid(geom::geometry))"), Arel.sql("ST_Y(ST_Centroid(geom::geometry))"), Arel.sql(distance))
+      .map { |name, uf, lon, lat, meters| { label: "#{name}/#{uf}", point: KmzGeometryExtractor::FACTORY.point(lon, lat), km: meters / 1000.0 } }
+  end
 end

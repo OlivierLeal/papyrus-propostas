@@ -19,6 +19,7 @@ require_relative "test_helpers/cal_stub_helper"
 require_relative "test_helpers/web_search_stub_helper"
 require_relative "test_helpers/class_method_stub_helper"
 require_relative "test_helpers/spreadsheet_fixture_helper"
+require_relative "test_helpers/geo_test_helper"
 
 module ActiveSupport
   class TestCase
@@ -37,6 +38,7 @@ module ActiveSupport
     include SpreadsheetFixtureHelper
     include WebSearchStubHelper
     include ClassMethodStubHelper
+    include GeoTestHelper
 
     # Add more helper methods to be used by all tests here...
   end

@@ -42,6 +42,21 @@
           <span><%= number_with_delimiter(pricing.distance_km, delimiter: ".", separator: ",") %> km (~<%= pricing.travel_hours %>h) sugere deslocamento aéreo — lance passagem e locação no destino nos custos do item.</span>
         </div>
       <% end %>
+      <% destination = Logistics::DestinationResolver.resolve(pricing.proposal) %>
+      <fieldset class="fieldset p-0 mb-3">
+        <legend class="fieldset-legend pt-0">Local do projeto</legend>
+        <%= form.text_field :municipality_query, disabled: !editable, autocomplete: "off", list: "municipios-proposta",
+              placeholder: destination&.label || "Município/UF, ex.: Remanso/BA", class: "input input-sm w-full" %>
+        <p class="label whitespace-normal <%= destination ? "" : "text-warning" %>">
+          <% if pricing.ibge_municipality %>
+            Informado pelo consultor. Apague pra voltar a usar o KMZ/ET.
+          <% elsif destination %>
+            Usando <%= destination.label %> (<%= destination.source %>). Preencha só pra corrigir.
+          <% else %>
+            Sem KMZ e sem município claro no ET — informe aqui (ou diga no chat) pra calcular distância e buscar hospedagem.
+          <% end %>
+        </p>
+      </fieldset>
       <div class="grid grid-cols-2 gap-3">
         <fieldset class="fieldset p-0">
           <legend class="fieldset-legend pt-0">Distância (ida)</legend>
@@ -68,7 +83,7 @@
       <p class="text-xs text-base-content/50 mb-3">Usados em todos os campos desta proposta.</p>
       <div class="grid grid-cols-2 gap-3">
         <% [ [ :rental_per_day, "Carro", "diária" ], [ :rental_4x4_per_day, "4x4", "diária" ],
-             [ :lodging_per_person_per_night, "Hospedagem", "pessoa/noite" ], [ :meal_per_person_per_day, "Alimentação", "pessoa/dia" ],
+             [ :lodging_per_person_per_night, "Hospedagem padrão", "pessoa/noite, campo sem hospedagem escolhida" ], [ :meal_per_person_per_day, "Alimentação", "pessoa/dia" ],
              [ :fuel_price_per_liter, "Combustível", "litro" ], [ :toll_price, "Pedágio", "unidade" ],
              [ :wash_price, "Lavagem", "unidade" ], [ :uber_price, "Uber", "corrida" ],
              [ :mateiro_per_day, "Mateiro", "dia (com alimentação)" ], [ :epi_price, "EPI/ASO", "kit" ] ].each do |attribute, label, unit| %>

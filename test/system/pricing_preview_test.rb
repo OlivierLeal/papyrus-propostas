@@ -62,6 +62,30 @@ class PricingPreviewTest < ApplicationSystemTestCase
     assert_equal 46_950, @proposal.project_pricing.reload.total_value
   end
 
+  # 2026-09-29: hospedagem a 2h por trecho da área → 4h úteis → o campo de 2 dias vira 4, e a
+  # bióloga (48 diárias no item) ganha +48. A prévia tem que bater com o que o servidor grava.
+  test "deslocamento até a hospedagem alonga o campo e as diárias da equipe, igual ao servidor" do
+    sign_in
+    visit conversation_proposal_path(@proposal.conversation)
+
+    campaign_row = find("[data-pricing-preview-target='campaign']")
+    within(campaign_row) do
+      find("select[data-field='lodging_mode']").select("Fornecida pelo cliente")
+      find("input[data-field='commute_km']").fill_in(with: "90")
+      find("input[data-field='commute_hours']").fill_in(with: "2")
+      assert_selector "[data-role='commute-note']", text: "2 → 4 dias em campo"
+    end
+    within("tr", text: proposal_professionals(:fauna_flora_line).professional.name) do
+      assert_selector "[data-role='commute-extra']", text: "+48 desloc."
+    end
+    preview_total = find("[data-pricing-preview-target='summaryTotal']").text
+
+    click_button "Salvar e recalcular"
+    assert_text "Preço recalculado"
+    assert_equal preview_total, find("[data-pricing-preview-target='summaryTotal']").text
+    assert_equal 48, proposal_professionals(:fauna_flora_line).reload.commute_extra_days
+  end
+
   private
 
   def sign_in

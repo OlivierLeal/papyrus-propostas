@@ -791,6 +791,19 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "Emitir relatório mensal de acompanhamento ao órgão financiador."
   end
 
+  # Hospedagem "fornecida pelo cliente" num campo (2026-09-29): vira obrigação da contratante no
+  # documento por regra do sistema, sem depender da IA lembrar.
+  test "hospedagem fornecida pelo cliente vira obrigação da contratante" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    field_campaigns(:campo_servico).update!(lodging_mode: "cliente")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args)
+
+    xml = document_xml(@proposal.generated_documents.first)
+    assert_includes xml, "Fornecer alojamento à equipe da" # "PAPYRUS" vira run próprio, em negrito
+  end
+
   # A maioria das propostas não tem obrigação extra nenhuma — o item de lista não pode ficar
   # visível em branco no documento final (ver ProposalDocxFiller#fill_simple_placeholders!).
   test "não deixa item de obrigação em branco quando não há nada adicional" do

@@ -228,6 +228,57 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert PricingItem.exists?(pricing_items(:servico_item).id), "o último item nunca sai"
   end
 
+  # Hospedagem por campo (2026-09-29): local do campo digitado, busca na Stay22 e escolha — tudo
+  # pelos botões structure_action, sem form aninhado.
+  test "campaign location, lodging search and choice through the pricing form" do
+    create_municipality(name: "Remanso", uf: "BA", lon: -42.2, lat: -9.7)
+    campaign = field_campaigns(:campo_servico)
+    item = pricing_items(:servico_item)
+    fake_stay22 = Object.new
+    def fake_stay22.search(**)
+      [ Lodging::Stay22Client::Option.new(id: "h1", name: "Pousada do Rio", kind: "Hotel", city: "Pilão Arcado",
+          price_per_night: 150.to_d, url: "https://example.com/h1", lat: -9.55, lng: -42.1) ]
+    end
+    campaign_params = ->(extra = {}) {
+      { bdi: "1.20", tax_multiplier: "1.25",
+        pricing_items_attributes: { "0" => { id: item.id, field_campaigns_attributes: { "0" => { id: campaign.id }.merge(extra) } } } }
+    }
+
+    stub_class_method(Lodging::Stay22Client, :new, ->(*) { fake_stay22 }) do
+      without_mapbox_directions do
+        patch conversation_proposal_path(@conversation), params: {
+          project_pricing: campaign_params.call(municipality_query: "Remanso/BA"), structure_action: "search_lodging:#{campaign.id}"
+        }
+      end
+    end
+    assert_redirected_to conversation_proposal_path(@conversation, anchor: "campo-#{campaign.id}")
+    assert_equal "Remanso/BA", campaign.reload.ibge_municipality.label
+    assert_equal [ "Pousada do Rio" ], campaign.lodging_options.map { |o| o["name"] }
+
+    get conversation_proposal_path(@conversation)
+    assert_select "button[value='choose_lodging:#{campaign.id}:h1']", text: "Escolher"
+
+    without_mapbox_directions do
+      patch conversation_proposal_path(@conversation), params: {
+        project_pricing: campaign_params.call, structure_action: "choose_lodging:#{campaign.id}:h1"
+      }
+    end
+    campaign.reload
+    assert_equal [ "hotel", 150 ], [ campaign.lodging_mode, campaign.lodging_price_per_night ]
+    assert campaign.commute_km.positive?
+    assert_equal @proposal.project_pricing.reload.pricing_items.sum(&:total), @proposal.project_pricing.total_value
+  end
+
+  test "an unknown campaign municipality is rejected with a message" do
+    campaign = field_campaigns(:campo_servico)
+    patch conversation_proposal_path(@conversation), params: { project_pricing: { bdi: "1.20",
+      pricing_items_attributes: { "0" => { id: pricing_items(:servico_item).id,
+        field_campaigns_attributes: { "0" => { id: campaign.id, municipality_query: "Lugar Nenhum/ZZ" } } } } } }
+
+    assert_match(/não encontrado/, flash[:alert])
+    assert_nil campaign.reload.ibge_municipality
+  end
+
   test "update rejects invalid pricing params and keeps the proposal editable" do
     patch conversation_proposal_path(@conversation), params: {
       project_pricing: { bdi: "0", tax_multiplier: "1.25", distance_km: "1",

@@ -4,7 +4,8 @@
 # perde, sem form aninhado (proibido nesta tela, ver CLAUDE.md seção 5).
 #
 # Ações: "add_item", "remove_item:ID", "add_campaign:ITEM", "remove_campaign:ID",
-# "add_cost:ITEM", "remove_cost:ITEM:ÍNDICE", "add_enterprise", "remove_enterprise:ID".
+# "add_cost:ITEM", "remove_cost:ITEM:ÍNDICE", "add_enterprise", "remove_enterprise:ID",
+# "search_lodging:CAMPO" (busca na Stay22, Lodging::Search) e "choose_lodging:CAMPO:OPÇÃO".
 # Devolve a âncora da tela pra voltar no lugar certo (ou nil sem ação).
 class PricingStructure
   def initialize(pricing)
@@ -12,7 +13,7 @@ class PricingStructure
   end
 
   def apply(action)
-    name, *ids = action.to_s.split(":")
+    name, *ids = action.to_s.split(":", 3)
     case name
     when "add_item" then add_item
     when "remove_item" then remove_item(ids.first)
@@ -22,6 +23,8 @@ class PricingStructure
     when "remove_cost" then remove_cost(ids.first, ids.second)
     when "add_enterprise" then add_enterprise
     when "remove_enterprise" then remove_enterprise(ids.first)
+    when "search_lodging" then search_lodging(ids.first)
+    when "choose_lodging" then choose_lodging(ids.first, ids.second)
     end
   end
 
@@ -57,11 +60,11 @@ class PricingStructure
     end
 
     def remove_campaign(id)
-      campaign = FieldCampaign.joins(:pricing_item).find_by(id: id, pricing_items: { project_pricing_id: @pricing.id })
-      return "itens" unless campaign
+      found = campaign(id)
+      return "itens" unless found
 
-      campaign.destroy!
-      "item-#{campaign.pricing_item_id}"
+      found.destroy!
+      "item-#{found.pricing_item_id}"
     end
 
     def add_cost(item_id)
@@ -86,6 +89,26 @@ class PricingStructure
       @pricing.pricing_enterprises.create!(name: "Empreendimento #{@pricing.pricing_enterprises.count + 1}",
         position: @pricing.pricing_enterprises.maximum(:position).to_i + 1)
       "empreendimentos"
+    end
+
+    def campaign(id)
+      FieldCampaign.joins(:pricing_item).find_by(id: id, pricing_items: { project_pricing_id: @pricing.id })
+    end
+
+    def search_lodging(id)
+      found = campaign(id)
+      return "itens" unless found
+
+      Lodging::Search.new(found).call
+      "campo-#{found.id}"
+    end
+
+    def choose_lodging(id, option_id)
+      found = campaign(id)
+      return "itens" unless found
+
+      found.choose_lodging!(option_id, @pricing)
+      "campo-#{found.id}"
     end
 
     def remove_enterprise(id)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_230000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -70,21 +70,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_230000) do
   end
 
   create_table "field_campaigns", force: :cascade do |t|
+    t.decimal "commute_hours", precision: 5, scale: 2, default: "0.0", null: false
+    t.decimal "commute_km", precision: 8, scale: 1, default: "0.0", null: false
     t.datetime "created_at", null: false
     t.decimal "days", precision: 8, scale: 2, default: "1.0", null: false
     t.string "description", null: false
+    t.decimal "distance_km", precision: 8, scale: 1
     t.integer "epi_count", default: 0, null: false
+    t.bigint "ibge_municipality_id"
+    t.string "lodging_city"
+    t.float "lodging_lat"
+    t.float "lodging_lng"
+    t.string "lodging_mode"
+    t.string "lodging_name"
+    t.jsonb "lodging_options", default: [], null: false
+    t.decimal "lodging_price_per_night", precision: 10, scale: 2
+    t.string "lodging_search_note"
+    t.datetime "lodging_searched_at"
+    t.string "lodging_url"
     t.decimal "mateiro_days", precision: 8, scale: 2, default: "0.0", null: false
     t.integer "people", default: 1, null: false
     t.integer "position", default: 0, null: false
     t.bigint "pricing_item_id", null: false
     t.integer "tolls", default: 0, null: false
     t.decimal "travel_days", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "travel_hours", precision: 6, scale: 1
     t.integer "uber_trips", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "vehicle_type", default: "carro", null: false
     t.integer "vehicles", default: 1, null: false
     t.integer "washes", default: 0, null: false
+    t.index ["ibge_municipality_id"], name: "index_field_campaigns_on_ibge_municipality_id"
     t.index ["pricing_item_id"], name: "index_field_campaigns_on_pricing_item_id"
   end
 
@@ -446,6 +462,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_230000) do
     t.jsonb "external_costs", default: [], null: false
     t.decimal "fuel_price_per_liter", precision: 10, scale: 2, default: "8.0", null: false
     t.decimal "fuel_total", precision: 10, scale: 2, default: "0.0", null: false
+    t.bigint "ibge_municipality_id"
     t.decimal "lodging_per_person_per_night", precision: 10, scale: 2, default: "220.0", null: false
     t.integer "logistics_days", default: 0, null: false
     t.decimal "mateiro_per_day", precision: 10, scale: 2, default: "250.0", null: false
@@ -468,6 +485,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_230000) do
     t.decimal "vehicle_consumption_km_per_liter", precision: 10, scale: 2, default: "8.0", null: false
     t.integer "vehicles_count", default: 1, null: false
     t.decimal "wash_price", precision: 10, scale: 2, default: "80.0", null: false
+    t.index ["ibge_municipality_id"], name: "index_project_pricings_on_ibge_municipality_id"
     t.index ["proposal_id"], name: "index_project_pricings_on_proposal_id", unique: true
   end
 
@@ -710,6 +728,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_230000) do
   add_foreign_key "conversation_study_types", "study_types"
   add_foreign_key "conversations", "models"
   add_foreign_key "conversations", "users"
+  add_foreign_key "field_campaigns", "ibge_municipalities"
   add_foreign_key "field_campaigns", "pricing_items", on_delete: :cascade
   add_foreign_key "general_chats", "models"
   add_foreign_key "general_chats", "users"
@@ -740,6 +759,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_230000) do
   add_foreign_key "project_findings", "active_storage_blobs", column: "source_blob_id"
   add_foreign_key "project_findings", "conversations"
   add_foreign_key "project_findings", "project_findings", column: "superseded_by_id"
+  add_foreign_key "project_pricings", "ibge_municipalities"
   add_foreign_key "project_pricings", "proposals"
   add_foreign_key "proposal_professionals", "pricing_items", on_delete: :nullify
   add_foreign_key "proposal_professionals", "professionals"

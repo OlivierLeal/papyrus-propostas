@@ -25,14 +25,29 @@ class ProposalProfessional < ApplicationRecord
     project_pricing.proposal_professionals.where(professional_id: professional_id).where.not(id: id).exists?
   end
 
-  def recalculate_subtotal(bdi:, tax_multiplier:)
-    self.subtotal = expected_subtotal(bdi: bdi, tax_multiplier: tax_multiplier)
+  # days_factor: PricingItem#days_factor do item desta linha — quem já tem os itens carregados
+  # (ProjectPricing#recalculate!) passa pronto; sem ele, lê do item.
+  def recalculate_subtotal(bdi:, tax_multiplier:, days_factor: nil)
+    self.subtotal = expected_subtotal(bdi: bdi, tax_multiplier: tax_multiplier, days_factor: days_factor)
   end
 
-  def expected_subtotal(bdi:, tax_multiplier:)
+  def expected_subtotal(bdi:, tax_multiplier:, days_factor: nil)
     c1 = man_hours * professional.rate_man_hour
-    c2 = field_days * professional.rate_daily
+    c2 = (field_days + commute_extra_days(days_factor)) * professional.rate_daily
     ((c1 + c2) * bdi * tax_multiplier).round(2)
+  end
+
+  # Hospedagem longe da área alonga os campos do item (FieldCampaign#effective_days) — quem vai a
+  # campo nesse item ganha diárias na mesma proporção: diárias × (dias ajustados ÷ planejados − 1),
+  # arredondado pra cima em meia diária. field_days continua sendo o PLANEJADO que o consultor
+  # digitou; o acréscimo é derivado, então trocar de hotel atualiza sozinho.
+  def commute_extra_days(days_factor = nil)
+    return 0.to_d unless field_days.positive?
+
+    days_factor ||= pricing_item&.days_factor || 1
+    return 0.to_d unless days_factor > 1
+
+    (field_days * (days_factor - 1) * 2).round(6).ceil.to_d / 2
   end
 
   private
