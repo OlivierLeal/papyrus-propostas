@@ -37,8 +37,10 @@ class ProcessLegalNormsJob < ApplicationJob
     # ferramenta search_legal_norms (ver #perform) — a IA decide sozinha quantas buscas fazer e
     # quando pedir o texto completo de uma norma, em vez de extrair achados de um texto já anexado.
     def prompt(conversation, municipios)
-      tipo_estudo = conversation.study_types.pluck(:name).join(" e ").presence
-      orgao = conversation.project_findings.active.where(field: "orgao_ambiental").pluck(:value).first
+      findings = conversation.project_findings.active
+      orgao = findings.where(field: "orgao_ambiental").pluck(:value).first
+      empreendimento = findings.where(field: "empreendimento").pluck(:value).join("; ").presence
+      area = findings.where(field: "area_ha").pluck(:value).first
       fields = ProjectFinding::FIELDS.map { |key, config| "- #{key}: #{config[:label]}" }.join("\n")
 
       <<~TEXT
@@ -47,8 +49,30 @@ class ProcessLegalNormsJob < ApplicationJob
         ser lido.
 
         Município(s) do empreendimento: #{municipios.join(', ')}
-        #{"Tipo de estudo já identificado: #{tipo_estudo}" if tipo_estudo}
+        #{"Empreendimento: #{empreendimento}" if empreendimento}
+        #{"Área: #{area} ha" if area}
         #{"Órgão ambiental já identificado: #{orgao}" if orgao}
+
+        TAREFA PRINCIPAL — ENQUADRAMENTO LEGAL. Descubra, PELA LEGISLAÇÃO, como este
+        empreendimento se enquadra: a norma que classifica a atividade (tabela de porte ×
+        potencial poluidor, lista de atividades sujeitas a licenciamento etc.), a classe/porte em
+        que ele cai, e a partir disso QUAL licença e QUAL estudo a norma exige. Faça isso sem se
+        apoiar no que o cliente pediu no ET — o cliente às vezes pede outro estudo por estratégia
+        ou por engano, e a Papyrus precisa saber o que a lei diz para comparar os dois. Gere:
+        - um achado "enquadramento_legal": classe/porte/potencial poluidor e a norma que define
+          (ex.: "Classe 4 — porte grande, potencial poluidor médio (Anexo IV, Decreto 14.024/12)");
+        - um achado "tipo_licenca" cujo "valor" é SÓ a(s) sigla(s) da(s) licença(s) que a norma
+          exige nesta fase (ex.: "LP" ou "LP+LI"), sem explicação;
+        - um achado "tipo_estudo" para CADA estudo que a norma exige, cujo "valor" é SÓ o CÓDIGO
+          EXATO de um dos tipos cadastrados abaixo (ex.: "eia_rima"), sem explicação.
+        A justificativa (artigo, classe) vai no "trecho" e no achado "enquadramento_legal", nunca
+        no "valor" de tipo_licenca/tipo_estudo — esses valores são comparados com o que o cliente
+        pediu.
+        Natureza "fato" só quando o texto da norma afirma o enquadramento para esse tipo de
+        empreendimento; se você deduziu a classe a partir do porte, é "inferencia". Se a norma não
+        permitir concluir (falta porte, atividade não listada), NÃO gere esses três achados.
+        Tipos de estudo cadastrados:
+        #{StudyType.ai_menu}
 
         Regra pra decidir o âmbito da busca:
         - Se o projeto abrange MAIS DE UM município, pesquise âmbito ESTADUAL ou FEDERAL — uma

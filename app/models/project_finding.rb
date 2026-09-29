@@ -36,8 +36,16 @@ class ProjectFinding < ApplicationRecord
     # 2026-09-28 (VESTAS/conversa 63): "custos discriminados por etapa" no ET não virava achado e
     # a sugestão de equipe (que não relê o PDF) não sabia que tinha que abrir o preço.
     "apresentacao_preco" => { label: "Forma de apresentação do preço pedida (preço global, discriminado por etapa/estudo/item, condições de pagamento)", comparable: false },
+    # 2026-09-29 (pedido da Sara): o que a LEGISLAÇÃO diz sobre o enquadramento (classe, porte,
+    # potencial poluidor e a norma que define), vindo do CAL — ver ProcessLegalNormsJob. A licença e
+    # o estudo que a norma exige entram como tipo_licenca/tipo_estudo com source_kind "cal", e aí
+    # a comparação com o que o cliente pediu sai de graça no ConflictDetector.
+    "enquadramento_legal" => { label: "Enquadramento legal (classe, porte, potencial poluidor e a norma que o define)", comparable: false },
     "outro" => { label: "Outra informação", comparable: false }
   }.freeze
+
+  # Campos em que a legislação e o pedido do cliente podem discordar sobre o ENQUADRAMENTO.
+  FRAMING_FIELDS = %w[tipo_licenca tipo_estudo].freeze
 
   NATURES = {
     "fato" => "Fato",

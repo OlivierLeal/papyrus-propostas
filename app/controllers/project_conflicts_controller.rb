@@ -12,7 +12,13 @@ class ProjectConflictsController < ApplicationController
       return
     end
 
-    @conflict.resolve!(Current.session.user, value: value, note: params[:note]) if @conflict.open?
+    # "Levado ao cliente" continua decidível: é quando a resposta do cliente chega.
+    @conflict.resolve!(Current.session.user, value: value, note: params[:note]) if @conflict.undecided?
+    respond_with_conflict
+  end
+
+  def refer_to_client
+    @conflict.refer_to_client!(Current.session.user) if @conflict.open? && @conflict.legal_framing?
     respond_with_conflict
   end
 

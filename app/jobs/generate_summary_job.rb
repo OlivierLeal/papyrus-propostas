@@ -37,6 +37,8 @@ class GenerateSummaryJob < ApplicationJob
 
         #{extracted_data_summary(conversation)}
 
+        #{legal_framing_summary(conversation)}
+
         #{conflicts_summary(conversation)}
 
         #{geospatial_summary(conversation)}
@@ -185,10 +187,46 @@ class GenerateSummaryJob < ApplicationJob
       end.join("\n\n")
     end
 
+    # Pedido da Sara (2026-09-29): antes de gerar, o resumo diz "a legislação enquadra assim, o
+    # cliente pediu assim, o que faço?". O enquadramento pela lei vem do CAL (ProcessLegalNormsJob);
+    # o pedido, do ET/TR. Quando concordam, o resumo confirma; quando o CAL não conseguiu concluir,
+    # diz isso em vez de calar — "não verificado" é diferente de "confere".
+    def legal_framing_summary(conversation)
+      findings = conversation.project_findings.active.includes(:source_blob)
+      legal = findings.select { |f| f.source_kind == "cal" && (f.field == "enquadramento_legal" || ProjectFinding::FRAMING_FIELDS.include?(f.field)) }
+      requested = findings.select { |f| f.source_kind != "cal" && ProjectFinding::FRAMING_FIELDS.include?(f.field) }
+      conflicts = conversation.project_conflicts.open.includes(findings: :source_blob).select(&:legal_framing?)
+
+      if legal.empty?
+        return <<~TEXT
+          ENQUADRAMENTO LEGAL: a pesquisa na legislação (CAL) não chegou a um enquadramento para este
+          projeto (sem município identificado, CAL indisponível, ou a norma não permitiu concluir).
+          Abra um tópico "Enquadramento legal" dizendo isso em uma frase, e que o enquadramento
+          pedido pelo cliente NÃO foi conferido contra a legislação — cabe ao consultor confirmar.
+        TEXT
+      end
+
+      <<~TEXT
+        ENQUADRAMENTO LEGAL × O QUE FOI SOLICITADO:
+        Pela legislação (CAL):
+        #{legal.map(&:to_context_line).join("\n")}
+        Solicitado nos documentos do cliente:
+        #{requested.map(&:to_context_line).join("\n").presence || "- nada sobre licença/estudo"}
+        #{conflicts.any? ? "O sistema encontrou divergência em: #{conflicts.map(&:field_label).join(', ')}." : "O sistema não encontrou divergência entre os dois."}
+
+        Abra um tópico "Enquadramento legal" logo no início do resumo, em três partes curtas:
+        "A legislação diz: …" (com a norma), "O cliente pediu: …" (com o documento), e, se houver
+        divergência, "O que fazer:" — seguir a legislação, seguir o que foi pedido, ou levar ao
+        cliente decidir; o card logo abaixo do resumo registra a escolha, e qualquer das três
+        entra no texto da proposta. Não recomende um lado. Sem divergência, diga que a legislação
+        confirma o que foi pedido.
+      TEXT
+    end
+
     # Divergência entre documentos é o tipo de coisa que passa despercebida numa leitura corrida e
     # reaparece depois como retrabalho. O sistema não escolhe um lado — mostra os dois.
     def conflicts_summary(conversation)
-      conflicts = conversation.project_conflicts.open.includes(findings: :source_blob)
+      conflicts = conversation.project_conflicts.open.includes(findings: :source_blob).reject(&:legal_framing?)
       return "" if conflicts.empty?
 
       <<~TEXT
@@ -206,7 +244,7 @@ class GenerateSummaryJob < ApplicationJob
     # carrega só o id, e a view resolve o registro — assim o card reflete o estado atual mesmo
     # depois de o consultor decidir, sem reescrever histórico de conversa.
     def announce_conflicts(conversation, conflicts)
-      conflicts.each do |conflict|
+      conflicts.sort_by { |conflict| conflict.legal_framing? ? 0 : 1 }.each do |conflict|
         conversation.messages.create!(role: "assistant", content: { project_conflict_id: conflict.id }.to_json)
       end
     end

@@ -2526,6 +2526,34 @@ lado. Resolver (`ProjectConflictsController#resolve`) **cria um achado novo** co
 `source_kind: "consultor"` e marca os divergentes como `superseded` — a decisão humana vira dado,
 e o rastro da divergência não se perde.
 
+### Enquadramento legal × o que o cliente pediu (2026-09-29, pedido da Sara)
+
+"A legislação faz o enquadramento e às vezes o cliente quer outro, por estratégia ou por erro. A gente
+tem que dizer: de acordo com a legislação o enquadramento é esse, o estudo é esse; entretanto, o TR
+pediu tal. Aí ou leva pro cliente definir, ou adota um dos dois." Montado sobre as divergências acima,
+sem mecanismo novo de comparação:
+- `ProcessLegalNormsJob` ganhou a TAREFA PRINCIPAL de enquadrar pela lei, sem se apoiar no pedido:
+  achado `enquadramento_legal` (classe/porte/potencial poluidor + norma, campo novo, não comparável) e
+  `tipo_licenca`/`tipo_estudo` com `source_kind: "cal"` — valor SÓ a sigla/o código (justificativa no
+  trecho), senão não casa com o catálogo nem compara. O `ConflictDetector` compara com ET/TR de graça.
+- O estudo da lei NÃO vira estudo da proposta (`assign_study_types_from_findings!` ignora `cal`); só
+  vira se o consultor escolher seguir a lei — `ProjectConflict#resolve!` em `tipo_estudo` chama
+  `Conversation#replace_study_types!`.
+- `ProjectConflict#legal_framing?` (licença/estudo com um lado `cal`): card próprio ("A legislação diz"
+  / "Foi solicitado", botões "Seguir a legislação" / "Seguir o pedido" / "Levar ao cliente decidir").
+  "Levar ao cliente" = status `client` (`refer_to_client!`), continua decidível quando o cliente responder.
+- Resumo (`GenerateSummaryJob#legal_framing_summary`): tópico "Enquadramento legal" no início — lei,
+  pedido e "o que fazer"; sem enquadramento pelo CAL, diz que o pedido não foi conferido.
+- Proposta: bloco `[ENQUADRAMENTO LEGAL × O QUE FOI SOLICITADO]` no snapshot (em QUALQUER status, menos
+  descartado) manda o 1º parágrafo de `escopo_e_metodologia` registrar as duas versões e terminar com
+  "a presente proposta contempla X" (decidido) ou "cabe à CONTRATANTE definir; esta proposta contempla
+  o solicitado; optando-se pelo enquadramento legal, escopo e preço serão revistos" (cliente/aberto).
+  Norma citada por tipo/número, sem o nome do órgão (regra do texto da proposta).
+- Verificado ao vivo na conversa 63 (eólica 472,5 MW na BA): o CAL achou a Resolução CEPRAM 4.636/18
+  (Classe 6 → EIA/RIMA, LP), e com o pedido trocado pra RAP (em transação desfeita) o resumo real
+  abriu o tópico com lei × pedido × o que fazer e o card de divergência.
+- Só vale pra conversas processadas daqui pra frente (o CAL roda uma vez, entre ET e TR).
+
 ### Sugestão fora do cadastro
 
 `Proposal#apply_lines!` continua descartando linha de equipe que não existe em `study_templates`,

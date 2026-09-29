@@ -114,7 +114,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     "o nome do parâmetro ficou de antes da separação ET/TR, mas o valor esperado é o do ET, o documento principal"
   param :escopo_e_metodologia, desc: "Parágrafo(s) INTRODUTÓRIOS da seção 'Escopo e Metodologia' — contexto geral de " \
     "como o serviço será executado, antes de entrar nos tópicos (ver topicos_escopo). Se o escopo for simples " \
-    "demais pra render nenhum tópico à parte, pode ser o texto inteiro da seção."
+    "demais pra render nenhum tópico à parte, pode ser o texto inteiro da seção. Se o estado da proposta trouxer " \
+    "[ENQUADRAMENTO LEGAL × O QUE FOI SOLICITADO], o PRIMEIRO parágrafo é o que aquele bloco manda escrever " \
+    "(o que a legislação enquadra, o que foi solicitado, e o que esta proposta contempla ou que a CONTRATANTE define)."
   param :topicos_escopo, type: "array", required: false,
     desc: "Etapas do PROCESSO de execução do serviço — não é um resumo do que será diagnosticado (isso já está em " \
           "caracterizacao_do_empreendimento/objetivo_dos_servicos), é como a Papyrus vai EXECUTAR: reuniões, " \

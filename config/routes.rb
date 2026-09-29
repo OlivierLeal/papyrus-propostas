@@ -28,6 +28,7 @@ Rails.application.routes.draw do
       member do
         post :resolve
         post :dismiss
+        post :refer_to_client
       end
     end
 

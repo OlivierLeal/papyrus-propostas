@@ -14,16 +14,29 @@ class ProjectConflict < ApplicationRecord
   has_many :project_conflict_findings, dependent: :destroy
   has_many :findings, through: :project_conflict_findings, source: :project_finding
 
-  STATUSES = %w[open resolved dismissed].freeze
+  # client: "levar ao cliente decidir" (só faz sentido no enquadramento legal × pedido, ver
+  # #legal_framing?) — ninguém decidiu ainda, e a proposta apresenta as duas alternativas pra
+  # CONTRATANTE escolher. Continua decidível depois, quando o cliente responder.
+  STATUSES = %w[open client resolved dismissed].freeze
 
   validates :field, inclusion: { in: ProjectFinding::FIELDS.keys }
   validates :summary, presence: true
   validates :status, inclusion: { in: STATUSES }
 
   scope :open, -> { where(status: "open") }
+  scope :undecided, -> { where(status: %w[open client]) }
 
   def open? = status == "open"
+  def client? = status == "client"
+  def undecided? = open? || client?
   def resolved? = status == "resolved"
+
+  # Legislação (CAL) × o que o cliente pediu (ET/TR), sobre licença ou estudo — pedido da Sara
+  # (2026-09-29): "a legislação diz isso, o cliente diz isso, faço o quê?". Tem card, resumo e
+  # texto na proposta próprios (ver Conversation#legal_framing_snapshot_text).
+  def legal_framing?
+    ProjectFinding::FRAMING_FIELDS.include?(field) && findings.any? { |finding| finding.source_kind == "cal" }
+  end
 
   def field_label = ProjectFinding::FIELDS.dig(field, :label) || field
 
@@ -36,10 +49,18 @@ class ProjectConflict < ApplicationRecord
         field: field, value: value, nature: "fato", source_kind: "consultor",
         excerpt: note.presence, status: "active"
       )
+      superseded_values = findings.active.map(&:value)
       findings.active.each { |finding| finding.supersede!(replacement) }
       update!(status: "resolved", resolved_by: user, resolved_at: Time.current, resolution_note: note.presence)
+      conversation.replace_study_types!(superseded_values, value) if field == "tipo_estudo"
       replacement
     end
+  end
+
+  # "Levar ao cliente decidir": nada é superado e nada é decidido — a proposta sai com as duas
+  # alternativas (ver Conversation#legal_framing_snapshot_text).
+  def refer_to_client!(user)
+    update!(status: "client", resolved_by: user, resolved_at: Time.current)
   end
 
   # "Não é divergência": os dois valores continuam válidos (grafias diferentes, recortes

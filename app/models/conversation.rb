@@ -371,8 +371,11 @@ class Conversation < ApplicationRecord
   # não casa vira um achado visível — mesma regra da sugestão de equipe fora do cadastro
   # (Proposal#flag_out_of_catalog): ou falta cadastro, ou a IA inventou, e as duas coisas são
   # informação pro consultor (não bloqueia mais nada, ver flag_study_type_out_of_catalog).
+  # O estudo que a LEGISLAÇÃO exige (source_kind "cal", ProcessLegalNormsJob) fica de fora: ele é
+  # o outro lado da comparação com o pedido do cliente, não o estudo desta proposta — só vira
+  # estudo da proposta se o consultor escolher seguir a legislação (ProjectConflict#resolve!).
   def assign_study_types_from_findings!
-    values = project_findings.active.where(field: "tipo_estudo").pluck(:value).uniq
+    values = project_findings.active.where(field: "tipo_estudo").where.not(source_kind: "cal").pluck(:value).uniq
     out_of_catalog = []
 
     values.each do |value|
@@ -385,6 +388,16 @@ class Conversation < ApplicationRecord
     end
 
     flag_study_type_out_of_catalog(out_of_catalog)
+  end
+
+  # Decisão do consultor numa divergência de tipo de estudo: sai o que foi descartado, entra o
+  # escolhido. Mexe só nos tipos que casam com os valores divergentes — um estudo que o consultor
+  # marcou à mão por outro motivo continua.
+  def replace_study_types!(discarded_values, chosen_value)
+    chosen = StudyType.match_ai_value(chosen_value)
+    discarded = discarded_values.filter_map { |value| StudyType.match_ai_value(value) } - [ chosen ]
+    self.study_types -= discarded if discarded.any?
+    study_types << chosen if chosen && !study_types.include?(chosen)
   end
 
   # ai_suggestions: false é usado por GenerateProposalDocumentTool (chamada pelo chat) — essa
@@ -508,7 +521,7 @@ class Conversation < ApplicationRecord
   def refresh_proposal_state_snapshot!
     messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
     text = [ proposal.present? ? proposal_state_text : no_proposal_state_text,
-             findings_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
+             findings_snapshot_text, legal_framing_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
     snapshot = create_user_message(text)
     snapshot.update!(internal: true)
   end
@@ -721,10 +734,46 @@ class Conversation < ApplicationRecord
       TEXT
     end
 
+    # Legislação × pedido do cliente (pedido da Sara, 2026-09-29): a proposta SEMPRE diz o que a
+    # legislação enquadra e o que foi solicitado — mesmo depois de o consultor escolher um lado
+    # ("de acordo com a legislação o estudo é X; entretanto, foi solicitado Y"). O que muda com a
+    # decisão é só a frase final: o que esta proposta contempla, ou que a CONTRATANTE define.
+    def legal_framing_snapshot_text
+      conflicts = project_conflicts.where.not(status: "dismissed").includes(findings: :source_blob).select(&:legal_framing?)
+      return "" if conflicts.empty?
+
+      lines = conflicts.map do |conflict|
+        legal, requested = conflict.findings.partition { |finding| finding.source_kind == "cal" }
+        decision = case conflict.status
+        when "resolved" then "o consultor decidiu: a proposta contempla #{conflict.findings.first&.superseded_by&.value}"
+        when "client" then "o consultor decidiu LEVAR AO CLIENTE: a CONTRATANTE escolhe qual adotar"
+        else "o consultor AINDA NÃO decidiu"
+        end
+        "- #{conflict.field_label}: legislação diz #{legal.map { |f| "#{f.value} (#{f.locator.presence || f.source_label})" }.join(' / ')}; " \
+          "foi solicitado #{requested.map { |f| "#{f.value} (#{f.source_label})" }.join(' / ')} — #{decision}"
+      end
+
+      <<~TEXT
+        [ENQUADRAMENTO LEGAL × O QUE FOI SOLICITADO]
+        #{lines.join("\n")}
+
+        Ao gerar a proposta, o PRIMEIRO parágrafo de escopo_e_metodologia registra isso, sempre:
+        "De acordo com a legislação aplicável (<tipo e número da norma, sem nome nem sigla do
+        órgão>), o empreendimento se enquadra em <X>; entretanto, <o Termo de Referência / a
+        solicitação da CONTRATANTE> prevê <Y>." E termina conforme a decisão:
+        - decidido: "A presente proposta contempla <o escolhido>."
+        - levar ao cliente: "Cabe à CONTRATANTE definir qual enquadramento adotar. Esta proposta
+          contempla <o solicitado>; optando-se por <o da legislação>, escopo e preço serão revistos."
+        - ainda não decidido: igual a "levar ao cliente", e avise o consultor no chat que a
+          decisão está pendente no card da divergência. Isso NÃO impede gerar a proposta.
+        Nunca escolha um lado por conta própria.
+      TEXT
+    end
+
     # Divergência aberta não bloqueia nada — mas a IA precisa saber que existe, senão escolhe um
     # dos valores por conta própria e o consultor nunca fica sabendo que havia dois.
     def conflicts_snapshot_text
-      conflicts = project_conflicts.open.includes(findings: :source_blob)
+      conflicts = project_conflicts.open.includes(findings: :source_blob).reject(&:legal_framing?)
       return "" if conflicts.empty?
 
       <<~TEXT

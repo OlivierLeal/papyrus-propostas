@@ -1,20 +1,30 @@
 <%# Card de uma divergência entre documentos (ver ProjectConflict). O sistema mostra os dois lados
-    com a origem de cada um; escolher o valor é decisão do consultor, nunca da IA. %>
+    com a origem de cada um; escolher o valor é decisão do consultor, nunca da IA.
+    Legislação × pedido do cliente (legal_framing?) tem três saídas: seguir a lei, seguir o
+    pedido, ou levar ao cliente decidir — as três entram no texto da proposta. %>
+<% findings = conflict.findings.includes(:source_blob).order(:id) %>
+<% legal_framing = conflict.legal_framing? %>
 <div id="<%= dom_id(conflict) %>" class="flex flex-col gap-3">
   <div class="flex items-start gap-2">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0 mt-0.5 text-warning">
       <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
     </svg>
     <div class="flex flex-col gap-1 min-w-0">
-      <span class="text-xs uppercase tracking-wide opacity-70">Divergência entre documentos · <%= conflict.field_label %></span>
+      <span class="text-xs uppercase tracking-wide opacity-70">
+        <%= legal_framing ? "Legislação × pedido do cliente" : "Divergência entre documentos" %> · <%= conflict.field_label %>
+      </span>
       <p class="text-sm"><%= conflict.summary %></p>
     </div>
   </div>
 
-  <% findings = conflict.findings.includes(:source_blob).order(:id) %>
   <ul class="flex flex-col gap-2">
     <% findings.each do |finding| %>
       <li class="px-3 py-2 rounded-field bg-base-100/60 flex flex-col gap-1 min-w-0">
+        <% if legal_framing %>
+          <span class="text-xs uppercase tracking-wide opacity-60">
+            <%= finding.source_kind == "cal" ? "A legislação diz" : "Foi solicitado" %>
+          </span>
+        <% end %>
         <span class="text-sm font-semibold text-base-content"><%= finding.value %></span>
         <span class="text-xs opacity-60"><%= finding.origin_label %></span>
         <% if finding.excerpt.present? %>
@@ -24,19 +34,36 @@
     <% end %>
   </ul>
 
-  <% if conflict.open? %>
+  <% if conflict.undecided? %>
     <div class="flex flex-col gap-2">
-      <span class="text-xs opacity-70">Qual vale para esta proposta?</span>
+      <% if conflict.client? %>
+        <p class="text-xs text-info">Levado ao cliente — a proposta apresenta as duas alternativas. Quando ele responder, registre aqui.</p>
+      <% end %>
+      <span class="text-xs opacity-70">
+        <%= legal_framing ? "Em que linha a proposta segue?" : "Qual vale para esta proposta?" %>
+      </span>
       <div class="flex flex-wrap items-center gap-2">
         <% findings.each do |finding| %>
-          <%= button_to finding.value.truncate(40),
+          <% label = if legal_framing
+                       (finding.source_kind == "cal" ? "Seguir a legislação: " : "Seguir o pedido: ") + finding.value.truncate(30)
+                     else
+                       finding.value.truncate(40)
+                     end %>
+          <%= button_to label,
                 resolve_conversation_project_conflict_path(conflict.conversation, conflict),
                 params: { value: finding.value },
                 class: "btn btn-xs btn-primary" %>
         <% end %>
-        <%= button_to "Não é divergência",
-              dismiss_conversation_project_conflict_path(conflict.conversation, conflict),
-              class: "btn btn-xs btn-ghost" %>
+        <% if legal_framing && conflict.open? %>
+          <%= button_to "Levar ao cliente decidir",
+                refer_to_client_conversation_project_conflict_path(conflict.conversation, conflict),
+                class: "btn btn-xs btn-outline" %>
+        <% end %>
+        <% if conflict.open? %>
+          <%= button_to "Não é divergência",
+                dismiss_conversation_project_conflict_path(conflict.conversation, conflict),
+                class: "btn btn-xs btn-ghost" %>
+        <% end %>
       </div>
 
       <%= form_with url: resolve_conversation_project_conflict_path(conflict.conversation, conflict),
@@ -52,6 +79,7 @@
         <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
       </svg>
       Decidido: <%= findings.first&.superseded_by&.value %>
+      <% if legal_framing %><span class="opacity-70">— a proposta registra as duas versões e diz qual adota.</span><% end %>
     </p>
   <% else %>
     <p class="text-xs opacity-60">Marcado como “não é divergência”.</p>

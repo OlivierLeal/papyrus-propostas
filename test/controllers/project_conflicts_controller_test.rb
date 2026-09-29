@@ -80,4 +80,44 @@ class ProjectConflictsControllerTest < ActionDispatch::IntegrationTest
     assert_select "##{ActionView::RecordIdentifier.dom_id(@conflict)}"
     assert_select "form[action=?]", resolve_conversation_project_conflict_path(@conversation, @conflict)
   end
+
+  test "legislação × pedido: o card oferece seguir um dos dois ou levar ao cliente" do
+    conflict = legal_framing_conflict
+    @conversation.messages.create!(role: "assistant", content: { project_conflict_id: conflict.id }.to_json)
+
+    get conversation_path(@conversation)
+
+    assert_select "##{ActionView::RecordIdentifier.dom_id(conflict)}" do
+      assert_select "button", text: /\ASeguir a legislação: eia_rima/
+      assert_select "button", text: /\ASeguir o pedido: rap/
+      assert_select "button", text: "Levar ao cliente decidir"
+      assert_select "form[action=?]", refer_to_client_conversation_project_conflict_path(@conversation, conflict)
+    end
+  end
+
+  test "levar ao cliente marca a divergência sem decidir, e continua decidível" do
+    conflict = legal_framing_conflict
+
+    post refer_to_client_conversation_project_conflict_path(@conversation, conflict)
+    assert conflict.reload.client?
+
+    post resolve_conversation_project_conflict_path(@conversation, conflict), params: { value: "eia_rima" }
+    assert conflict.reload.resolved?
+  end
+
+  test "levar ao cliente não se aplica a divergência que não é de enquadramento" do
+    post refer_to_client_conversation_project_conflict_path(@conversation, @conflict)
+
+    assert @conflict.reload.open?
+  end
+
+  private
+
+  def legal_framing_conflict
+    requested = @conversation.project_findings.create!(field: "tipo_estudo", value: "rap", nature: "fato", source_kind: "tr")
+    legal = @conversation.project_findings.create!(field: "tipo_estudo", value: "eia_rima", nature: "fato", source_kind: "cal")
+    @conversation.project_conflicts.create!(field: "tipo_estudo", summary: "Lei × TR.").tap do |conflict|
+      [ requested, legal ].each { |f| conflict.project_conflict_findings.create!(project_finding: f) }
+    end
+  end
 end
