@@ -698,6 +698,27 @@ efeito dominó de sempre ao inserir capítulo novo, ver "ITENS NÃO PREVISTOS" a
   BANCÁRIOS" — a cadeia inteira renumerada sozinha, exceto os 3 literais que precisaram de edição
   manual (2 captions + a chamada `SECAO_PRAZO_NUMERO`).
 
+**Rodada de correções da Charlene na proposta "Copão da Deeh" (2026-09-29, prints no grupo):**
+- **VALIDADE no fim, antes das assinaturas** (desfaz a posição de 2026-08 descrita logo abaixo). O
+  modelo tem o fechamento (VALIDADE + "Data do aceite" + assinaturas) DUAS vezes: no fim do lado
+  técnico (pra técnica separada/sozinha) e depois de DADOS BANCÁRIOS. Documento único:
+  `ProposalDocxFiller#remove_technical_closing_duplicate!` tira o do lado técnico (do título VALIDADE
+  até PREÇO). Split: cada arquivo fica com o seu (a comercial agora também tem validade).
+- **"Quadro N-1/N-2" de Preço/Desembolso calculados** (`#renumber_price_quadros!`): conta os Título 1
+  numerados até PREÇO no documento final — 12 no único, outro número no comercial separado. O modelo
+  ainda diz "13"; não editar o literal à mão.
+- **Cronograma entra depois de TODO o texto do PRAZO** (`#last_prazo_paragraph`) — o parágrafo "O
+  referido prazo poderá ter alterações…" ficava do outro lado da página paisagem.
+- **Legendas do cronograma:** a da figura é "Linha do Tempo do Serviço." (`TIMELINE_CAPTIONS`, não é
+  cronograma); nas duas, só o rótulo ("Figura 11-1:") em negrito, como as legendas fixas do modelo.
+- **Quadro de equipe:** cabeçalho "SETOR" (era "SETOR/PROGRAMA"), colunas 1293/1724/2003/3474 dxa
+  (medidas no quadro que ela ajustou), UMA linha por profissional (com itens, a mesma pessoa tinha
+  várias linhas de equipe); FUNÇÃO = cargo pra equipe fixa, entregável de maior esforço pro resto
+  (`Proposal#docx_team_function`).
+- **Prazo sem redundância:** `prazo_de_execucao` é só a duração; `#prazo_duration` corta ", contado a
+  partir…/condicionado…" que a IA acrescentava (o modelo já continua a frase com isso).
+- Frase fixa de proposta complementar: "não contemplados neste documento" (era "nesta proposta").
+
 **Validade da proposta sempre 90 dias, inclusive na técnica-sozinha (2026-08):** a seção
 "VALIDADE DA PROPOSTA" (texto fixo "Esta proposta tem validade de 90 dias.", sem placeholder —
 nunca varia por proposta) foi movida pra ANTES de "PREÇO E CONDIÇÕES DE PAGAMENTO" — antes ficava

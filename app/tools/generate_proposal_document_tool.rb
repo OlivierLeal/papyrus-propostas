@@ -136,7 +136,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "search_historical_archive pra ver como a Papyrus estruturou o escopo de projetos parecidos antes de " \
           "escrever — a estrutura processual varia bastante por tipo de estudo e vale seguir o padrão já usado."
   param :prazo_de_execucao, required: false,
-    desc: "Prazo contratual, por extenso (ex.: \"120 dias corridos\"). Texto independente da " \
+    desc: "SÓ a duração do prazo contratual, por extenso (ex.: \"120 dias corridos\", \"até três meses\"). " \
+    "NÃO escreva \"contado a partir da assinatura...\", condição de análise do órgão etc. — o modelo já traz " \
+    "esse texto logo depois, e repetir fica redundante. Texto independente da " \
     "tabela/infográfico do cronograma (Quadro/Figura N-1) — mudar só este texto não reconstrói o cronograma; " \
     "pra isso, use atualizar_cronograma. Sem informação clara no ET/TR, pode deixar de fora — o sistema usa " \
     "\"12 (doze) meses contratuais\" como padrão automaticamente (pedido da Charlene, 2026-09), nunca invente " \
@@ -609,7 +611,17 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     def prazo_execucao_value(args)
       return "12 (doze) meses contratuais" if lp_li_family_licensing?
 
-      args[:prazo_de_execucao].presence || "12 (doze) meses contratuais"
+      prazo_duration(args[:prazo_de_execucao]).presence || "12 (doze) meses contratuais"
+    end
+
+    # O modelo continua a frase com ", contado a partir da assinatura do contrato, emissão da O.S.…";
+    # a IA às vezes já escrevia o complemento ("até três meses, contado a partir da assinatura…,
+    # condicionado ao prazo de análise…") e o texto saía repetido (2026-09-29, Charlene:
+    # "redundância"). Fica só a duração, até o primeiro complemento desse tipo.
+    PRAZO_COMPLEMENT = /[,;]?\s+(contad[oa]s?|a\s+partir|condicionad[oa]s?|após|apos|sujeit[oa]s?|mediante)\b/i
+
+    def prazo_duration(value)
+      value.to_s.strip.split(PRAZO_COMPLEMENT, 2).first.to_s.strip.sub(/[,;.\s]+\z/, "")
     end
 
     def lp_li_family_licensing?

@@ -150,8 +150,9 @@ class ProposalDocxFiller
           if block_given?
             yield doc
           else
-            remove_technical_signature_duplicate!(doc)
+            remove_technical_closing_duplicate!(doc)
           end
+          renumber_price_quadros!(doc)
           zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
         end
 
@@ -179,28 +180,50 @@ class ProposalDocxFiller
       end
     end
 
-    # Bloco de assinatura duplicado no modelo (Papyrus + cliente, em negrito) logo depois de
-    # "VALIDADE DA PROPOSTA" — pra a proposta TÉCNICA (arquivo separado, ou o único gerado
-    # enquanto a proposta ainda é draft) também terminar com assinatura, e não só a comercial
-    # (que já tinha o bloco original no fim do corpo, ver CLAUDE.md seção 8). Âncora por texto,
-    # nunca por índice — mesma regra de FIRST_TECHNICAL_HEADING/FIRST_COMMERCIAL_HEADING.
-    TECHNICAL_SIGNATURE_ANCHOR = "Data do aceite da proposta:"
+    # O FECHAMENTO da proposta (VALIDADE DA PROPOSTA + "Data do aceite" + assinaturas) existe duas
+    # vezes no modelo: no fim do lado TÉCNICO (pra proposta técnica sozinha/separada também
+    # terminar com validade e assinatura) e no fim do corpo, depois de DADOS BANCÁRIOS (2026-09-29,
+    # Charlene: "essa parte é no final, antes das assinaturas"). No documento ÚNICO (fill, sem
+    # split) as duas cópias sobreviveriam — sai a técnica, fica só a do fim. Com split, trim_body!
+    # já deixa cada arquivo só com a do seu lado. Âncora por texto, nunca por índice.
+    TECHNICAL_CLOSING_HEADING = "VALIDADE DA PROPOSTA"
 
-    # Sem split (fill, documento único), os dois blocos de assinatura — este e o original no fim
-    # do corpo — sobreviveriam juntos no mesmo arquivo, e o cliente veria a assinatura duas
-    # vezes. Só faz sentido manter os dois quando trim_body! vai cortar o documento em dois
-    # arquivos de verdade (fill_split): cada um fica só com o bloco do seu próprio lado.
-    def remove_technical_signature_duplicate!(doc)
-      body = doc.at_xpath("//w:body", NS)
-      children = body.children.to_a
-
-      accept_index = children.each_index.find do |i|
-        children[i].name == "p" && children[i].xpath(".//w:t", NS).map(&:text).join.include?(TECHNICAL_SIGNATURE_ANCHOR)
-      end
-      return unless accept_index
-
+    def remove_technical_closing_duplicate!(doc)
+      children = doc.at_xpath("//w:body", NS).children.to_a
       commercial_index = heading_index(children, FIRST_COMMERCIAL_HEADING)
-      children[(accept_index + 1)...commercial_index].each(&:remove)
+      closing_index = children.each_index.find do |i|
+        i < commercial_index && children[i].name == "p" && children[i].xpath(".//w:t", NS).map(&:text).join.strip == TECHNICAL_CLOSING_HEADING
+      end
+      return unless closing_index
+
+      children[closing_index...commercial_index].each(&:remove)
+    end
+
+    # Os "Quadro 13-1"/"13-2" (Preço/Desembolso) são texto literal do modelo, mas o número da seção
+    # PREÇO muda conforme o arquivo (único, só comercial) e conforme onde a VALIDADE está. Recalcula
+    # contando os títulos numerados (Título 1 com numeração) até PREÇO, só dentro da seção PREÇO.
+    def renumber_price_quadros!(doc)
+      children = doc.at_xpath("//w:body", NS).children.to_a
+      number = 0
+      price_index = children.each_index.find do |i|
+        next false unless children[i].name == "p" && numbered_heading?(children[i])
+
+        number += 1
+        children[i].xpath(".//w:t", NS).map(&:text).join.strip == FIRST_COMMERCIAL_HEADING
+      end
+      return unless price_index
+
+      children[(price_index + 1)..].each do |node|
+        break if node.name == "p" && numbered_heading?(node)
+
+        node.xpath(".//w:t", NS).each do |t|
+          t.content = t.text.gsub(/Quadro \d+-(\d)/) { "Quadro #{number}-#{::Regexp.last_match(1)}" } if t.text.include?("Quadro ")
+        end
+      end
+    end
+
+    def numbered_heading?(node)
+      heading_paragraph?(node) && node.at_xpath("w:pPr/w:numPr", NS).present?
     end
 
     def heading_index(children, text)
@@ -274,6 +297,12 @@ class ProposalDocxFiller
       "servico" => "Cronograma do Serviço.",
       "implantacao" => "Cronograma de Implantação do Empreendimento."
     }.freeze
+    # O infográfico é LINHA DO TEMPO, não cronograma (2026-09-29, correção da Charlene) — o
+    # cronograma é a tabela (Quadro).
+    TIMELINE_CAPTIONS = {
+      "servico" => "Linha do Tempo do Serviço.",
+      "implantacao" => "Linha do Tempo da Implantação do Empreendimento."
+    }.freeze
     SCHEDULE_UNITS = { "servico" => :week, "implantacao" => :month }.freeze
 
     # Propriedades de seção (cabeçalho/rodapé/margens). O rodapé do modelo (`footer1.xml`, rId16)
@@ -310,7 +339,7 @@ class ProposalDocxFiller
       paragraph = anchor&.at_xpath("ancestor::w:p", NS)
       return unless paragraph
 
-      paragraph.add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
+      last_prazo_paragraph(paragraph).add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
       strip_titlepg_from_final_section!(doc)
     end
 
@@ -324,6 +353,24 @@ class ProposalDocxFiller
     # nenhum ali. Achado ao vivo corrigindo a numeração de página (2026-09): a página logo depois
     # do cronograma ficava sem "Sistema de Gestão..." nenhum. Remover é seguro — sem `titlePg`, a
     # seção usa `type="default"` em toda página dela, igual as outras.
+    # O bloco do cronograma entra DEPOIS de todo o texto da seção PRAZO — o parágrafo fixo "O
+    # referido prazo poderá ter alterações…" ficava do outro lado da página paisagem (2026-09-29,
+    # Charlene: "essa parte estava lá embaixo… puxei pra cima"). Anda pelos irmãos até o próximo
+    # título/tabela e fica com o último parágrafo que tem texto.
+    def last_prazo_paragraph(paragraph)
+      last = paragraph
+      node = paragraph.next_element
+      while node && node.name == "p" && !heading_paragraph?(node)
+        last = node if node.xpath(".//w:t", NS).map(&:text).join.strip.present?
+        node = node.next_element
+      end
+      last
+    end
+
+    def heading_paragraph?(node)
+      node.at_xpath("w:pPr/w:pStyle[@w:val='Ttulo1' or @w:val='Heading1']", NS).present?
+    end
+
     def strip_titlepg_from_final_section!(doc)
       doc.at_xpath("//w:body/w:sectPr/w:titlePg", NS)&.remove
     end
@@ -347,8 +394,8 @@ class ProposalDocxFiller
         # usada nos outros quadros fixos do modelo, ex. "Quadro 6-1", ver CLAUDE.md seção 8).
         # Mesmo número "-N" pros dois — descrevem o MESMO conteúdo (resumo visual × detalhe
         # auditável), só a palavra muda.
-        tables_xml << schedule_caption_xml("Figura #{SECAO_PRAZO_NUMERO}-#{quadro_number}: #{SCHEDULE_CAPTIONS.fetch(type)}")
-        tables_xml << schedule_caption_xml("Quadro #{SECAO_PRAZO_NUMERO}-#{quadro_number}: #{SCHEDULE_CAPTIONS.fetch(type)}")
+        tables_xml << schedule_caption_xml("Figura #{SECAO_PRAZO_NUMERO}-#{quadro_number}:", TIMELINE_CAPTIONS.fetch(type))
+        tables_xml << schedule_caption_xml("Quadro #{SECAO_PRAZO_NUMERO}-#{quadro_number}:", SCHEDULE_CAPTIONS.fetch(type))
         tables_xml << ScheduleTableBuilder.new(payload[:items], start_date: payload[:start_date], unit: SCHEDULE_UNITS.fetch(type)).build_xml
       end
 
@@ -496,11 +543,14 @@ class ProposalDocxFiller
       "<w:pPr><w:jc w:val=\"center\"/></w:pPr>#{run_xml}</w:p>"
     end
 
-    def schedule_caption_xml(text)
+    # Mesmo padrão das legendas fixas do modelo ("Quadro 9-1: Membros da equipe."): só o rótulo
+    # em negrito, a descrição normal (2026-09-29, correção da Charlene).
+    def schedule_caption_xml(label, text)
+      run_pr = "<w:rFonts w:ascii=\"Metropolis\" w:hAnsi=\"Metropolis\"/>"
       "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" \
-      "<w:pPr><w:jc w:val=\"both\"/><w:rPr><w:rFonts w:ascii=\"Metropolis\" w:hAnsi=\"Metropolis\"/><w:b/></w:rPr></w:pPr>" \
-      "<w:r><w:rPr><w:rFonts w:ascii=\"Metropolis\" w:hAnsi=\"Metropolis\"/><w:b/></w:rPr>" \
-      "<w:t xml:space=\"preserve\">#{CGI.escapeHTML(text)}</w:t></w:r></w:p>"
+      "<w:pPr><w:jc w:val=\"both\"/><w:rPr>#{run_pr}</w:rPr></w:pPr>" \
+      "<w:r><w:rPr>#{run_pr}<w:b/></w:rPr><w:t xml:space=\"preserve\">#{CGI.escapeHTML(label)}</w:t></w:r>" \
+      "<w:r><w:rPr>#{run_pr}</w:rPr><w:t xml:space=\"preserve\"> #{CGI.escapeHTML(text)}</w:t></w:r></w:p>"
     end
 
     def section_break_paragraph_xml(sect_xml)

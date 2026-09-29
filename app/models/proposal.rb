@@ -92,13 +92,24 @@ class Proposal < ApplicationRecord
   def team_rows_for_docx
     lines = project_pricing&.proposal_professionals&.includes(:professional)&.to_a || []
 
-    lines
-      .sort_by { |line| [ DOCX_TEAM_SECTORS.fetch(docx_team_sector(line.professional)), line.professional.name.to_s ] }
-      .map do |line|
-        professional = line.professional
+    # UMA linha por profissional (2026-09-29): com a precificação por item, a mesma pessoa tem uma
+    # linha de equipe em cada item (campo, elaboração, protocolo…) e saía repetida no quadro.
+    lines.group_by(&:professional)
+      .sort_by { |professional, _| [ DOCX_TEAM_SECTORS.fetch(docx_team_sector(professional)), professional.name.to_s ] }
+      .map do |professional, professional_lines|
         habilitacao = [ professional.specialties.presence, professional.registration.presence ].compact.join(" — ")
-        [ docx_team_sector_label(professional), line.deliverable_name.to_s, professional.name.to_s, habilitacao ]
+        [ docx_team_sector_label(professional), docx_team_function(professional, professional_lines), professional.name.to_s, habilitacao ]
       end
+  end
+
+  # Equipe fixa (Diretoria/Coordenação) aparece com o CARGO, não com o entregável que a IA escreveu
+  # pra ela nesta proposta ("Coordenação de Negócios e Relacionamento com o Cliente") — 2026-09-29,
+  # Charlene: "as funções aqui estão erradas". O resto, com o entregável PRINCIPAL desta proposta (o
+  # de maior esforço, diária = 8 HH) — juntar todos deixava a coluna estreita com 10+ linhas.
+  def docx_team_function(professional, lines)
+    return professional.role.to_s if professional.always_included
+
+    lines.max_by { |line| [ line.man_hours.to_f + line.field_days.to_f * 8, -line.id.to_i ] }.deliverable_name.to_s
   end
 
   # Reserva a próxima revisão direto no banco e devolve o número (2026-09-28, conversas 43/57: o

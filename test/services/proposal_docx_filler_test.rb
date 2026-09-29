@@ -619,7 +619,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_nil sect_prs[2].at_xpath("w:titlePg", NS), "titlePg da seção final tem que sumir quando o cronograma é inserido"
 
     xml = document_xml(bytes)
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
     # O resto do documento continua intacto depois da tabela.
     assert_includes xml, "VALIDADE DA PROPOSTA"
@@ -649,8 +649,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     )
     xml = document_xml(bytes)
 
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
-    assert_includes xml, "Quadro 11-2: Cronograma de Implantação do Empreendimento."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-2: Cronograma de Implantação do Empreendimento."
     assert_operator xml.index("Quadro 11-1"), :<, xml.index("Quadro 11-2")
   end
 
@@ -660,8 +660,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     technical_xml = document_xml(result[:technical])
     commercial_xml = document_xml(result[:commercial])
 
-    assert_includes technical_xml, "Quadro 11-1: Cronograma do Serviço."
-    assert_not_includes commercial_xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(technical_xml), "Quadro 11-1: Cronograma do Serviço."
+    assert_not_includes paragraph_texts(commercial_xml), "Quadro 11-1: Cronograma do Serviço."
     # A técnica não fica truncada no meio do bloco novo — a validade (seção seguinte) continua lá.
     assert_includes technical_xml, "VALIDADE DA PROPOSTA"
   end
@@ -676,7 +676,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes xml, 'r:embed="rId_CRONOGRAMA_SERVICO_1"'
     assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
     assert_includes zip_entry_content(bytes, "word/_rels/document.xml.rels"), 'Id="rId_CRONOGRAMA_SERVICO_1"'
-    assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 11-1: Cronograma do Serviço.")
+    assert_operator xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"'), :<, xml.index("Quadro 11-1:")
   end
 
   # Legenda da FIGURA (infográfico), pedida junto com a do Quadro (2026-09, pedido do
@@ -686,10 +686,10 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") })
     xml = document_xml(bytes)
 
-    assert_includes xml, "Figura 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Figura 11-1: Linha do Tempo do Serviço."
     image_at = xml.index('r:embed="rId_CRONOGRAMA_SERVICO_1"')
-    figura_at = xml.index("Figura 11-1: Cronograma do Serviço.")
-    quadro_at = xml.index("Quadro 11-1: Cronograma do Serviço.")
+    figura_at = xml.index("Figura 11-1:")
+    quadro_at = xml.index("Quadro 11-1:")
 
     assert_operator image_at, :<, figura_at
     assert_operator figura_at, :<, quadro_at
@@ -702,8 +702,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     )
     xml = document_xml(bytes)
 
-    assert_includes xml, "Figura 11-1: Cronograma do Serviço."
-    assert_includes xml, "Figura 11-2: Cronograma de Implantação do Empreendimento."
+    assert_includes paragraph_texts(xml), "Figura 11-1: Linha do Tempo do Serviço."
+    assert_includes paragraph_texts(xml), "Figura 11-2: Linha do Tempo da Implantação do Empreendimento."
   end
 
   # Quando o payload traz os ≤6 marcos que a IA elegeu (project_pricing.schedule_key_points), o
@@ -719,7 +719,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_includes xml, 'r:embed="rId_CRONOGRAMA_SERVICO_1"'
     assert_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
   end
 
   test "fill numbers a separate image/relationship per schedule type present" do
@@ -746,7 +746,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     # O modelo já tem <w:drawing> de sobra (logo da capa etc.) — o que importa é que NENHUM
     # arquivo/relationship do cronograma foi criado, não a ausência de <w:drawing> no geral.
     assert_not_includes zip_entry_names(bytes), "word/media/cronograma_servico_1.png"
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
   ensure
     ScheduleTimelineRenderer.define_method(:call, original_call)
@@ -772,12 +772,12 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
   # só a seção paisagem de cronograma logo depois de "PRAZO DE EXECUÇÃO", sem tocar em mais nada.
   test "insert_schedule_section adds the landscape schedule block to a finished docx, leaving the rest intact" do
     finished = @filler.fill(placeholders: @placeholders, tables: @tables) # sem schedules — "revisado por fora"
-    assert_not_includes document_xml(finished), "Quadro 11-1: Cronograma do Serviço."
+    assert_not_includes paragraph_texts(document_xml(finished)), "Quadro 11-1: Cronograma do Serviço."
 
     result = ProposalDocxFiller.new(nil).insert_schedule_section(finished, schedules: { "servico" => schedule_payload("servico") })
     xml = document_xml(result)
 
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
     assert_includes xml, 'w:orient="landscape"', "o bloco de cronograma tem que abrir numa seção paisagem"
     assert_includes zip_entry_names(result), "word/media/cronograma_servico_1.png"
@@ -798,7 +798,7 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     )
     twice = ProposalDocxFiller.new(nil).insert_schedule_section(with_block, schedules: { "servico" => schedule_payload("servico") })
 
-    assert_equal 1, document_xml(twice).scan("Quadro 11-1: Cronograma do Serviço.").size
+    assert_equal 1, paragraph_texts(document_xml(twice)).scan("Quadro 11-1: Cronograma do Serviço.").size
   end
 
   test "insert_schedule_section raises SectionAnchorError when the doc has no PRAZO DE EXECUÇÃO section" do
@@ -814,6 +814,13 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
   end
 
   private
+    # Texto de cada parágrafo (runs juntados), uma linha por parágrafo — legenda com rótulo em
+    # negrito e descrição normal fica em dois runs (2026-09-29).
+    def paragraph_texts(xml)
+      Nokogiri::XML(xml).xpath("//w:p", "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+        .map { |p| p.xpath(".//w:t", "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main").map(&:text).join }.join("\n")
+    end
+
     def document_xml(bytes)
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
         tmp.write(bytes)
@@ -907,6 +914,40 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_not_includes technical_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
   end
 
+  # 2026-09-29, correções da Charlene na proposta "Copão da Deeh".
+  test "documento único: VALIDADE só no final, depois de DADOS BANCÁRIOS e antes das assinaturas, e Quadros de preço renumerados" do
+    texts = paragraph_texts(document_xml(@filler.fill(placeholders: @placeholders, tables: @tables))).split("\n")
+
+    assert_equal 1, texts.count("VALIDADE DA PROPOSTA")
+    assert_operator texts.index("DADOS BANCÁRIOS"), :<, texts.index("VALIDADE DA PROPOSTA")
+    assert_operator texts.index("VALIDADE DA PROPOSTA"), :<, texts.rindex("_____________________________________")
+    # Sem a VALIDADE no meio, PREÇO é a 12ª seção: os literais "Quadro 13-" do modelo viram "12-".
+    assert texts.any? { |t| t.start_with?("Quadro 12-1") }
+    assert texts.any? { |t| t.start_with?("Quadro 12-2") }
+    assert texts.none? { |t| t.include?("Quadro 13-") }
+  end
+
+  test "modelo: 'neste documento' na proposta complementar e cabeçalho SETOR no quadro de equipe" do
+    texts = paragraph_texts(document_xml(@filler.fill(placeholders: @placeholders, tables: @tables)))
+
+    assert_includes texts, "não contemplados neste documento, estes serão objeto de proposta complementar"
+    assert_includes texts, "SETOR\n"
+    assert_not_includes texts, "SETOR/PROGRAMA"
+  end
+
+  test "o cronograma entra depois de TODO o texto do PRAZO (inclusive 'O referido prazo…'), e as legendas só têm o rótulo em negrito" do
+    xml = document_xml(@filler.fill(placeholders: @placeholders, tables: @tables, schedules: { "servico" => schedule_payload("servico") }))
+    texts = paragraph_texts(xml)
+
+    assert_operator texts.index("O referido prazo poderá ter alterações"), :<, texts.index("Quadro 11-1:")
+    ns = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }
+    caption = Nokogiri::XML(xml).xpath("//w:p", ns).find { |p| p.xpath(".//w:t", ns).map(&:text).join.start_with?("Figura 11-1:") }
+    label, description = caption.xpath(".//w:r", ns)
+    assert label.at_xpath("w:rPr/w:b", ns)
+    assert_nil description.at_xpath("w:rPr/w:b", ns)
+    assert_equal " Linha do Tempo do Serviço.", description.at_xpath("w:t", ns).text
+  end
+
   test "fill_split keeps the commercial half whole under the same expansion" do
     escopo = Array.new(60) { |i| "Parágrafo #{i + 1} do escopo." }.join("\n\n")
 
@@ -917,8 +958,9 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
 
     assert_includes commercial_xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
     assert_includes commercial_xml, "DADOS BANCÁRIOS"
-    # VALIDADE DA PROPOSTA ficou do lado técnico agora (ver teste acima) — não duplica aqui.
-    assert_not_includes commercial_xml, "VALIDADE DA PROPOSTA"
+    # VALIDADE DA PROPOSTA também fecha a comercial (2026-09-29, Charlene: "no final, antes das
+    # assinaturas") — depois de DADOS BANCÁRIOS.
+    assert_operator commercial_xml.index("DADOS BANCÁRIOS"), :<, commercial_xml.index("VALIDADE DA PROPOSTA")
     assert_not_includes commercial_xml, "Parágrafo 1 do escopo"
     assert_not_includes commercial_xml, "RESPONSABILIDADES DAS PARTES"
   end

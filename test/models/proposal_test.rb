@@ -520,6 +520,25 @@ class ProposalTest < ActiveSupport::TestCase
     assert_equal 16, points.last["periodo"]
   end
 
+  test "team_rows_for_docx: a mesma pessoa em vários itens sai UMA vez, com o entregável de maior esforço" do
+    proposal = proposals(:priced_proposal)
+    pricing = proposal.project_pricing
+    pricing.proposal_professionals.create!(professional: professionals(:biologa), deliverable_name: "Relatório de fauna",
+      man_hours: 10, field_days: 0)
+    pricing.proposal_professionals.create!(professional: professionals(:diretora), deliverable_name: "Revisão final",
+      man_hours: 5, field_days: 0)
+    pricing.proposal_professionals.create!(professional: professionals(:diretora), deliverable_name: "Negociação",
+      man_hours: 5, field_days: 0)
+
+    rows = proposal.team_rows_for_docx
+
+    assert_equal 1, rows.count { |row| row[2] == "Diretora Fixa" }
+    assert_equal "Diretora de Negócios", rows.find { |row| row[2] == "Diretora Fixa" }[1]
+    biologa = rows.select { |row| row[2] == professionals(:biologa).name }
+    assert_equal 1, biologa.size
+    assert_equal "Diagnóstico de fauna e flora", biologa.first[1] # 30 HH + 48 diárias × 8 > 10 HH
+  end
+
   test "team_rows_for_docx: uma linha por profissional, [SETOR, FUNÇÃO, PROFISSIONAL, HABILITAÇÃO], agrupada por setor" do
     proposal = proposals(:priced_proposal)
     proposal.project_pricing.proposal_professionals.create!(
@@ -529,9 +548,10 @@ class ProposalTest < ActiveSupport::TestCase
 
     rows = proposal.team_rows_for_docx
 
-    # Diretora (always_included, cargo "Diretora de Negócios") vem primeiro, no setor Diretoria;
-    # coordenador e bióloga (execução) depois.
-    assert_equal [ "Diretoria", "Direção de Negócios", "Diretora Fixa", "Direção — CREA 00000" ], rows.first
+    # Diretora (always_included) vem primeiro, no setor Diretoria, com o CARGO na FUNÇÃO — não o
+    # entregável (2026-09-29, Charlene: "as funções aqui estão erradas"); coordenador e bióloga
+    # (execução) depois.
+    assert_equal [ "Diretoria", "Diretora de Negócios", "Diretora Fixa", "Direção — CREA 00000" ], rows.first
     coordenador_row = rows.find { |r| r[2] == "Pedro Almeida" }
     assert_equal "Execução", coordenador_row[0]
     assert_equal "Coordenação geral", coordenador_row[1] # FUNÇÃO é o entregável desta proposta, não o cargo

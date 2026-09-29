@@ -195,6 +195,18 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal 2, @proposal.generated_documents.map { |doc| doc.filename.to_s }.uniq.size
   end
 
+  # 2026-09-29, Charlene: "redundância" — o modelo já continua com ", contado a partir da assinatura...".
+  test "prazo_de_execucao fica só com a duração, sem repetir o complemento que o modelo já traz" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args, prazo_de_execucao: "até três meses, contado a partir da assinatura do contrato, condicionado ao prazo de análise do órgão ambiental municipal")
+
+    texts = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_includes texts, "será até três meses, contado a partir da assinatura do contrato, emissão"
+    assert_equal 1, texts.scan("contado a partir da assinatura").size
+  end
+
   test "apresentacao_preco abre o Quadro de Preço por item, com valores do sistema e linha TOTAL" do
     @proposal.update!(status: "priced", document_split: "combined")
     campo = @proposal.project_pricing.pricing_items.create!(name: "Campanhas de campo", position: 1)
@@ -606,6 +618,13 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   end
 
   private
+    # Texto de cada parágrafo (runs juntados), uma linha por parágrafo — legenda com rótulo em
+    # negrito e descrição normal fica em dois runs (2026-09-29).
+    def paragraph_texts(xml)
+      Nokogiri::XML(xml).xpath("//w:p", "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+        .map { |p| p.xpath(".//w:t", "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main").map(&:text).join }.join("\n")
+    end
+
     # PNG mínimo (1x1) válido — só precisa abrir como imagem de verdade, não importa o conteúdo.
     PNG_1X1 = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 
@@ -911,7 +930,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
     assert_includes xml, "Mobilização"
   end
 
@@ -958,7 +977,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
     assert_includes zip_entry_names(@proposal.generated_documents.first), "word/media/cronograma_servico_1.png"
   end
 
@@ -995,8 +1014,8 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     tool.execute(**@args)
 
     xml = document_xml(@proposal.generated_documents.first)
-    assert_includes xml, "Quadro 11-1: Cronograma do Serviço."
-    assert_includes xml, "Quadro 11-2: Cronograma de Implantação do Empreendimento."
+    assert_includes paragraph_texts(xml), "Quadro 11-1: Cronograma do Serviço."
+    assert_includes paragraph_texts(xml), "Quadro 11-2: Cronograma de Implantação do Empreendimento."
   end
 
   # 2026-09, pedido do consultor: o .xml de MS Project passou a ser SOB DEMANDA — a IA só marca
