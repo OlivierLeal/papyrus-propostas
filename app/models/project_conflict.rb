@@ -4,9 +4,10 @@
 # A regra é não escolher sozinho. Quando o TR diz 500 ha e o KMZ mede 620, o sistema não elege um
 # valor: registra a divergência, mostra os dois lados com a origem de cada um e pede orientação.
 #
-# Conflito aberto NÃO bloqueia a geração do documento (decisão do consultor): ele entra como
-# ressalva no texto, no mesmo espírito do "A confirmar com o cliente" que já existe. O que ele
-# muda é que a divergência deixa de passar despercebida.
+# Conflito aberto TRAVA a geração do documento desde 2026-09-30 (antes só virava ressalva, e o
+# consultor pulava a decisão — conversa 65). Decidir, marcar "não é divergência", levar ao cliente
+# (enquadramento legal) ou "seguir sem decidir" com motivo liberam; nos dois últimos o texto sai
+# com a ressalva cobrindo os dois cenários.
 class ProjectConflict < ApplicationRecord
   belongs_to :conversation
   belongs_to :resolved_by, class_name: "User", optional: true
@@ -17,7 +18,10 @@ class ProjectConflict < ApplicationRecord
   # client: "levar ao cliente decidir" (só faz sentido no enquadramento legal × pedido, ver
   # #legal_framing?) — ninguém decidiu ainda, e a proposta apresenta as duas alternativas pra
   # CONTRATANTE escolher. Continua decidível depois, quando o cliente responder.
-  STATUSES = %w[open client resolved dismissed].freeze
+  # waived: "seguir sem decidir" (2026-09-30) — divergência aberta passou a TRAVAR a geração
+  # (Conversation#generation_blockers); o consultor pode liberar sem escolher um lado, com motivo
+  # (resolution_note), e a proposta sai com a ressalva cobrindo os dois cenários.
+  STATUSES = %w[open client waived resolved dismissed].freeze
 
   validates :field, inclusion: { in: ProjectFinding::FIELDS.keys }
   validates :summary, presence: true
@@ -30,6 +34,13 @@ class ProjectConflict < ApplicationRecord
   def client? = status == "client"
   def undecided? = open? || client?
   def resolved? = status == "resolved"
+  def waived? = status == "waived"
+
+  def waive!(user, reason)
+    return false if reason.to_s.strip.blank?
+
+    update!(status: "waived", resolved_by: user, resolved_at: Time.current, resolution_note: reason.to_s.strip)
+  end
 
   # Legislação (CAL) × o que o cliente pediu (ET/TR), sobre licença ou estudo — pedido da Sara
   # (2026-09-29): "a legislação diz isso, o cliente diz isso, faço o quê?". Tem card, resumo e

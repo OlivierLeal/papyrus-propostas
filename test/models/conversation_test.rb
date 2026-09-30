@@ -521,7 +521,7 @@ class ConversationTest < ActiveSupport::TestCase
     assert_not_includes marker.content, "protocolo junto ao INEMA", "o trecho é para o consultor ver no chip, não para gastar contexto a cada turno"
   end
 
-  test "refresh_proposal_state_snapshot! tells the AI to treat an open divergence as a caveat, never to pick a side" do
+  test "refresh_proposal_state_snapshot! tells the AI an open divergence blocks generation, never to pick a side" do
     conversation = conversations(:reviewing_conversation)
     tr = conversation.project_findings.create!(field: "area_ha", value: "500", nature: "fato", source_kind: "tr")
     kmz = conversation.project_findings.create!(field: "area_ha", value: "620", nature: "fato", source_kind: "sistema")
@@ -533,7 +533,7 @@ class ConversationTest < ActiveSupport::TestCase
 
     assert_includes marker.content, "[DIVERGÊNCIAS ABERTAS ENTRE OS DOCUMENTOS]"
     assert_includes marker.content, "NUNCA escolha um dos valores sozinho"
-    assert_includes marker.content, "Isso NÃO impede gerar a proposta."
+    assert_includes marker.content, "TRAVAM a geração"
   end
 
   test "a divergence already decided leaves the snapshot" do

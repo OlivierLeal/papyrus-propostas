@@ -76,7 +76,9 @@ class Proposal < ApplicationRecord
   # conversa. Usado pelo gerador do .docx pra aplicar a regra de prazo de 12 meses da família
   # Prévia/Instalação (ver GenerateProposalDocumentTool) e, internamente, por #ato_licenciamento.
   def license_act_acronyms
-    conversation.project_findings.active.where(field: "tipo_licenca").pluck(:value)
+    # Norma antes do pedido do cliente (Conversation#framing_values) — antes misturava as siglas das
+    # duas fontes ("LP" do ET + "LP+LI" do CAL).
+    conversation.framing_values("tipo_licenca")
       .flat_map { |texto| license_acronyms_in(texto) }.uniq
   end
 

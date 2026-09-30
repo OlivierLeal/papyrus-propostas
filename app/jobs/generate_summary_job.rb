@@ -11,6 +11,7 @@ class GenerateSummaryJob < ApplicationJob
 
     conversation.ask_internally(build_prompt(conversation))
     announce_conflicts(conversation, conflicts)
+    announce_issues(conversation, extract_issues(conversation))
 
     conversation.mark_step!("summary", "done")
     conversation.update!(status: "reviewing")
@@ -202,7 +203,8 @@ class GenerateSummaryJob < ApplicationJob
           ENQUADRAMENTO LEGAL: a pesquisa na legislação (CAL) não chegou a um enquadramento para este
           projeto (sem município identificado, CAL indisponível, ou a norma não permitiu concluir).
           Abra um tópico "Enquadramento legal" dizendo isso em uma frase, e que o enquadramento
-          pedido pelo cliente NÃO foi conferido contra a legislação — cabe ao consultor confirmar.
+          pedido pelo cliente NÃO foi conferido contra a legislação — cabe ao consultor conferir e
+          clicar em "Confirmar enquadramento" no painel antes de precificar ou gerar a proposta.
         TEXT
       end
 
@@ -218,8 +220,11 @@ class GenerateSummaryJob < ApplicationJob
         "A legislação diz: …" (com a norma), "O cliente pediu: …" (com o documento), e, se houver
         divergência, "O que fazer:" — seguir a legislação, seguir o que foi pedido, ou levar ao
         cliente decidir; o card logo abaixo do resumo registra a escolha, e qualquer das três
-        entra no texto da proposta. Não recomende um lado. Sem divergência, diga que a legislação
-        confirma o que foi pedido.
+        entra no texto da proposta. Diga que, por padrão, a proposta segue a LEGISLAÇÃO (o estudo
+        da proposta já foi ajustado pra ela) e que o pedido do cliente só vale se o consultor
+        escolher "Seguir o pedido". Sem divergência, diga que a legislação confirma o que foi pedido.
+        Se o cliente não indicou estudo/licença, diga que a proposta adotou o da legislação. Termine o tópico dizendo que, antes de precificar ou gerar a
+        proposta, o consultor precisa conferir e clicar em "Confirmar enquadramento" no painel.
       TEXT
     end
 
@@ -236,8 +241,62 @@ class GenerateSummaryJob < ApplicationJob
         Abra um tópico próprio no resumo para isso, listando cada divergência com os dois valores e
         de que documento veio cada um. NÃO escolha um dos valores e não sugira qual está certo —
         diga que o consultor precisa decidir, e que os cards logo abaixo do resumo permitem
-        registrar a decisão. Isso não impede seguir com a proposta.
+        registrar a decisão. Diga também que, enquanto houver divergência sem decisão, a geração
+        da proposta fica travada — no card dá pra decidir ou "seguir sem decidir" explicando o motivo.
+        Nunca escreva que "a proposta pode seguir normalmente".
       TEXT
+    end
+
+    # Pendências bloqueantes (ProjectIssue, 2026-09-30 — conversa 65: o resumo listava as dúvidas em
+    # "próximos passos" e o consultor pedia pra gerar sem responder nenhuma). Chamada à parte, DEPOIS
+    # do resumo (que já está no histórico), pedindo só o que trava de verdade — a lista de exclusões
+    # é o que evita a volta do bloqueio inventado (equipe 0h, logística zerada).
+    MAX_ISSUES = 6
+
+    def extract_issues(conversation)
+      conversation.ask_internally(issues_prompt(conversation), hide_response: true)
+      reply = conversation.messages.where(role: "assistant").order(:created_at).last&.content
+      Array((AiJsonResponse.parse(reply) || {})["pendencias"]).first(MAX_ISSUES).filter_map do |item|
+        next unless item.is_a?(Hash) && item["pergunta"].to_s.strip.present?
+
+        conversation.project_issues.create!(question: item["pergunta"].to_s.strip, impact: item["impacto"].to_s.strip.presence, source: "resumo")
+      end
+    rescue StandardError => e
+      # Extrair pendência é reforço: falhar aqui não pode derrubar o resumo.
+      Rails.logger.warn("[GenerateSummaryJob] extração de pendências falhou: #{e.class} #{e.message}")
+      []
+    end
+
+    def issues_prompt(conversation)
+      conflicts = conversation.project_conflicts.open.map { |c| "- #{c.field_label}: #{c.summary}" }.join("\n")
+
+      <<~TEXT
+        Com base no resumo que você acabou de escrever e nos documentos desta proposta, liste as
+        PENDÊNCIAS BLOQUEANTES: perguntas que o consultor (ou o cliente, por meio dele) precisa
+        responder ANTES de gerar a proposta, porque a resposta muda escopo, quantitativo, equipe,
+        prazo ou preço — informação que falta ou que está incoerente nos documentos.
+
+        NÃO inclua:
+        - as divergências abaixo, que já têm card próprio;
+        - dado de cadastro (CNPJ, contato, e-mail, endereço) — isso vira "A confirmar" no texto;
+        - nada que o sistema calcula: equipe, horas, diárias sugeridas, logística, cronograma, preço;
+        - dúvida que os próprios documentos respondem;
+        - detalhe menor que dá pra cobrir com ressalva sem mudar o preço.
+        Na dúvida, não inclua. Nenhuma pendência é uma resposta válida. No máximo #{MAX_ISSUES}.
+
+        Divergências já registradas:
+        #{conflicts.presence || "- nenhuma"}
+
+        Cada pendência: "pergunta" (direta, respondível, autoexplicativa) e "impacto" (1 frase: o que
+        muda na proposta conforme a resposta).
+
+        Responda APENAS com JSON válido, sem texto antes ou depois:
+        { "pendencias": [ { "pergunta": "...", "impacto": "..." } ] }
+      TEXT
+    end
+
+    def announce_issues(conversation, issues)
+      issues.each { |issue| conversation.messages.create!(role: "assistant", content: { project_issue_id: issue.id }.to_json) }
     end
 
     # Um card por divergência, no mesmo padrão do card de memória (KnowledgeNote): a mensagem

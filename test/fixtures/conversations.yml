@@ -1,4 +1,7 @@
+# framing_confirmed_at: as fixtures já passaram da confirmação de enquadramento (Conversation#
+# framing_confirmation_required?); os testes da trava desmarcam explicitamente.
 reviewing_conversation:
+  framing_confirmed_at: <%= 1.day.ago.to_fs(:db) %>
   user: one
   model: default
   client_name: Serra Verde Energias Renováveis S.A.
@@ -12,6 +15,7 @@ reviewing_conversation:
     summary: done
 
 processing_conversation:
+  framing_confirmed_at: <%= 1.day.ago.to_fs(:db) %>
   user: one
   model: default
   client_name: Cliente Em Processamento
@@ -25,6 +29,7 @@ processing_conversation:
     summary: pending
 
 priced_conversation:
+  framing_confirmed_at: <%= 1.day.ago.to_fs(:db) %>
   user: two
   model: default
   client_name: Cliente Já Precificado

@@ -22,6 +22,15 @@ class ProjectConflictsController < ApplicationController
     respond_with_conflict
   end
 
+  # "Seguir sem decidir": libera a geração sem escolher um lado, exigindo o motivo (vira ressalva).
+  def waive
+    if @conflict.open? && !@conflict.waive!(Current.session.user, params[:reason])
+      redirect_to @conversation, alert: "Escreva o motivo para seguir sem decidir."
+      return
+    end
+    respond_with_conflict
+  end
+
   def dismiss
     @conflict.dismiss!(Current.session.user) if @conflict.open?
     respond_with_conflict

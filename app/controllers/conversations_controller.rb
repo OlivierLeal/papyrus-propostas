@@ -1,5 +1,5 @@
 class ConversationsController < ApplicationController
-  before_action :set_conversation, only: %i[ show update ]
+  before_action :set_conversation, only: %i[ show update confirm_framing ]
 
   def index
     @query = params[:q]
@@ -54,6 +54,14 @@ class ConversationsController < ApplicationController
   def update
     @conversation.update!(study_type_params)
     redirect_to @conversation, notice: "Tipo de estudo atualizado."
+  end
+
+  def confirm_framing
+    if @conversation.confirm_framing!(Current.session.user)
+      redirect_to @conversation, notice: "Enquadramento confirmado."
+    else
+      redirect_to @conversation, alert: "Decida antes a divergência entre a legislação e o pedido do cliente (card no chat)."
+    end
   end
 
   private

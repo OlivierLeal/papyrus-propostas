@@ -22,6 +22,9 @@
   <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:h-[80vh]">
       <div class="lg:col-span-1 flex flex-col gap-4 lg:overflow-y-auto lg:min-h-0 lg:pr-1">
+        <%= render "conversations/generation_blockers", conversation: @conversation %>
+        <%= render "conversations/framing_panel", conversation: @conversation %>
+
         <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
           <h2 class="font-semibold text-base-content mb-4">Tipo(s) de estudo</h2>
 
@@ -47,7 +50,9 @@
           </p>
         </div>
 
-        <% if @conversation.status == "reviewing" %>
+        <% if @conversation.status == "reviewing" && @conversation.framing_confirmation_required? %>
+          <button type="button" class="btn btn-primary w-full" disabled title="Confirme o enquadramento primeiro">Avançar para Precificação</button>
+        <% elsif @conversation.status == "reviewing" %>
           <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
         <% elsif @conversation.status.in?(%w[pricing completed]) %>
           <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>

@@ -72,6 +72,18 @@
               class: "input input-bordered input-xs flex-1" %>
         <%= form.submit "Registrar", class: "btn btn-xs btn-ghost" %>
       <% end %>
+
+      <% if conflict.open? && !legal_framing %>
+        <details>
+          <summary class="text-xs opacity-70 cursor-pointer">Seguir sem decidir</summary>
+          <%= form_with url: waive_conversation_project_conflict_path(conflict.conversation, conflict),
+                method: :post, class: "flex items-center gap-2 mt-2" do |form| %>
+            <%= form.text_field :reason, required: true, placeholder: "Por quê? (vira ressalva na proposta)",
+                  class: "input input-bordered input-xs flex-1" %>
+            <%= form.submit "Seguir", class: "btn btn-xs btn-ghost" %>
+          <% end %>
+        </details>
+      <% end %>
     </div>
   <% elsif conflict.resolved? %>
     <p class="text-xs text-success flex items-center gap-1">
@@ -81,6 +93,8 @@
       Decidido: <%= findings.first&.superseded_by&.value %>
       <% if legal_framing %><span class="opacity-70">— a proposta registra as duas versões e diz qual adota.</span><% end %>
     </p>
+  <% elsif conflict.waived? %>
+    <p class="text-xs opacity-70">Liberado sem decidir — <%= conflict.resolution_note %> (sai como ressalva).</p>
   <% else %>
     <p class="text-xs opacity-60">Marcado como “não é divergência”.</p>
   <% end %>

@@ -32,6 +32,8 @@ class RespondToMessageJob < ApplicationJob
     # mesmo motivo do CAL acima: ferramenta que sempre falha vira algo que a IA acha que tentou.
     conversation.with_tool(WebSearchTool.new) if WebSearch::Client.configured?
     conversation.with_tool(RememberForFutureProposalsTool.new(conversation: conversation))
+    conversation.with_tool(RegisterPendingIssueTool.new(conversation: conversation))
+    conversation.with_tool(AnswerPendingIssueTool.new(conversation: conversation)) if conversation.project_issues.open.exists?
     # Aprender com a versão final revisada manualmente pela Papyrus, quando anexada no chat (ver
     # CLAUDE.md seção 11.1) — mesma disciplina de curadoria da ferramenta acima, card pendente até
     # o consultor aprovar.

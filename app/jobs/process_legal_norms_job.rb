@@ -20,6 +20,8 @@ class ProcessLegalNormsJob < ApplicationJob
     conversation.with_tool(SearchLegalNormsArchiveTool.new) if LegalNormChunk.embedded.exists?
     conversation.ask_internally(prompt(conversation, municipios), hide_response: true)
     record_findings!(conversation)
+    # A norma vence o pedido do cliente: troca já o estudo que o ET indicou (Conversation#framing_values).
+    conversation.assign_study_types_from_findings!
 
     conversation.mark_step!("cal", "done")
   rescue StandardError => e
@@ -56,9 +58,12 @@ class ProcessLegalNormsJob < ApplicationJob
         TAREFA PRINCIPAL — ENQUADRAMENTO LEGAL. Descubra, PELA LEGISLAÇÃO, como este
         empreendimento se enquadra: a norma que classifica a atividade (tabela de porte ×
         potencial poluidor, lista de atividades sujeitas a licenciamento etc.), a classe/porte em
-        que ele cai, e a partir disso QUAL licença e QUAL estudo a norma exige. Faça isso sem se
-        apoiar no que o cliente pediu no ET — o cliente às vezes pede outro estudo por estratégia
-        ou por engano, e a Papyrus precisa saber o que a lei diz para comparar os dois. Gere:
+        que ele cai, e a partir disso QUAL licença e QUAL estudo a norma exige. O que a NORMA
+        concluir é o que a proposta vai seguir. Ignore o estudo/licença que o ET indica (ele já está
+        no histórico desta conversa): o cliente às vezes pede outro por estratégia, por engano, por
+        falta de informação ou com base em norma desatualizada — não use o pedido dele como
+        resposta, nem como ponto de partida da busca. Confira se a norma está vigente (revogada ou
+        alterada por outra mais recente não vale). Gere:
         - um achado "enquadramento_legal": classe/porte/potencial poluidor e a norma que define
           (ex.: "Classe 4 — porte grande, potencial poluidor médio (Anexo IV, Decreto 14.024/12)");
         - um achado "tipo_licenca" cujo "valor" é SÓ a(s) sigla(s) da(s) licença(s) que a norma

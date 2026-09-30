@@ -2520,9 +2520,10 @@ comparável, só entre fontes diferentes, igualdade textual e comparação numé
 resolvem sem IA, e só o que sobra vai numa **única** chamada em lote para julgar se a diferença é
 de grafia ou de conteúdo. Veredito ilegível conta como equivalente.
 
-Divergência **sinaliza, não bloqueia**: vira card no chat, entra no resumo e no bloco
-`[DIVERGÊNCIAS ABERTAS]` do snapshot, com a instrução de escrever ressalva em vez de escolher um
-lado. Resolver (`ProjectConflictsController#resolve`) **cria um achado novo** com
+Divergência vira card no chat, entra no resumo e no bloco `[DIVERGÊNCIAS ABERTAS]` do snapshot.
+**Desde 2026-09-30 ela TRAVA a geração** até ser decidida, marcada "não é divergência", levada ao
+cliente (enquadramento legal) ou liberada com "Seguir sem decidir" + motivo (status `waived`, vira
+ressalva) — ver "Pendências que travam a geração" abaixo. Antes só sinalizava, e o consultor pulava. Resolver (`ProjectConflictsController#resolve`) **cria um achado novo** com
 `source_kind: "consultor"` e marca os divergentes como `superseded` — a decisão humana vira dado,
 e o rastro da divergência não se perde.
 
@@ -2536,9 +2537,18 @@ sem mecanismo novo de comparação:
   achado `enquadramento_legal` (classe/porte/potencial poluidor + norma, campo novo, não comparável) e
   `tipo_licenca`/`tipo_estudo` com `source_kind: "cal"` — valor SÓ a sigla/o código (justificativa no
   trecho), senão não casa com o catálogo nem compara. O `ConflictDetector` compara com ET/TR de graça.
-- O estudo da lei NÃO vira estudo da proposta (`assign_study_types_from_findings!` ignora `cal`); só
-  vira se o consultor escolher seguir a lei — `ProjectConflict#resolve!` em `tipo_estudo` chama
-  `Conversation#replace_study_types!`.
+- **A NORMA vale por padrão (2026-09-30, invertido — antes valia o pedido do cliente).** Sara: "a gente
+  sempre busca seguir primeiro via requisito normativo"; consultor: o cliente pode não ter a
+  informação ou estar desatualizado. `Conversation#framing_values(field)`: decisão do consultor >
+  CAL > ET/TR/complementar. Usado por `assign_study_types_from_findings!` (que agora TROCA o estudo
+  vindo de achado, e roda também no fim do `ProcessLegalNormsJob`; tipo marcado à mão no painel fica)
+  e por `Proposal#license_act_acronyms` (não mistura mais "LP" do ET com "LP+LI" do CAL). O pedido do
+  cliente só vale se o consultor escolher "Seguir o pedido" no card; "levar ao cliente" = proposta
+  segue a lei e a CONTRATANTE confirma. Sem enquadramento pelo CAL (sem município, CAL fora, norma
+  inconclusiva), vale o pedido e o resumo diz que não foi conferido. O prompt do CAL manda ignorar o
+  estudo do ET (está no histórico) e conferir se a norma está vigente. Verificado ao vivo na conversa
+  64 (ET com "tipo exato a definir"): Decreto 14.024/12, Classe 5 (inferência) → LP + EMI/PRAD/
+  gerenciamento de resíduos, e o estudo da proposta passou de nenhum pra esses três.
 - `ProjectConflict#legal_framing?` (licença/estudo com um lado `cal`): card próprio ("A legislação diz"
   / "Foi solicitado", botões "Seguir a legislação" / "Seguir o pedido" / "Levar ao cliente decidir").
   "Levar ao cliente" = status `client` (`refer_to_client!`), continua decidível quando o cliente responder.
@@ -2553,6 +2563,46 @@ sem mecanismo novo de comparação:
   (Classe 6 → EIA/RIMA, LP), e com o pedido trocado pra RAP (em transação desfeita) o resumo real
   abriu o tópico com lei × pedido × o que fazer e o card de divergência.
 - Só vale pra conversas processadas daqui pra frente (o CAL roda uma vez, entre ET e TR).
+- **Trava de confirmação (2026-09-30, relato da Sara: "leio o resumo no automático e já peço pra
+  gerar"; o enquadramento diferente só apareceu com a proposta pronta).** Card "Enquadramento" no
+  painel (`conversations/_framing_panel`: licença pedida, estudo(s) da proposta, o que a lei diz) com
+  "Confirmar enquadramento" (`ConversationsController#confirm_framing` → `framing_confirmed_at`/
+  `_by`). Enquanto `Conversation#framing_confirmation_required?`: "Avançar para Precificação"
+  desabilitado (e recusado no controller), `GenerateProposalDocumentTool` devolve
+  `FRAMING_NOT_CONFIRMED` (diz ONDE se resolve), e o snapshot traz `[BLOQUEIO: ENQUADRAMENTO NÃO
+  CONFIRMADO]`. Divergência lei × pedido em aberto impede confirmar (decidir no card antes; "levar ao
+  cliente" conta como decisão). Proposta que já tem documento gerado não trava. As fixtures de
+  conversa nascem confirmadas; os testes da trava desmarcam.
+
+### Pendências que travam a geração (2026-09-30, pedido do consultor: "o cliente tá pulando os
+questionamentos da IA e pedindo pra gerar direto")
+
+Caso real, conversa 65 (Petrobras, embarcados): o resumo abriu 3 divergências e listou dúvidas de
+diárias/escala em "próximos passos" — e ainda disse "a proposta pode seguir normalmente"; o consultor
+pediu "gere a primeira versão" 15 min depois e tudo saiu "A confirmar". As travas antigas eram só
+PROMPT (a IA decidia recusar) e foram tiradas porque ela inventava bloqueio (ver "Bloqueio inventado"
+abaixo). Agora a trava é CÓDIGO e a IA só propõe:
+- `ProjectIssue` (pendência): `question`, `impact`, `source` (`resumo`/`chat`), `status`
+  `open`/`answered`/`waived`, `answer`/`waiver_reason`, quem/quando. Nasce de duas formas:
+  `GenerateSummaryJob#extract_issues` (chamada à parte DEPOIS do resumo, JSON, no máximo 6, com lista
+  de exclusões: divergência já em card, cadastro/CNPJ/contato, nada que o sistema calcula — equipe,
+  horas, logística, cronograma, preço) e `RegisterPendingIssueTool` no chat (dedup por texto
+  normalizado). Card próprio (`project_issues/_issue`): "Responder" ou "Seguir sem resposta" com motivo
+  obrigatório. Resposta dada NO CHAT a IA registra com `AnswerPendingIssueTool` (só resposta de
+  verdade — liberar sem resposta é sempre humano, no card).
+- `Conversation#generation_blockers` = divergências `open` + pendências `open`.
+  `GenerateProposalDocumentTool` devolve `generation_blockers_text` (lista + onde se resolve) em vez de
+  gerar; a geração pendente em background (`background_ready`) não passa por isso. Painel "Antes de
+  gerar a proposta" (`conversations/_generation_blockers`, atualizado por turbo_stream ao responder).
+- Snapshot: `[PENDÊNCIAS ABERTAS — TRAVAM A GERAÇÃO]`, `[PENDÊNCIAS JÁ TRATADAS]` (respostas são dado
+  pro texto; liberadas viram ressalva), `[DIVERGÊNCIAS LIBERADAS SEM DECISÃO]`. A checklist ganhou a
+  EXCEÇÃO: o que muda escopo/quantitativo/equipe/prazo/preço vira pendência; o resto continua "A
+  confirmar" sem travar.
+- Verificado ao vivo na conversa 65 (Bedrock, transação desfeita): 5 pendências em 18 s, todas de peso
+  no preço (TER embarcado ou só veterinário, poços simultâneos, tablet por conta de quem, o que as
+  2.994 diárias da PPU cobrem, subcontratação de reabilitação de fauna); nenhuma de cadastro.
+- Conversas antigas: divergência aberta passa a travar; pendências só nascem em resumo novo (ou pelo
+  chat).
 
 ### Sugestão fora do cadastro
 

@@ -18,6 +18,11 @@ class ProposalsController < ApplicationController
       return
     end
 
+    if @conversation.framing_confirmation_required?
+      redirect_to @conversation, alert: "Confirme o enquadramento (licença e estudo) no painel antes de precificar."
+      return
+    end
+
     @conversation.ensure_proposal!
 
     redirect_to conversation_proposal_path(@conversation),

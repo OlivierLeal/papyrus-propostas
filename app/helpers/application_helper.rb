@@ -97,7 +97,9 @@ module ApplicationHelper
     "add_external_cost" => "Lançou um custo externo",
     "insert_schedule_section" => "Inseriu o cronograma no documento",
     "remember_for_future_proposals" => "Propôs guardar uma memória",
-    "learn_from_revised_proposal" => "Leu a versão revisada da proposta"
+    "learn_from_revised_proposal" => "Leu a versão revisada da proposta",
+    "register_pending_issue" => "Abriu uma pendência",
+    "answer_pending_issue" => "Registrou a resposta de uma pendência"
   }.freeze
 
   def tool_step?(message)

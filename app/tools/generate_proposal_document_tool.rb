@@ -297,6 +297,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     proposal.conversation.broadcast_refresh
   end
 
+  # Trava de confirmação do enquadramento (Conversation#framing_confirmation_required?). A mensagem
+  # diz ONDE se resolve — erro de ferramenta que não diz isso faz a IA tentar de novo em loop.
+  FRAMING_NOT_CONFIRMED = "Não gerei: o enquadramento (licença e estudo) ainda não foi confirmado. " \
+    "Peça ao consultor pra conferir e clicar em \"Confirmar enquadramento\" no painel da proposta " \
+    "(à esquerda do chat) — se houver divergência entre a legislação e o pedido do cliente, ele decide " \
+    "no card antes. Não chame esta ferramenta de novo até ele confirmar.".freeze
+
   def initialize(conversation:, background_ready: false)
     super()
     @conversation = conversation
@@ -312,6 +319,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
     # reload: a geração pendente (.generate_pending!, dentro de um job) chega aqui com a proposta carregada
     # ANTES da chamada de IA deles — status, formato e versão podem ter mudado nesse meio-tempo.
+    # A geração pendente (@background_ready) já passou por esta trava quando foi pedida.
+    return { error: FRAMING_NOT_CONFIRMED }.to_json if !@background_ready && @conversation.framing_confirmation_required?
+    # Divergência sem decisão / pendência sem resposta (Conversation#generation_blockers, 2026-09-30).
+    if !@background_ready && (blockers = @conversation.generation_blockers_text)
+      return { error: blockers }.to_json
+    end
+
     @proposal = @conversation.proposal&.reload || @conversation.ensure_proposal!(ai_suggestions: false)
     return { error: blocked_reason }.to_json if @proposal.nil?
 

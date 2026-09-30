@@ -13,6 +13,8 @@ class Conversation < ApplicationRecord
   # divergências entre documentos — ver ProjectFinding e ProjectConflict.
   has_many :project_findings, dependent: :destroy
   has_many :project_conflicts, dependent: :destroy
+  has_many :project_issues, dependent: :destroy
+  belongs_to :framing_confirmed_by, class_name: "User", optional: true
 
   STATUSES = %w[setup processing reviewing pricing completed].freeze
 
@@ -228,6 +230,14 @@ class Conversation < ApplicationRecord
     de opções antes de ver qualquer coisa — não pergunte "Opção A/B/C", só gere. Se 3, 5, 6 e 11
     estiverem minimamente resolvidos, chame a ferramenta.
 
+    EXCEÇÃO (2026-09-30): o que MUDA escopo, quantitativo, equipe, prazo ou preço e só o consultor
+    ou o cliente sabem responder (ex.: "as bacias X e Y do cronograma estão no escopo?", "as 2.994
+    diárias da planilha batem com a escala 14×14?") não vai só no texto: registre com
+    register_pending_issue. Pendência aberta e divergência sem decisão travam a geração — é o
+    sistema que trava, não você; o estado da proposta mostra o que está aberto a cada turno.
+    Dado de cadastro (CNPJ, contato, e-mail), detalhe regulatório menor e tudo o que o sistema
+    calcula (equipe, horas, logística, cronograma, preço) continuam NÃO sendo pendência.
+
     Só marque `somente_tecnica: true` quando o consultor pedir EXPLICITAMENTE só a parte técnica
     (ex.: "gera só a técnica por enquanto", "ainda não quero mostrar preço") — nunca por conta
     própria, nunca só porque o status é "draft". Só marque `somente_comercial: true` quando pedir
@@ -371,23 +381,84 @@ class Conversation < ApplicationRecord
   # não casa vira um achado visível — mesma regra da sugestão de equipe fora do cadastro
   # (Proposal#flag_out_of_catalog): ou falta cadastro, ou a IA inventou, e as duas coisas são
   # informação pro consultor (não bloqueia mais nada, ver flag_study_type_out_of_catalog).
-  # O estudo que a LEGISLAÇÃO exige (source_kind "cal", ProcessLegalNormsJob) fica de fora: ele é
-  # o outro lado da comparação com o pedido do cliente, não o estudo desta proposta — só vira
-  # estudo da proposta se o consultor escolher seguir a legislação (ProjectConflict#resolve!).
+  # A NORMA vence o pedido do cliente (2026-09-30, Sara: "a gente sempre busca seguir primeiro via
+  # requisito normativo"; consultor: "o cliente pode não ter a informação ou estar desatualizado") —
+  # ver #framing_values. Roda depois do ET, do CAL e do TR: o ET chega primeiro, e o que ele pediu
+  # é TROCADO pelo que a norma exige assim que o CAL termina. Tipo marcado à mão no painel (que não
+  # veio de achado nenhum) fica.
   def assign_study_types_from_findings!
-    values = project_findings.active.where(field: "tipo_estudo").where.not(source_kind: "cal").pluck(:value).uniq
-    out_of_catalog = []
+    values = framing_values("tipo_estudo")
+    out_of_catalog = values.reject { |value| StudyType.match_ai_value(value) }
+    wanted = values.filter_map { |value| StudyType.match_ai_value(value) }.uniq
+    from_findings = project_findings.active.where(field: "tipo_estudo").pluck(:value).filter_map { |value| StudyType.match_ai_value(value) }
 
-    values.each do |value|
-      match = StudyType.match_ai_value(value)
-      if match
-        study_types << match unless study_types.include?(match)
-      else
-        out_of_catalog << value
-      end
-    end
+    stale = study_types.to_a & (from_findings - wanted)
+    self.study_types -= stale if stale.any?
+    wanted.each { |type| study_types << type unless study_types.include?(type) }
 
     flag_study_type_out_of_catalog(out_of_catalog)
+  end
+
+  # Trava de confirmação do enquadramento (2026-09-29, relato da Sara: "estou lendo o resumo no
+  # automático e já peço pra gerar" — o sistema tinha enquadrado diferente da Papyrus, e o escopo
+  # inteiro saiu no enquadramento errado). Antes de precificar ou gerar o 1º documento, um consultor
+  # confirma licença e estudo(s) no painel. Propostas que já têm documento gerado não travam — já
+  # passaram desse ponto antes da trava existir.
+  def framing_confirmation_required?
+    framing_confirmed_at.nil? && !proposal&.generated_documents&.attached?
+  end
+
+  # O que TRAVA a geração da proposta (2026-09-30, conversa 65: o consultor pulava os
+  # questionamentos e pedia pra gerar direto): divergência sem decisão e pendência sem resposta.
+  # Cada uma se libera no próprio card — decidindo/respondendo, ou "seguir sem" com motivo.
+  def generation_blockers
+    project_conflicts.open.order(:id).to_a + project_issues.open.order(:id).to_a
+  end
+
+  def generation_blockers_text
+    blockers = generation_blockers
+    return nil if blockers.empty?
+
+    lines = blockers.map do |blocker|
+      blocker.is_a?(ProjectConflict) ? "- Divergência (#{blocker.field_label}): #{blocker.summary}" : "- Pendência: #{blocker.question}"
+    end
+    "Não gerei: há #{blockers.size} ponto(s) sem resposta que mudam escopo/preço:\n#{lines.join("\n")}\n" \
+      "Apresente cada um ao consultor. Ele responde no card de cada ponto no chat (ou aqui no chat, e aí " \
+      "você registra com answer_pending_issue), ou libera com \"Seguir sem resposta\"/\"Seguir sem decidir\" " \
+      "escrevendo o motivo. Não chame generate_proposal_document de novo até não restar nenhum."
+  end
+
+  # Divergência lei × pedido ainda sem decisão: confirmar antes disso seria confirmar sem escolher.
+  def open_legal_framing_conflicts
+    project_conflicts.open.where(field: ProjectFinding::FRAMING_FIELDS)
+      .where(id: ProjectConflictFinding.joins(:project_finding).where(project_findings: { source_kind: "cal" }).select(:project_conflict_id))
+      .to_a
+  end
+
+  def confirm_framing!(user)
+    return false if open_legal_framing_conflicts.any?
+
+    update!(framing_confirmed_at: Time.current, framing_confirmed_by: user)
+  end
+
+  # O que o painel mostra pra confirmar: o que foi pedido (ET/TR/consultor) e o que a lei diz (CAL).
+  def framing_overview
+    findings = project_findings.active.where(field: %w[tipo_licenca enquadramento_legal tipo_estudo]).order(:id)
+    requested, legal = findings.partition { |finding| finding.source_kind != "cal" }
+    {
+      licenses: requested.select { |f| f.field == "tipo_licenca" }.map(&:value).uniq,
+      legal: legal.map { |f| [ f.field_label, f.value ] }
+    }
+  end
+
+  # Qual fonte vale pra licença/estudo desta proposta: decisão do consultor > norma (CAL) > o que os
+  # documentos do cliente pedem (ET/TR/complementar). Sem enquadramento pela norma (CAL não rodou ou
+  # não concluiu), vale o pedido — e o resumo avisa que não foi conferido.
+  def framing_values(field)
+    findings = project_findings.active.where(field: field).to_a
+    chosen = findings.select { |f| f.source_kind == "consultor" }.presence ||
+      findings.select { |f| f.source_kind == "cal" }.presence || findings
+    chosen.map(&:value).uniq
   end
 
   # Decisão do consultor numa divergência de tipo de estudo: sai o que foi descartado, entra o
@@ -521,7 +592,8 @@ class Conversation < ApplicationRecord
   def refresh_proposal_state_snapshot!
     messages.where(role: "user", internal: true).where("content LIKE ?", "#{PROPOSAL_STATE_MARKER}%").destroy_all
     text = [ proposal.present? ? proposal_state_text : no_proposal_state_text,
-             findings_snapshot_text, legal_framing_snapshot_text, conflicts_snapshot_text ].compact_blank.join("\n")
+             findings_snapshot_text, legal_framing_snapshot_text, conflicts_snapshot_text,
+             issues_snapshot_text, framing_gate_snapshot_text ].compact_blank.join("\n")
     snapshot = create_user_message(text)
     snapshot.update!(internal: true)
   end
@@ -734,6 +806,18 @@ class Conversation < ApplicationRecord
       TEXT
     end
 
+    def framing_gate_snapshot_text
+      return "" unless framing_confirmation_required?
+
+      <<~TEXT
+        [BLOQUEIO: ENQUADRAMENTO NÃO CONFIRMADO] Nenhum consultor confirmou ainda a licença e o(s)
+        estudo(s) desta proposta. Enquanto isso, NÃO chame generate_proposal_document e não diga que
+        vai gerar: peça ao consultor que confira o enquadramento e clique em "Confirmar enquadramento"
+        no painel à esquerda do chat (se houver divergência legislação × pedido, ele decide no card
+        antes). Tirar dúvida, ajustar escopo e conversar continuam liberados.
+      TEXT
+    end
+
     # Legislação × pedido do cliente (pedido da Sara, 2026-09-29): a proposta SEMPRE diz o que a
     # legislação enquadra e o que foi solicitado — mesmo depois de o consultor escolher um lado
     # ("de acordo com a legislação o estudo é X; entretanto, foi solicitado Y"). O que muda com a
@@ -746,7 +830,7 @@ class Conversation < ApplicationRecord
         legal, requested = conflict.findings.partition { |finding| finding.source_kind == "cal" }
         decision = case conflict.status
         when "resolved" then "o consultor decidiu: a proposta contempla #{conflict.findings.first&.superseded_by&.value}"
-        when "client" then "o consultor decidiu LEVAR AO CLIENTE: a CONTRATANTE escolhe qual adotar"
+        when "client" then "o consultor decidiu LEVAR AO CLIENTE: a proposta segue a legislação e a CONTRATANTE confirma"
         else "o consultor AINDA NÃO decidiu"
         end
         "- #{conflict.field_label}: legislação diz #{legal.map { |f| "#{f.value} (#{f.locator.presence || f.source_label})" }.join(' / ')}; " \
@@ -762,29 +846,61 @@ class Conversation < ApplicationRecord
         órgão>), o empreendimento se enquadra em <X>; entretanto, <o Termo de Referência / a
         solicitação da CONTRATANTE> prevê <Y>." E termina conforme a decisão:
         - decidido: "A presente proposta contempla <o escolhido>."
-        - levar ao cliente: "Cabe à CONTRATANTE definir qual enquadramento adotar. Esta proposta
-          contempla <o solicitado>; optando-se por <o da legislação>, escopo e preço serão revistos."
+        - levar ao cliente: "Esta proposta contempla o enquadramento legal (<o da legislação>).
+          Cabe à CONTRATANTE confirmar; optando-se por <o solicitado>, escopo e preço serão revistos."
         - ainda não decidido: igual a "levar ao cliente", e avise o consultor no chat que a
-          decisão está pendente no card da divergência. Isso NÃO impede gerar a proposta.
+          decisão está pendente no card da divergência — enquanto isso a geração fica travada.
         Nunca escolha um lado por conta própria.
       TEXT
     end
 
-    # Divergência aberta não bloqueia nada — mas a IA precisa saber que existe, senão escolhe um
+    # Divergência aberta TRAVA a geração (2026-09-30) — e a IA precisa saber que existe, senão escolhe um
     # dos valores por conta própria e o consultor nunca fica sabendo que havia dois.
     def conflicts_snapshot_text
-      conflicts = project_conflicts.open.includes(findings: :source_blob).reject(&:legal_framing?)
+      conflicts = project_conflicts.where(status: %w[open waived]).includes(findings: :source_blob).reject(&:legal_framing?)
       return "" if conflicts.empty?
 
-      <<~TEXT
-        [DIVERGÊNCIAS ABERTAS ENTRE OS DOCUMENTOS] (o consultor ainda não decidiu qual valor vale):
-        #{conflicts.map(&:to_context_line).join("\n")}
+      open, waived = conflicts.partition(&:open?)
+      [
+        (<<~TEXT if open.any?),
+          [DIVERGÊNCIAS ABERTAS ENTRE OS DOCUMENTOS] (o consultor ainda não decidiu — TRAVAM a geração):
+          #{open.map(&:to_context_line).join("\n")}
+          NUNCA escolha um dos valores sozinho. Enquanto houver divergência aberta, generate_proposal_document
+          recusa gerar: apresente os pontos e peça ao consultor que decida no card (ou libere com
+          "Seguir sem decidir", explicando o motivo).
+        TEXT
+        (<<~TEXT if waived.any?)
+          [DIVERGÊNCIAS LIBERADAS SEM DECISÃO] (o consultor mandou seguir assim):
+          #{waived.map { |c| "#{c.to_context_line} — motivo: #{c.resolution_note}" }.join("\n")}
+          No texto da proposta, trate cada uma como ressalva, cobrindo os dois cenários ou marcando "A
+          confirmar com o cliente".
+        TEXT
+      ].compact.join("\n")
+    end
 
-        NUNCA escolha um dos valores sozinho e nunca apresente um deles como se fosse o único.
-        Ao escrever qualquer seção que dependa de um desses pontos, trate a divergência como
-        ressalva no texto — cobrindo os dois cenários ou marcando "A confirmar com o cliente",
-        mesma regra que já vale para dado incerto. Isso NÃO impede gerar a proposta.
-      TEXT
+    # Pendências (ProjectIssue): as abertas travam a geração; as respondidas são DADO que a proposta
+    # tem que usar; as liberadas sem resposta viram ressalva/"a confirmar".
+    def issues_snapshot_text
+      issues = project_issues.order(:id).to_a
+      return "" if issues.empty?
+
+      open, closed = issues.partition(&:open?)
+      [
+        (<<~TEXT if open.any?),
+          [PENDÊNCIAS ABERTAS — TRAVAM A GERAÇÃO] (questionamentos sem resposta do consultor):
+          #{open.map(&:to_context_line).join("\n")}
+          Enquanto houver pendência aberta, generate_proposal_document recusa gerar. Se o consultor
+          pedir pra gerar, NÃO prometa gerar: liste as pendências e diga que ele responde no card de
+          cada uma (ou aqui no chat) ou libera com "Seguir sem resposta" explicando o motivo. Se ele
+          RESPONDER uma delas no chat, registre com answer_pending_issue.
+        TEXT
+        (<<~TEXT if closed.any?)
+          [PENDÊNCIAS JÁ TRATADAS]
+          #{closed.map(&:to_context_line).join("\n")}
+          Use as respostas no texto da proposta; o que foi liberado sem resposta sai como ressalva ou
+          "A confirmar com o cliente".
+        TEXT
+      ].compact.join("\n")
     end
 
     def no_proposal_state_text

@@ -4,6 +4,9 @@ Rails.application.routes.draw do
   resources :users, except: :show
 
   resources :conversations, only: %i[index new create show update] do
+    member do
+      post :confirm_framing
+    end
     resources :messages, only: :create
 
     resources :knowledge_notes, only: [] do
@@ -29,6 +32,14 @@ Rails.application.routes.draw do
         post :resolve
         post :dismiss
         post :refer_to_client
+        post :waive
+      end
+    end
+
+    resources :project_issues, only: [] do
+      member do
+        post :answer
+        post :waive
       end
     end
 

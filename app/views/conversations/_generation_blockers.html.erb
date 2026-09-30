@@ -1,0 +1,21 @@
+<%# O que trava a geração da proposta (Conversation#generation_blockers): divergência sem decisão e
+    pendência sem resposta. Os cards ficam no chat e rolam pra cima; aqui fica a lista. %>
+<% blockers = conversation.generation_blockers %>
+<div id="generation_blockers">
+  <% if blockers.any? %>
+    <div class="bg-base-100 rounded-box border border-warning shadow-sm p-6">
+      <h2 class="font-semibold text-base-content mb-1">Antes de gerar a proposta</h2>
+      <p class="text-xs text-base-content/60 mb-3">
+        <%= blockers.size %> ponto(s) sem resposta. Responda ou libere com motivo no card de cada um, no chat.
+      </p>
+      <ul class="flex flex-col gap-2 text-sm">
+        <% blockers.each do |blocker| %>
+          <li class="flex gap-2">
+            <span class="badge badge-warning badge-xs mt-1 shrink-0"><%= blocker.is_a?(ProjectConflict) ? "divergência" : "pendência" %></span>
+            <span class="text-base-content"><%= blocker.is_a?(ProjectConflict) ? blocker.field_label : blocker.question.truncate(120) %></span>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+</div>

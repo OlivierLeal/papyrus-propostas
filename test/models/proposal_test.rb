@@ -821,9 +821,21 @@ class ProposalTest < ActiveSupport::TestCase
     conversation = proposal.conversation
     conversation.project_findings.create!(field: "tipo_licenca", source_kind: "et", value: "Licença Prévia (LP)")
     conversation.project_findings.create!(field: "tipo_licenca", source_kind: "tr", value: "Licença de Instalação (LI)")
-    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "consultor", value: "LP")
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "complementar", value: "LP")
 
     assert_includes proposal.docx_filename("combined"), "_LP+LI_Rev."
+  end
+
+  # Decisão do consultor > norma (CAL) > pedido do cliente (Conversation#framing_values).
+  test "ato_licenciamento follows the consultant's decision over the documents" do
+    proposal = proposals(:priced_proposal)
+    proposal.update!(version: 1)
+    conversation = proposal.conversation
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "et", value: "Licença Prévia (LP)")
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "tr", value: "Licença de Instalação (LI)")
+    conversation.project_findings.create!(field: "tipo_licenca", source_kind: "consultor", value: "LP")
+
+    assert_includes proposal.docx_filename("combined"), "_LP_Rev."
   end
 
   # O consultor dita o nome no chat quando a pasta na rede e o controle de propostas já existem

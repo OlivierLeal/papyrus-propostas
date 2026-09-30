@@ -14,10 +14,56 @@ class LegalFramingTest < ActiveSupport::TestCase
     [ @requested, @legal ].each { |f| @conflict.project_conflict_findings.create!(project_finding: f) }
   end
 
-  test "o estudo exigido pela legislação não vira estudo da proposta sozinho" do
+  # 2026-09-30 (Sara: "a gente sempre busca seguir primeiro via requisito normativo"): a norma vence
+  # o pedido do cliente por padrão — ele pode não ter a informação ou estar desatualizado.
+  test "o estudo exigido pela legislação substitui o que o cliente pediu" do
+    @conversation.study_types << study_types(:rap)
+
+    @conversation.assign_study_types_from_findings!
+
+    assert_equal [ study_types(:eia_rima) ], @conversation.reload.study_types
+  end
+
+  test "cliente que não indicou estudo: a proposta adota o da legislação" do
+    @requested.destroy!
+
+    @conversation.assign_study_types_from_findings!
+
+    assert_equal [ study_types(:eia_rima) ], @conversation.reload.study_types
+  end
+
+  test "seguir o pedido do cliente no card faz o estudo dele valer" do
+    @conversation.assign_study_types_from_findings!
+
+    @conflict.resolve!(users(:one), value: "rap")
     @conversation.assign_study_types_from_findings!
 
     assert_equal [ study_types(:rap) ], @conversation.reload.study_types
+  end
+
+  test "sem enquadramento pela norma, vale o pedido do cliente" do
+    @legal.destroy!
+
+    @conversation.assign_study_types_from_findings!
+
+    assert_equal [ study_types(:rap) ], @conversation.reload.study_types
+  end
+
+  test "tipo marcado à mão no painel, que não veio de achado, fica" do
+    manual = StudyType.where.not(id: [ study_types(:rap).id, study_types(:eia_rima).id ]).first || StudyType.create!(name: "Manual", code: "manual_test")
+    @conversation.study_types << manual
+
+    @conversation.assign_study_types_from_findings!
+
+    assert_includes @conversation.reload.study_types, manual
+  end
+
+  test "sigla da licença usa a da norma, sem misturar com a do pedido" do
+    @conversation.project_findings.create!(field: "tipo_licenca", value: "LP", nature: "fato", source_kind: "et")
+    @conversation.project_findings.create!(field: "tipo_licenca", value: "LP+LI", nature: "fato", source_kind: "cal")
+    proposal = Proposal.new(conversation: @conversation)
+
+    assert_equal %w[LP LI], proposal.license_act_acronyms
   end
 
   test "divergência entre CAL e pedido sobre licença/estudo é de enquadramento; outras não" do

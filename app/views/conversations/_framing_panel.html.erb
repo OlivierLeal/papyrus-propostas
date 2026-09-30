@@ -1,0 +1,52 @@
+<%# Trava de confirmação do enquadramento (Conversation#framing_confirmation_required?): o consultor
+    confere licença e estudo(s) — o que foi pedido e o que a legislação diz — antes de precificar ou
+    gerar o 1º documento. Relato da Sara (2026-09-29): lendo o resumo "no automático", o enquadramento
+    diferente do sistema passou despercebido até a proposta estar pronta. %>
+<% overview = conversation.framing_overview %>
+<% pending_conflicts = conversation.open_legal_framing_conflicts %>
+<div class="bg-base-100 rounded-box border shadow-sm p-6 <%= conversation.framing_confirmation_required? ? "border-warning" : "border-base-300" %>">
+  <h2 class="font-semibold text-base-content mb-3">Enquadramento</h2>
+
+  <dl class="flex flex-col gap-2 text-sm">
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-base-content/50">Licença pedida</dt>
+      <dd class="text-base-content"><%= overview[:licenses].join(" · ").presence || "não identificada" %></dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-base-content/50">Estudo(s) desta proposta</dt>
+      <dd class="text-base-content"><%= conversation.study_types_label %></dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-base-content/50">Pela legislação (CAL)</dt>
+      <% if overview[:legal].any? %>
+        <% overview[:legal].each do |label, value| %>
+          <dd class="text-base-content"><span class="text-base-content/60"><%= label %>:</span> <%= value.truncate(160) %></dd>
+        <% end %>
+      <% else %>
+        <dd class="text-base-content/60">não verificado — confira o enquadramento pela norma</dd>
+      <% end %>
+    </div>
+  </dl>
+
+  <% if conversation.framing_confirmed_at %>
+    <p class="text-xs text-success mt-3">
+      Confirmado por <%= conversation.framing_confirmed_by&.name || "consultor" %>
+      em <%= conversation.framing_confirmed_at.strftime("%d/%m/%Y %H:%M") %>.
+    </p>
+  <% elsif !conversation.framing_confirmation_required? %>
+    <p class="text-xs text-base-content/50 mt-3">Proposta anterior à confirmação de enquadramento.</p>
+  <% elsif pending_conflicts.any? %>
+    <p class="text-xs text-warning mt-3">
+      A legislação diverge do pedido em <%= pending_conflicts.map(&:field_label).join(", ") %>. Decida no card
+      do chat (seguir a lei, seguir o pedido ou levar ao cliente) e depois confirme aqui.
+    </p>
+    <button type="button" class="btn btn-warning btn-sm w-full mt-2" disabled>Confirmar enquadramento</button>
+  <% else %>
+    <p class="text-xs text-base-content/60 mt-3">
+      Confira licença e estudo antes de seguir — o escopo e a equipe da proposta partem daqui. Se algo
+      estiver errado, ajuste os tipos de estudo abaixo ou diga no chat.
+    </p>
+    <%= button_to "Confirmar enquadramento", confirm_framing_conversation_path(conversation),
+          class: "btn btn-warning btn-sm w-full mt-2" %>
+  <% end %>
+</div>

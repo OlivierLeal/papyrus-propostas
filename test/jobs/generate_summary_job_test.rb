@@ -6,6 +6,12 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     @conversation.update!(processing_steps: { "et" => "done", "cal" => "skipped", "tr" => "skipped", "comp_docs" => "skipped", "summary" => "queued" })
   end
 
+  # Depois do resumo vem a extração de pendências (outra mensagem interna) — o prompt do resumo é
+  # achado pelo começo do texto, não por ser o último.
+  def summary_prompt
+    @conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "Monte um resumo%").order(:created_at).last.content
+  end
+
   def record_finding!(field:, value:, source_kind: "tr", nature: "fato", excerpt: nil)
     @conversation.project_findings.create!(
       field: field, value: value, source_kind: source_kind, nature: nature, excerpt: excerpt
@@ -40,8 +46,8 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
   test "the summary reply is visible to the consultant, only the instruction is hidden" do
     stub_ai_complete("# RESUMO ESTRUTURADO") { GenerateSummaryJob.perform_now(@conversation.id) }
 
-    instruction = @conversation.messages.where(role: "user", internal: true).last
-    reply = @conversation.messages.where(role: "assistant").last
+    instruction = @conversation.messages.where(role: "user", internal: true).where("content LIKE ?", "Monte um resumo%").last
+    reply = @conversation.messages.where(role: "assistant", internal: false).where.not("content LIKE ?", "{%").last
 
     assert instruction.present?
     assert_not reply.internal?
@@ -51,7 +57,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     finding = record_finding!(field: "tipo_licenca", value: "LP")
 
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_includes sent_prompt, "Tipo de licença"
     assert_includes sent_prompt, "[#{finding.citation_code}] Tipo de licença: LP"
@@ -64,7 +70,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     record_finding!(field: "tipo_licenca", value: "LP")
 
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_includes sent_prompt, "Tipo de licença: LP"
     assert_not_includes sent_prompt, "isso não é json"
@@ -76,7 +82,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     record_finding!(field: "orgao_ambiental", value: "INEMA", excerpt: "...protocolo junto ao INEMA, conforme...")
 
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_not_includes sent_prompt, "protocolo junto ao INEMA"
   end
@@ -91,7 +97,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     assert_equal "open", conflict.status
     assert_includes @conversation.messages.map(&:content), { project_conflict_id: conflict.id }.to_json
 
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
     assert_includes sent_prompt, "DIVERGÊNCIAS ENTRE OS DOCUMENTOS"
   end
 
@@ -99,7 +105,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     @conversation.create_geospatial_result!(area_ha: 478.07, perimeter_km: 8.75)
 
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_includes sent_prompt, "Área: 478.07 ha"
     assert_includes sent_prompt, "Perímetro: 8.75 km"
@@ -107,7 +113,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
 
   test "omits the geospatial section entirely when there is no GeospatialResult" do
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_not_includes sent_prompt, "Dados geoespaciais"
   end
@@ -115,7 +121,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
   test "falls back to a placeholder message when there is no structured data yet" do
     sent_prompt = nil
     stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_includes sent_prompt, "Nenhum dado estruturado disponível ainda."
   end
@@ -166,7 +172,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     with_similar_jobs([]) do
       stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
     end
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_includes sent_prompt, "nenhum projeto anterior semelhante"
   end
@@ -180,7 +186,7 @@ class GenerateSummaryJobTest < ActiveSupport::TestCase
     with_similar_jobs([ match ]) do
       stub_ai_complete("ok") { GenerateSummaryJob.perform_now(@conversation.id) }
     end
-    sent_prompt = @conversation.messages.where(role: "user", internal: true).order(:created_at).last.content
+    sent_prompt = summary_prompt
 
     assert_includes sent_prompt, "25051 · Petrobras · Diagnóstico Quilombola (2025) — referência direta"
     assert_no_match(/similaridade \d+%/, sent_prompt)

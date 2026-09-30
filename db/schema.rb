@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -58,12 +58,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_150000) do
     t.datetime "ai_responding_since"
     t.string "client_name", null: false
     t.datetime "created_at", null: false
+    t.datetime "framing_confirmed_at"
+    t.bigint "framing_confirmed_by_id"
     t.bigint "model_id"
     t.jsonb "processing_steps", default: {}, null: false
     t.datetime "setup_completed_at"
     t.string "status", default: "setup", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index ["framing_confirmed_by_id"], name: "index_conversations_on_framing_confirmed_by_id"
     t.index ["model_id"], name: "index_conversations_on_model_id"
     t.index ["status"], name: "index_conversations_on_status"
     t.index ["user_id"], name: "index_conversations_on_user_id"
@@ -452,6 +455,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_150000) do
     t.index ["superseded_by_id"], name: "index_project_findings_on_superseded_by_id"
   end
 
+  create_table "project_issues", force: :cascade do |t|
+    t.text "answer"
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.text "impact"
+    t.text "question", null: false
+    t.datetime "resolved_at"
+    t.bigint "resolved_by_id"
+    t.string "source", default: "resumo", null: false
+    t.string "status", default: "open", null: false
+    t.datetime "updated_at", null: false
+    t.text "waiver_reason"
+    t.index ["conversation_id", "status"], name: "index_project_issues_on_conversation_id_and_status"
+    t.index ["conversation_id"], name: "index_project_issues_on_conversation_id"
+    t.index ["resolved_by_id"], name: "index_project_issues_on_resolved_by_id"
+  end
+
   create_table "project_pricings", force: :cascade do |t|
     t.decimal "bdi", precision: 6, scale: 4, default: "1.3", null: false
     t.string "common_split", default: "equal", null: false
@@ -728,6 +748,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_150000) do
   add_foreign_key "conversation_study_types", "study_types"
   add_foreign_key "conversations", "models"
   add_foreign_key "conversations", "users"
+  add_foreign_key "conversations", "users", column: "framing_confirmed_by_id"
   add_foreign_key "field_campaigns", "ibge_municipalities"
   add_foreign_key "field_campaigns", "pricing_items", on_delete: :cascade
   add_foreign_key "general_chats", "models"
@@ -759,6 +780,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_150000) do
   add_foreign_key "project_findings", "active_storage_blobs", column: "source_blob_id"
   add_foreign_key "project_findings", "conversations"
   add_foreign_key "project_findings", "project_findings", column: "superseded_by_id"
+  add_foreign_key "project_issues", "conversations"
+  add_foreign_key "project_issues", "users", column: "resolved_by_id"
   add_foreign_key "project_pricings", "ibge_municipalities"
   add_foreign_key "project_pricings", "proposals"
   add_foreign_key "proposal_professionals", "pricing_items", on_delete: :nullify

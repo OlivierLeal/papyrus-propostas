@@ -56,6 +56,11 @@
         <% if conflict %>
           <%= render "project_conflicts/conflict", conflict: conflict %>
         <% end %>
+      <% elsif parsed_content.is_a?(Hash) && parsed_content["project_issue_id"].present? %>
+        <% issue = ProjectIssue.find_by(id: parsed_content["project_issue_id"]) %>
+        <% if issue %>
+          <%= render "project_issues/issue", issue: issue %>
+        <% end %>
       <% elsif parsed_content.is_a?(Hash) && parsed_content["knowledge_note_id"].present? %>
         <% note = KnowledgeNote.find_by(id: parsed_content["knowledge_note_id"]) %>
         <% if note %>
