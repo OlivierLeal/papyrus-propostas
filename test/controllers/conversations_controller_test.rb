@@ -407,8 +407,8 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     get conversation_path(proposal.conversation)
 
     assert_response :success
-    assert_select "#files_panel", text: /Versão atual · Rev\.01/
-    assert_select "#files_panel details", text: /Versões anteriores \(1\)/
+    assert_select "#files_panel", text: /Proposta · Rev\.01/
+    assert_select "#files_panel details", text: /Revisões anteriores \(1\)/
     assert_select "#files_panel details", text: /v1\.docx/
     assert_operator response.body.index("v2.docx"), :<, response.body.index("v1.docx")
   end

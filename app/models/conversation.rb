@@ -14,6 +14,7 @@ class Conversation < ApplicationRecord
   has_many :project_findings, dependent: :destroy
   has_many :project_conflicts, dependent: :destroy
   has_many :project_issues, dependent: :destroy
+  has_many :spreadsheet_fills, dependent: :destroy
   belongs_to :framing_confirmed_by, class_name: "User", optional: true
 
   STATUSES = %w[setup processing reviewing pricing completed].freeze

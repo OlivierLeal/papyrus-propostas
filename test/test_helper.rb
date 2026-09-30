@@ -36,6 +36,7 @@ module ActiveSupport
     include EmbedderStubHelper
     include CalStubHelper
     include SpreadsheetFixtureHelper
+    include ClientSpreadsheetFixtureHelper
     include WebSearchStubHelper
     include ClassMethodStubHelper
     include GeoTestHelper

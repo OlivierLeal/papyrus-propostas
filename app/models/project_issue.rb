@@ -13,7 +13,7 @@ class ProjectIssue < ApplicationRecord
   belongs_to :resolved_by, class_name: "User", optional: true
 
   STATUSES = %w[open answered waived].freeze
-  SOURCES = %w[resumo chat].freeze
+  SOURCES = %w[resumo chat planilha].freeze
 
   validates :question, presence: true
   validates :status, inclusion: { in: STATUSES }

@@ -1,0 +1,27 @@
+# Dados fixos da Papyrus usados pra preencher as planilhas de preço dos clientes (PPU, DFP etc. —
+# ver Spreadsheets::FactCatalog). Mesma regra da seção 9 do CLAUDE.md: dado fixo da empresa fica em
+# arquivo/prompt, não em tabela de cadastro. Valor em branco (~) = a Papyrus ainda não informou; o
+# preenchimento vira PENDÊNCIA em vez de inventar.
+razao_social: "PAPYRUS CONSULTORIA AMBIENTAL LTDA"
+cnpj: "07.946.358/0001-50"
+municipio_faturamento: "Lauro de Freitas/BA"
+regime_tributario: ~        # ex.: "Lucro Presumido"
+sindicato: ~                # sindicato considerado na proposta
+data_base_reajuste: ~       # data-base do reajuste salarial
+
+# Tributos sobre o faturamento (frações). Fonte: "Impostos Aplicáveis" do modelo .docx da Papyrus.
+tributos:
+  iss: 0.03
+  pis: 0.0065
+  cofins: 0.03
+  cprb: 0
+  ir: 0.048
+  csll: 0.0288
+
+# Decomposição do BDI pedida em planilhas de formação de preço (DFP). A administração central é
+# calculada pelo sistema pra fechar com BDI × impostos da proposta; as demais a Papyrus informa.
+bdi_componentes:
+  lucro: ~
+  riscos: ~
+  seguros_garantias: ~
+  despesas_financeiras: ~

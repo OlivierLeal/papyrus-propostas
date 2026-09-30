@@ -79,7 +79,8 @@ module ApplicationHelper
     "et" => "ET", "tr" => "TR", "kmz" => "KMZ", "complementary" => "Complementar",
     "tecnica" => "Técnica", "comercial" => "Comercial", "combined" => "Técnica + Comercial",
     "schedule_mspdi_servico" => "MS Project · Serviço",
-    "schedule_mspdi_implantacao" => "MS Project · Implantação"
+    "schedule_mspdi_implantacao" => "MS Project · Implantação",
+    "revised_with_schedule" => "Revisado + cronograma"
   }.freeze
 
   # Passo da IA que só chamou ferramenta, sem escrever texto (2026-09-27, relato do consultor:
@@ -96,6 +97,7 @@ module ApplicationHelper
     "generate_proposal_document" => "Gerou o documento da proposta",
     "add_external_cost" => "Lançou um custo externo",
     "insert_schedule_section" => "Inseriu o cronograma no documento",
+    "fill_client_spreadsheet" => "Começou a preencher a planilha do cliente",
     "remember_for_future_proposals" => "Propôs guardar uma memória",
     "learn_from_revised_proposal" => "Leu a versão revisada da proposta",
     "register_pending_issue" => "Abriu uma pendência",

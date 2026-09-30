@@ -366,6 +366,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     tables = build_tables(args, description)
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS]
     export_ms_project = export_ms_project?(args)
+    # Planilhas do cliente anexadas (PPU, DFP, formulários) vão preenchidas junto da parte comercial,
+    # sem depender de a IA lembrar de pedir (SpreadsheetFill.queue_automatic!).
+    spreadsheet_note = somente_tecnica?(args) ? "" : client_spreadsheets_note
 
     # 2026-09, pedido do consultor: a comercial/combinado sai sempre que pedido, mesmo com o
     # preço ainda em "draft" (antes só saía a técnica-sozinha até o preço ser revisado/aprovado
@@ -399,7 +402,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       { success: true, version: @proposal.version, filenames: [ commercial_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{commercial_filename} — só a parte comercial, a pedido do consultor. " \
           "Peça \"gerar completo\"/\"com a técnica\" quando quiser o documento inteiro.#{price_review_warning}" \
-          "#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}" }.to_json
+          "#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     elsif @proposal.document_split == "separated"
       technical_filename = @proposal.docx_filename("tecnica")
       commercial_filename = @proposal.docx_filename("comercial")
@@ -414,7 +417,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}" }.to_json
+          "disponíveis na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined")
       bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
@@ -422,7 +425,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -430,6 +433,18 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
+    # Falha aqui nunca derruba a geração do .docx — a planilha é um anexo à parte.
+    def client_spreadsheets_note
+      queued = SpreadsheetFill.queue_automatic!(@conversation)
+      return "" if queued.empty?
+
+      " Também estou conferindo e preenchendo a(s) planilha(s) do cliente (#{queued.to_sentence(last_word_connector: ' e ')}) " \
+        "com esta precificação; o resultado aparece no chat em instantes (se for só material de referência, fica anotado na aba Arquivos)."
+    rescue StandardError => e
+      Rails.logger.error("[GenerateProposalDocumentTool] planilhas do cliente: #{e.class} #{e.message}")
+      ""
+    end
+
     # "Att.: Sr. Lincoln Juvenal" + "Prezado Sr." / "Att.: Sra. Maria" + "Prezada Sra." (2026-09-28,
     # pedido do consultor — o modelo tinha "Sr." e "Prezado Sr." fixos, errados pra contato mulher).
     # Sem contato definido: "A confirmar" + "Prezados Senhores". Tratamento não informado cai no

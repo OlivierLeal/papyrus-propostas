@@ -43,6 +43,9 @@ Rails.application.routes.draw do
       end
     end
 
+    # Botão "Preencher" das planilhas do cliente (aba Arquivos / Tela de Precificação).
+    resources :spreadsheet_fills, only: :create
+
     resource :proposal, only: %i[show create update] do
       post :approve
       post :suggest_logistics

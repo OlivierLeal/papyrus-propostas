@@ -48,6 +48,18 @@ class Settings::ProfessionalsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 300.00, professional.rate_man_hour
   end
 
+  # Encargos: digitado em %, gravado como fração (Spreadsheets::FactCatalog separa salário e encargos).
+  test "update grava os encargos sociais digitados em porcentagem" do
+    professional = professionals(:coordenador)
+
+    patch settings_professional_path(professional), params: { professional: { social_charges_percent_display: "80,5" } }
+
+    assert_redirected_to settings_professionals_path
+    assert_equal 0.805, professional.reload.social_charges_percent
+    get edit_settings_professional_path(professional)
+    assert_select "input[name='professional[social_charges_percent_display]'][value='80.5']"
+  end
+
   test "update re-renders the edit form when a required field is invalid" do
     professional = professionals(:coordenador)
 

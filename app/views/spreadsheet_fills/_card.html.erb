@@ -1,0 +1,64 @@
+<%# Resultado do preenchimento de uma planilha do cliente (FillClientSpreadsheetJob): arquivo pronto,
+    o que foi escrito em cada célula e de onde veio, e o que falta conferir. %>
+<div class="flex flex-col gap-3 min-w-0" id="<%= dom_id(fill) %>">
+  <div class="flex items-center gap-2 font-semibold">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/60 shrink-0">
+      <path fill-rule="evenodd" d="M.99 5.24A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25l.01 9.5A2.25 2.25 0 0 1 16.76 17H3.26A2.267 2.267 0 0 1 1 14.74l-.01-9.5Zm8.26 9.52v-.625a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v.615c0 .414.336.75.75.75h5.373a.75.75 0 0 0 .627-.74Zm1.5 0a.75.75 0 0 0 .627.74h5.373a.75.75 0 0 0 .75-.75v-.615a.75.75 0 0 0-.75-.75H11.5a.75.75 0 0 0-.75.75v.625Zm6.75-3.63v-.625a.75.75 0 0 0-.75-.75H11.5a.75.75 0 0 0-.75.75v.625c0 .414.336.75.75.75h5.25a.75.75 0 0 0 .75-.75Zm-8.25 0v-.625a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v.625c0 .414.336.75.75.75H8.5a.75.75 0 0 0 .75-.75ZM17.5 7.5v-.625a.75.75 0 0 0-.75-.75H11.5a.75.75 0 0 0-.75.75V7.5c0 .414.336.75.75.75h5.25a.75.75 0 0 0 .75-.75Zm-8.25 0v-.625a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75V7.5c0 .414.336.75.75.75H8.5a.75.75 0 0 0 .75-.75Z" clip-rule="evenodd" />
+    </svg>
+    <span class="truncate">Planilha do cliente — <%= fill.source_filename %></span>
+  </div>
+
+  <% if fill.processing? %>
+    <p class="flex items-center gap-2 text-base-content/70"><span class="loading loading-spinner loading-xs"></span> Preenchendo…</p>
+  <% elsif fill.not_applicable? %>
+    <p class="text-base-content/80">Não preenchi: é material de referência, não um formulário pra devolver — <%= fill.reason %></p>
+    <p class="text-xs text-base-content/60">Se ela deve ser preenchida, use "Preencher mesmo assim" na aba Arquivos ou peça aqui no chat.</p>
+  <% elsif fill.failed? %>
+    <p class="text-error"><%= fill.error.presence || "Não consegui preencher a planilha." %></p>
+  <% else %>
+    <% if fill.totals.present? %>
+      <% matches = fill.totals["planilha"].to_d.round(2) == fill.totals["proposta"].to_d.round(2) %>
+      <p class="<%= matches ? "text-success" : "text-warning" %>">
+        Total da planilha: <strong><%= brl(fill.totals["planilha"]) %></strong>
+        <%= matches ? "— igual ao total da proposta." : "— proposta: #{brl(fill.totals["proposta"])}." %>
+      </p>
+    <% end %>
+
+    <% if fill.issues.any? || fill.warnings.any? %>
+      <div class="rounded-field bg-warning/10 border border-warning/30 px-3 py-2">
+        <p class="text-xs font-semibold uppercase tracking-wide text-warning mb-1">Conferir</p>
+        <ul class="list-disc pl-4 flex flex-col gap-0.5 text-xs">
+          <% (fill.issues + fill.warnings).each do |text| %>
+            <li><%= text %></li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+
+    <details class="text-xs">
+      <summary class="cursor-pointer text-base-content/70"><%= pluralize(fill.entries.size, "célula preenchida", plural: "células preenchidas") %> — ver de onde veio cada valor</summary>
+      <div class="overflow-x-auto mt-2 max-h-80">
+        <table class="table table-xs">
+          <thead><tr><th>Célula</th><th>Valor</th><th>Origem</th></tr></thead>
+          <tbody>
+            <% fill.entries.each do |entry| %>
+              <tr>
+                <td class="whitespace-nowrap"><%= entry["aba"] %>!<%= entry["celula"] %></td>
+                <td class="whitespace-nowrap"><%= entry["valor"].to_s.truncate(40) %></td>
+                <td><%= entry["origem"] %></td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <% if fill.result.attached? %>
+      <div class="flex items-center justify-between gap-3 px-3 py-2 rounded-field bg-base-100/60">
+        <span class="truncate"><%= fill.result.filename %></span>
+        <%= link_to "Baixar", rails_blob_path(fill.result, disposition: "attachment"), class: "btn btn-primary btn-xs shrink-0" %>
+      </div>
+      <p class="text-xs text-base-content/60">Os totais da planilha são recalculados ao abrir no Excel/LibreOffice.</p>
+    <% end %>
+  <% end %>
+</div>

@@ -100,7 +100,9 @@
     <aside class="flex flex-col gap-6 xl:sticky xl:top-6 xl:max-h-[calc(92vh-3rem)] xl:overflow-y-auto xl:overscroll-contain">
       <%= render "summary", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
       <%= render "precedents", matches: @precedent_matches %>
-      <%= render "generated_documents", proposal: @proposal %>
+      <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-5">
+        <%= render "documents/generated", conversation: @conversation %>
+      </div>
     </aside>
   </div>
 </div>

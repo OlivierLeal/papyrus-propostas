@@ -1,0 +1,48 @@
+<%# Uma planilha do cliente em "Gerados pela IA": versão preenchida mais recente (com conferência do
+    total e selo de desatualizada), anteriores recolhidas, e "Preencher de novo".
+    locals: conversation, group %>
+<% latest = group.latest %>
+<% stale = spreadsheet_fill_stale?(conversation, latest) %>
+<% attachment = client_spreadsheet_attachments(conversation).find { |a| a.blob_id == group.source_blob.id } %>
+<div class="flex flex-col gap-1.5" id="spreadsheet_group_<%= group.source_blob.id %>">
+  <p class="text-[11px] text-base-content/60 truncate" title="<%= group.source_blob.filename %>">Original: <%= group.source_blob.filename %></p>
+  <% if latest %>
+    <ul class="flex flex-col gap-1.5">
+      <%= render "conversations/file_row", file: latest.result, kind: stale ? "Desatualizada" : "Atual", highlight: !stale %>
+    </ul>
+    <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+      <% if latest.totals.present? %>
+        <% matches = latest.totals["planilha"].to_d.round(2) == latest.totals["proposta"].to_d.round(2) %>
+        <span class="badge badge-xs <%= matches ? "badge-success badge-soft" : "badge-warning badge-soft" %>">
+          <%= matches ? "Total = proposta" : "Total #{brl(latest.totals["planilha"])} ≠ #{brl(latest.totals["proposta"])}" %>
+        </span>
+      <% end %>
+      <% if (to_check = latest.issues.size + latest.warnings.size).positive? %>
+        <span class="badge badge-xs badge-ghost" title="<%= (latest.issues + latest.warnings).join("\n") %>"><%= pluralize(to_check, "item a conferir", plural: "itens a conferir") %></span>
+      <% end %>
+      <% if stale %>
+        <span class="text-warning">a precificação mudou depois deste preenchimento</span>
+      <% end %>
+    </div>
+  <% end %>
+  <div class="flex items-center gap-2">
+    <% if group.processing %>
+      <span class="text-[11px] text-base-content/60"><span class="loading loading-spinner loading-xs align-middle"></span> Preenchendo <%= latest ? "nova versão" : "" %>…</span>
+    <% elsif attachment %>
+      <%= button_to conversation_spreadsheet_fills_path(conversation), params: { attachment_id: attachment.id },
+            class: "btn btn-xs #{stale ? "btn-primary" : "btn-ghost"}", form: { class: "inline" } do %>
+        Preencher de novo
+      <% end %>
+    <% end %>
+  </div>
+  <% if group.older.any? %>
+    <details>
+      <summary class="text-[11px] text-base-content/60 cursor-pointer select-none">Versões anteriores (<%= group.older.size %>)</summary>
+      <ul class="flex flex-col gap-1.5 mt-1.5">
+        <% group.older.each do |fill| %>
+          <%= render "conversations/file_row", file: fill.result, kind: nil, highlight: false %>
+        <% end %>
+      </ul>
+    </details>
+  <% end %>
+</div>

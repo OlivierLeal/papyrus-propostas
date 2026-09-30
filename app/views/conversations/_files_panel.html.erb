@@ -1,31 +1,8 @@
-<%# Aba "Arquivos": a revisão mais recente em destaque, as anteriores recolhidas, e os enviados à parte. %>
-<% generated = conversation.proposal ? latest_generated_documents(conversation.proposal) : [] %>
-<% latest_version = generated.first&.blob&.metadata&.dig("version") %>
-<% current, older = generated.partition { |d| d.blob.metadata["version"] == latest_version } %>
+<%# Aba "Arquivos": o que a IA gerou (revisões da proposta, planilhas preenchidas) e, à parte, o que
+    foi enviado — planilhas do cliente com a situação do preenchimento. %>
 <% uploaded = conversation.messages.includes(attachments_attachments: :blob).where(internal: false).order(:created_at).flat_map(&:attachments) %>
-<div id="files_panel" class="flex flex-col gap-4">
-  <% if current.any? %>
-    <section class="rounded-box border border-primary/40 bg-primary/5 p-3 flex flex-col gap-2">
-      <h2 class="font-display text-base font-semibold text-primary">
-        Versão atual · Rev.<%= format("%02d", [ latest_version.to_i - 1, 0 ].max) %>
-      </h2>
-      <ul class="flex flex-col gap-1.5">
-        <% current.each do |document| %>
-          <%= render "conversations/file_row", file: document, kind: document_kind_label(document), highlight: true %>
-        <% end %>
-      </ul>
-      <% if older.any? %>
-        <details class="group">
-          <summary class="text-xs text-base-content/60 cursor-pointer select-none">Versões anteriores (<%= older.size %>)</summary>
-          <ul class="flex flex-col gap-1.5 mt-2">
-            <% older.each do |document| %>
-              <%= render "conversations/file_row", file: document, kind: "v#{document.blob.metadata['version']}", highlight: false %>
-            <% end %>
-          </ul>
-        </details>
-      <% end %>
-    </section>
-  <% end %>
+<div id="files_panel" class="flex flex-col gap-5">
+  <%= render "documents/generated", conversation: conversation %>
 
   <section class="flex flex-col gap-2">
     <h2 class="font-display text-base font-semibold text-base-content">Enviados</h2>
@@ -33,6 +10,9 @@
       <ul class="flex flex-col gap-1.5">
         <% uploaded.each do |attachment| %>
           <%= render "conversations/file_row", file: attachment, kind: document_kind_label(attachment), highlight: false %>
+          <% if attachment.record.role == "user" && SpreadsheetFill.spreadsheet?(attachment.filename) %>
+            <%= render "spreadsheet_fills/status", conversation: conversation, attachment: attachment %>
+          <% end %>
         <% end %>
       </ul>
     <% else %>

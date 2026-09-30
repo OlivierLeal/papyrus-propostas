@@ -61,6 +61,11 @@
         <% if issue %>
           <%= render "project_issues/issue", issue: issue %>
         <% end %>
+      <% elsif parsed_content.is_a?(Hash) && parsed_content["spreadsheet_fill_id"].present? %>
+        <% fill = SpreadsheetFill.find_by(id: parsed_content["spreadsheet_fill_id"]) %>
+        <% if fill %>
+          <%= render "spreadsheet_fills/card", fill: fill %>
+        <% end %>
       <% elsif parsed_content.is_a?(Hash) && parsed_content["knowledge_note_id"].present? %>
         <% note = KnowledgeNote.find_by(id: parsed_content["knowledge_note_id"]) %>
         <% if note %>

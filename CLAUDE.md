@@ -2860,3 +2860,72 @@ proposta aberta, algo que vale a pena lembrar ("a Petrobras sempre exige ART em 
 (`knowledge_notes/_note.html.erb`) aparece direto na bolha da mensagem, com rota própria
 (`GeneralChatKnowledgeNotesController`, `approve_general_chat_knowledge_note_path`). Ver seção
 11.1, item 4, pro detalhe de como `KnowledgeNote` passou a nascer de um `GeneralChat` também.
+
+---
+
+## 15. Planilhas do cliente preenchidas pelo sistema (2026-09-30)
+
+Pedido do consultor: "muitos clientes têm planilhas específicas… não tem como a gente mapear qual
+vai vir, precisa que a IA saiba interpretar e preencher" (caso real: conversa 65, Petrobras, com
+"Anexo 02 PPU.xlsx" e "Adendo E DFP.xlsm"). Um motor só, pra qualquer planilha, com a divisão de
+sempre (seção 1): **a IA interpreta a planilha e monta um PLANO; o Ruby calcula e escreve.**
+
+- **`Spreadsheets::Workbook`** — lê/escreve `.xlsx`/`.xlsm` direto no XML (rubyzip + Nokogiri), o
+  resto do arquivo (macros incluídas) passa byte a byte. Nunca escreve por cima de fórmula; texto vai
+  como `inlineStr`; `fill_table` replica a linha-modelo traduzindo as fórmulas; `unhide` mostra aba
+  oculta (DFP liberada por macro). Ao salvar, tira o valor em cache de toda fórmula, liga
+  `fullCalcOnLoad` e remove o `calcChain` — quem abrir recalcula. `.xls` antigo não é aceito (pedir
+  "salvar como .xlsx").
+- **`Spreadsheets::FactCatalog`** — tudo o que o sistema sabe, com chave estável: `papyrus.*`
+  (`config/papyrus_company.yml` via `PapyrusCompany`), `proposta.*`, equipe `L{id}.*` (HH, diárias,
+  diárias em horas, valor por hora, salário sem encargos, encargos), campos `C{id}.*` (logística por
+  categoria), custos de item `K…`, externos `E…` (terceirizado vira "Serviços especializados"),
+  `tributo.*` e `bdi.*`. **Peças de custo** = pedaços do custo direto + externos; Σ peça × (BDI ×
+  impostos, externos × 1) = total da proposta. `bdi.administracao_central` é o item de EQUILÍBRIO
+  (fórmula da DFP Petrobras: preço = custo × (1 + adm + riscos + seguros) × (1 + desp. fin.) × (1 +
+  lucro) ÷ (1 − tributos)) — só existe quando lucro/riscos/seguros/despesas financeiras estão no yml.
+- **`Spreadsheets::PlanExecutor`** — executa o plano: `celulas` (fato ou rótulo curto; texto
+  numérico é recusado; rótulo "LICITANTE:" recebe o dado junto), `tabelas`, `abas_mostrar`,
+  `precos_unitarios` (Σ peça × fração × multiplicador ÷ quantidade; o item de menor quantidade só
+  absorve ARREDONDAMENTO — peça esquecida fica à mostra, nunca escondida), `faltando` e `duvidas`.
+  Frações que não fecham 100% são normalizadas mantendo a proporção (com aviso) — medido ao vivo, a
+  IA erra essa conta.
+- **`FillClientSpreadsheetJob`** (background, nunca dentro de tool call) → plano via `ask_internally`
+  → executa → **`Spreadsheets::Recalculator`** (LibreOffice headless) recalcula e lê `celula_total`
+  → se não bater com o total da proposta (tolerância R$ 1), UMA rodada de correção com as abas
+  mostrando "=fórmula → valor". Card no chat (`spreadsheet_fills/_card`): total conferido, "Conferir"
+  (faltas/avisos), origem de cada célula, download. `duvidas` viram `ProjectIssue` com
+  `source: "planilha"` (travam a geração); `faltando` só aparece no card.
+- **`FillClientSpreadsheetTool`** — chat da proposta; pega a planilha anexada mais recente (ou pelo
+  nome) e enfileira. `SpreadsheetFill` guarda plano, relatório e resultado.
+- **Nem todo `.xlsx` é pra preencher (2026-09-30, consultor).** A IA classifica primeiro:
+  formulário (preço, DFP, equipe, dados cadastrais, checklist…) ou referência (coordenadas,
+  quantitativos/dados do cliente, planilha de custo da própria Papyrus). Referência vira
+  `not_applicable` com o motivo e nunca é reprocessada sozinha; "Preencher mesmo assim" (botão ou
+  chat) grava `forced` e o prompt manda tratar como formulário. `tipo_planilha: "formulario"` não
+  passa pela conferência de cobertura do custo (só `"preco"`/`precos_unitarios`). Verificado ao
+  vivo: planilha de coordenadas dos poços → "referência"; PPU da conversa 65 → preenchida, total igual.
+- **Automático na geração** (`SpreadsheetFill.queue_automatic!`, chamado por
+  `GenerateProposalDocumentTool` sempre que sai a parte comercial — não com `somente_tecnica`):
+  enfileira planilha anexada nunca vista ou preenchida com dados que mudaram. "Mudou" =
+  `facts_digest` (SHA256 dos fatos que o preenchimento USOU, `report.used_keys`, sem `hoje.data`)
+  diferente do atual — `SpreadsheetFill#stale?`. No automático, referência não posta card (fica na
+  aba Arquivos); preenchida posta. A mensagem da ferramenta avisa quais planilhas entraram.
+- **"Gerados pela IA"** (`documents/_generated`, mesmo bloco na aba Arquivos e na Tela de
+  Precificação, fora do `#pricing-form`; substituiu `proposals/_generated_documents`): revisões da
+  proposta (atual em destaque com a descrição, anteriores recolhidas) e planilhas preenchidas
+  (`documents/_spreadsheet_group`: versão atual com selo Atual/Desatualizada, "Total = proposta" ou
+  a diferença, itens a conferir, "Preencher de novo", versões anteriores recolhidas; planilha ainda
+  não conferida com botão "Preencher"). "Enviados" (aba Arquivos) guarda só a situação de cada
+  planilha (`spreadsheet_fills/_status`: referência + motivo, falha, "Preencher mesmo assim") —
+  `SpreadsheetFillsController#create`. Sem precificação ainda, só avisa.
+- `professionals.social_charges_percent` (fração; digitado em % no cadastro) — só pra planilha que
+  separa salário e encargos. Em branco, vai cheio (encargos 0%).
+- Verificado ao vivo na conversa 65 (Bedrock real): PPU → TOTAL GERAL recalculado R$ 353.925,00 =
+  proposta; DFP (com percentuais de BDI provisórios) → DFP!E3 R$ 353.924,91 (arredondamento da
+  planilha), mão de obra em horas certa, BDI fechando. Perguntas de benefício fiscal/desoneração
+  saem em "Falta informar", nunca respondidas pela IA.
+- **Pendente com a Papyrus** (`config/papyrus_company.yml`): lucro, riscos, seguros/garantias e
+  despesas financeiras (sem eles a DFP não fecha o BDI), regime tributário, sindicato, data-base,
+  encargos de cada profissional, se IR/CSLL entram em "outros tributos" e se custo externo leva BDI
+  na DFP (hoje ela avisa quando isso acontece).

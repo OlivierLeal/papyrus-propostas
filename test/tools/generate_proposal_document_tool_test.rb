@@ -1,6 +1,7 @@
 require "test_helper"
 
 class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
   NS = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }.freeze
 
   setup do
@@ -44,6 +45,19 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
   teardown do
     Conversation.define_method(:complete, @original_complete_method)
     GenerateProposalDocumentTool.define_method(:wait_for_background_work, @original_wait_method)
+  end
+
+  # 2026-09-30: planilha do cliente anexada vai preenchida junto da parte comercial, sem depender da IA.
+  test "generation with the commercial part queues the attached client spreadsheets; technical-only does not" do
+    message = @proposal.conversation.messages.create!(role: "user", content: "complementares")
+    message.attachments.attach(io: StringIO.new(client_xlsx_bytes), filename: "Anexo 02 PPU.xlsx")
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    assert_no_enqueued_jobs(only: FillClientSpreadsheetJob) { tool.execute(**@args, somente_tecnica: true) }
+    result = nil
+    assert_enqueued_jobs(1, only: FillClientSpreadsheetJob) { result = JSON.parse(tool.execute(**@args)) }
+    assert_includes result["message"], "Anexo 02 PPU.xlsx"
+    assert @proposal.conversation.spreadsheet_fills.last.automatic?
   end
 
   # 2026-09, pedido do consultor: a comercial/combinado sai sempre que pedido, mesmo em "draft"

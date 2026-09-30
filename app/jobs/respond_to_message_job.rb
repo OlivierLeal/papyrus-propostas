@@ -16,6 +16,8 @@ class RespondToMessageJob < ApplicationJob
     # Inserir só a seção de cronograma num .docx finalizado que o consultor anexou (proposta
     # gerada pelo sistema e revisada por fora — ver CLAUDE.md seção 8).
     conversation.with_tool(InsertScheduleSectionTool.new(proposal: conversation.proposal)) if conversation.proposal
+    # Planilha do cliente (PPU, DFP…) preenchida a partir da precificação — ver FillClientSpreadsheetJob.
+    conversation.with_tool(FillClientSpreadsheetTool.new(conversation: conversation)) if conversation.proposal
     # Consulta ao acervo histórico (CLAUDE.md seção 11.1). Só é registrada quando há acervo
     # indexado — sem isso a IA "descobre" uma ferramenta que sempre volta vazia e passa a
     # mencionar buscas que não trouxeram nada.

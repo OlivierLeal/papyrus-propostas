@@ -60,6 +60,15 @@
             </label>
             <%= settings_field_error(professional, :rate_daily) %>
           </fieldset>
+
+          <fieldset class="fieldset">
+            <legend class="fieldset-legend">Encargos sociais (opcional)</legend>
+            <label class="<%= settings_field_class(professional, :social_charges_percent) %>">
+              <%= form.number_field :social_charges_percent_display, step: "any", min: 0, class: "grow" %>
+              <span class="text-xs text-base-content/40">% do salário</span>
+            </label>
+            <p class="text-xs text-base-content/50">Quanto dos valores acima é encargo. Só é usado quando a planilha do cliente pede salário e encargos separados; em branco, o valor vai cheio.</p>
+          </fieldset>
         </div>
       </section>
 

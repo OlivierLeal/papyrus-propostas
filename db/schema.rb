@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -406,6 +406,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_120000) do
     t.decimal "rate_man_hour", precision: 10, scale: 2, null: false
     t.string "registration"
     t.string "role", null: false
+    t.decimal "social_charges_percent", precision: 6, scale: 4
     t.string "specialties"
     t.datetime "updated_at", null: false
     t.index ["active"], name: "index_professionals_on_active"
@@ -711,6 +712,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_120000) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
+  create_table "spreadsheet_fills", force: :cascade do |t|
+    t.boolean "automatic", default: false, null: false
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.string "facts_digest"
+    t.boolean "forced", default: false, null: false
+    t.text "instructions"
+    t.jsonb "plan", default: {}, null: false
+    t.jsonb "report", default: {}, null: false
+    t.bigint "source_blob_id", null: false
+    t.string "status", default: "processing", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "source_blob_id"], name: "index_spreadsheet_fills_on_conversation_id_and_source_blob_id"
+    t.index ["conversation_id"], name: "index_spreadsheet_fills_on_conversation_id"
+    t.index ["source_blob_id"], name: "index_spreadsheet_fills_on_source_blob_id"
+  end
+
   create_table "study_types", force: :cascade do |t|
     t.string "code", null: false
     t.datetime "created_at", null: false
@@ -797,5 +816,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_120000) do
   add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "spreadsheet_fills", "active_storage_blobs", column: "source_blob_id"
+  add_foreign_key "spreadsheet_fills", "conversations"
   add_foreign_key "tool_calls", "messages"
 end

@@ -1,0 +1,69 @@
+<%# "Gerados pela IA": tudo o que o sistema produziu nesta proposta — revisões do documento (a atual em
+    destaque, as anteriores recolhidas) e planilhas do cliente preenchidas (idem, por planilha). Usado
+    na aba Arquivos da proposta e na Tela de Precificação (fora do #pricing-form: tem botão).
+    locals: conversation %>
+<% proposal = conversation.proposal %>
+<% versions = proposal ? latest_generated_documents(proposal).group_by { |d| d.blob.metadata["version"].to_i }.to_a : [] %>
+<% groups = spreadsheet_fill_groups(conversation) %>
+<% attempted = conversation.spreadsheet_fills.distinct.pluck(:source_blob_id) %>
+<% waiting = proposal&.project_pricing ? client_spreadsheet_attachments(conversation).reject { |a| attempted.include?(a.blob_id) } : [] %>
+<section id="generated_documents" class="flex flex-col gap-3">
+  <h2 class="font-display text-base font-semibold text-base-content flex items-center gap-2">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-primary"><path d="M15.98 1.804a1 1 0 0 0-1.96 0l-.24 1.192a1 1 0 0 1-.784.785l-1.192.238a1 1 0 0 0 0 1.962l1.192.238a1 1 0 0 1 .785.785l.238 1.192a1 1 0 0 0 1.962 0l.238-1.192a1 1 0 0 1 .785-.785l1.192-.238a1 1 0 0 0 0-1.962l-1.192-.238a1 1 0 0 1-.785-.785l-.238-1.192ZM6.949 5.684a1 1 0 0 0-1.898 0l-.683 2.051a1 1 0 0 1-.633.633l-2.051.683a1 1 0 0 0 0 1.898l2.051.684a1 1 0 0 1 .633.632l.683 2.051a1 1 0 0 0 1.898 0l.683-2.051a1 1 0 0 1 .633-.633l2.051-.683a1 1 0 0 0 0-1.898l-2.051-.683a1 1 0 0 1-.633-.633L6.95 5.684ZM13.949 13.684a1 1 0 0 0-1.898 0l-.184.551a1 1 0 0 1-.632.633l-.551.183a1 1 0 0 0 0 1.898l.551.183a1 1 0 0 1 .633.633l.183.551a1 1 0 0 0 1.898 0l.184-.551a1 1 0 0 1 .632-.633l.551-.183a1 1 0 0 0 0-1.898l-.551-.184a1 1 0 0 1-.633-.632l-.183-.551Z" /></svg>
+    Gerados pela IA
+  </h2>
+
+  <% if versions.empty? && groups.empty? && waiting.empty? %>
+    <p class="text-sm text-base-content/60">Nada gerado ainda. Peça a proposta no chat; planilhas do cliente anexadas são preenchidas junto da parte comercial (ou pelo botão em "Enviados").</p>
+  <% end %>
+
+  <% if versions.any? %>
+    <% current_version, current_docs = versions.first %>
+    <div class="rounded-box border border-primary/40 bg-primary/5 p-3 flex flex-col gap-2">
+      <div class="flex items-baseline justify-between gap-2 min-w-0">
+        <h3 class="text-sm font-semibold text-primary whitespace-nowrap">Proposta · Rev.<%= format("%02d", [ current_version - 1, 0 ].max) %></h3>
+        <span class="text-[11px] text-base-content/50 truncate min-w-0" title="<%= current_docs.first.blob.metadata["description"] %>"><%= current_docs.first.blob.metadata["description"] %></span>
+      </div>
+      <ul class="flex flex-col gap-1.5">
+        <% current_docs.each do |document| %>
+          <%= render "conversations/file_row", file: document, kind: document_kind_label(document), highlight: true %>
+        <% end %>
+      </ul>
+      <% if versions.size > 1 %>
+        <details>
+          <summary class="text-xs text-base-content/60 cursor-pointer select-none">Revisões anteriores (<%= versions.size - 1 %>)</summary>
+          <div class="flex flex-col gap-3 mt-2">
+            <% versions.drop(1).each do |version, documents| %>
+              <div>
+                <p class="text-[11px] text-base-content/60 mb-1">
+                  <span class="font-semibold">Rev.<%= format("%02d", [ version - 1, 0 ].max) %></span> · <%= documents.first.blob.metadata["description"] %>
+                </p>
+                <ul class="flex flex-col gap-1.5">
+                  <% documents.each do |document| %>
+                    <%= render "conversations/file_row", file: document, kind: document_kind_label(document), highlight: false %>
+                  <% end %>
+                </ul>
+              </div>
+            <% end %>
+          </div>
+        </details>
+      <% end %>
+    </div>
+  <% end %>
+
+  <% if groups.any? || waiting.any? %>
+    <div class="rounded-box border border-base-300 p-3 flex flex-col gap-3">
+      <h3 class="text-sm font-semibold text-base-content">Planilhas do cliente preenchidas</h3>
+      <% groups.each do |group| %>
+        <%= render "documents/spreadsheet_group", conversation: conversation, group: group %>
+      <% end %>
+      <% waiting.each do |attachment| %>
+        <div class="flex items-center gap-2 text-[11px] min-w-0" id="spreadsheet_waiting_<%= attachment.id %>">
+          <span class="flex-1 truncate text-base-content/60" title="<%= attachment.filename %>"><%= attachment.filename %> — ainda não conferida</span>
+          <%= button_to "Preencher", conversation_spreadsheet_fills_path(conversation), params: { attachment_id: attachment.id },
+                class: "btn btn-xs btn-primary", form: { class: "shrink-0" } %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+</section>

@@ -1,0 +1,29 @@
+<%# Situação do preenchimento de uma planilha do cliente, logo abaixo dela em "Enviados". A planilha
+    preenchida (e o "Preencher de novo") fica em "Gerados pela IA" (documents/_generated).
+    locals: conversation, attachment %>
+<% fill = latest_spreadsheet_fills(conversation)[attachment.blob_id] %>
+<% result = fill&.result %>
+<% has_result = result&.attached? # sempre lido: o preload do resultado vale pra todas as linhas (Bullet) %>
+<% stale = spreadsheet_fill_stale?(conversation, fill) %>
+<% can_fill = conversation.proposal&.project_pricing.present? %>
+<li class="flex flex-wrap items-center gap-x-2 gap-y-1 pl-9 pr-3 -mt-1 text-[11px] min-w-0" id="spreadsheet_status_<%= attachment.id %>">
+  <span class="flex-1 min-w-[10rem] text-base-content/60">
+    <% if fill.nil? %>
+      <%= can_fill ? "Planilha ainda não conferida." : "Preenchimento disponível depois de avançar para a precificação." %>
+    <% elsif fill.processing? %>
+      <span class="loading loading-spinner loading-xs align-middle"></span> Preenchendo…
+    <% elsif fill.not_applicable? %>
+      Referência, não é formulário: <%= fill.reason %>
+    <% elsif fill.failed? %>
+      <span class="text-error"><%= fill.error.presence || "Falhou ao preencher." %></span>
+    <% elsif has_result %>
+      Preenchida<%= " (desatualizada)" if stale %> — está em <a href="#generated_documents" class="link link-primary">Gerados pela IA</a>.
+    <% end %>
+  </span>
+  <% if can_fill && !fill&.processing? && !fill&.done? %>
+    <%= button_to conversation_spreadsheet_fills_path(conversation), params: { attachment_id: attachment.id },
+          class: "btn btn-xs #{fill.nil? || stale ? "btn-primary" : "btn-ghost"} shrink-0", form: { class: "shrink-0" } do %>
+      <%= if fill.nil? then "Preencher" elsif fill.not_applicable? then "Preencher mesmo assim" else "Preencher de novo" end %>
+    <% end %>
+  <% end %>
+</li>

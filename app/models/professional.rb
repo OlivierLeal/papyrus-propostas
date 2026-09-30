@@ -5,6 +5,17 @@ class Professional < ApplicationRecord
   validates :role, presence: true
   validates :rate_man_hour, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :rate_daily, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :social_charges_percent, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+
+  # Encargos sociais: gravado como fração (0.8), digitado como porcentagem (80) — ver
+  # Spreadsheets::FactCatalog, que usa pra separar salário e encargos em planilha de formação de preço.
+  def social_charges_percent_display
+    social_charges_percent && (social_charges_percent * 100).round(2)
+  end
+
+  def social_charges_percent_display=(value)
+    self.social_charges_percent = value.to_s.strip.presence && value.to_s.tr(",", ".").to_d / 100
+  end
 
   scope :active, -> { where(active: true) }
   # Entra em toda proposta independente do que a IA sugerir (ver Proposal#ensure_always_included_lines!)
