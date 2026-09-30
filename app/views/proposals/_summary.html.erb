@@ -10,18 +10,26 @@
     <p class="font-display text-3xl font-bold text-primary tabular-nums mt-1" data-pricing-preview-target="summaryTotal"><%= brl(pricing.total_value) %></p>
   </div>
 
+  <%# Composição (2026-09-30, pedido do cliente: "deixar o valor puro e aplicar embaixo — alguns clientes
+      querem saber HH, logística, BDI e impostos separados"): as partes aparecem SEM margem, e BDI e
+      impostos entram como linhas próprias. A conta não mudou (ProjectPricing#price_composition fecha
+      centavo a centavo com total_value); só a forma de mostrar. %>
+  <% c = pricing.price_composition %>
   <dl class="border-t border-base-300 px-6 py-4 flex flex-col gap-2 text-sm">
-    <% outsourced = pricing.outsourced_costs.sum { |cost, _| cost["value"].to_f } %>
-    <% [ [ "Equipe", pricing.professionals_total, "summaryTeam" ],
-         [ "Logística dos campos", pricing.logistics_total, "summaryLogistics" ],
-         [ "Custos dos itens", pricing.item_costs_total, "summaryItemCosts" ],
-         [ "Custos externos", pricing.external_costs_total - outsourced, nil ],
-         [ "Terceirizados", outsourced, nil ] ].each do |label, value, target| %>
-      <div class="flex justify-between gap-3">
-        <dt class="text-base-content/60"><%= label %></dt>
-        <dd class="text-base-content tabular-nums" <% if target %>data-pricing-preview-target="<%= target %>"<% end %>><%= brl(value) %></dd>
-      </div>
+    <dt class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Composição do preço</dt>
+    <%= render "proposals/composition_row", label: "Equipe", value: c[:team], target: "summaryTeam" %>
+    <%= render "proposals/composition_row", label: "Logística dos campos", value: c[:logistics], target: "summaryLogistics" %>
+    <%= render "proposals/composition_row", label: "Custos dos itens", value: c[:item_costs], target: "summaryItemCosts" %>
+    <%= render "proposals/composition_row", label: "Custo direto", value: c[:direct], target: "summaryDirect", strong: true %>
+    <%= render "proposals/composition_row", label: "+ BDI", value: c[:bdi], target: "summaryBdi", hint: "(× #{number_with_precision(pricing.bdi, precision: 2, separator: ',')})", hint_target: "summaryBdiRate" %>
+    <%= render "proposals/composition_row", label: "+ Impostos e ADM", value: c[:taxes], target: "summaryTaxes", hint: "(× #{number_with_precision(pricing.tax_multiplier, precision: 2, separator: ',')})", hint_target: "summaryTaxRate" %>
+    <% if c[:external].positive? %>
+      <%= render "proposals/composition_row", label: "+ Custos externos", value: c[:external], hint: "(repasse)" %>
     <% end %>
+    <% if c[:outsourced].positive? %>
+      <%= render "proposals/composition_row", label: "+ Terceirizados", value: c[:outsourced], hint: "(repasse)" %>
+    <% end %>
+    <%= render "proposals/composition_row", label: "= Total", value: pricing.total_value, target: "compositionTotal", strong: true %>
   </dl>
 
   <div class="border-t border-base-300 px-6 py-4">

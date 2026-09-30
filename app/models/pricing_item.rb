@@ -16,6 +16,17 @@ class PricingItem < ApplicationRecord
     proposal_professionals.sum(&:subtotal)
   end
 
+  # Custo PURO do item (sem BDI nem impostos) — o que a Tela de Precificação mostra por linha
+  # (2026-09-30, pedido do cliente: "deixar o valor puro e aplicar embaixo").
+  def team_cost
+    factor = days_factor
+    proposal_professionals.sum { |line| line.direct_cost(factor) }
+  end
+
+  def direct_total
+    team_cost + campaigns_cost + costs_cost
+  end
+
   # Custo direto da logística dos campos, ANTES do multiplicador.
   def campaigns_cost
     field_campaigns.sum { |campaign| campaign.cost(project_pricing) }

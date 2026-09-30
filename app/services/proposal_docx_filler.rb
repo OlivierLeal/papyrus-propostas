@@ -133,7 +133,8 @@ class ProposalDocxFiller
               fill_revisions_table!(table_node, config.fetch(:rows))
             else
               fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false),
-                merge_first_column: config.fetch(:merge_first_column, false))
+                merge_first_column: config.fetch(:merge_first_column, false),
+                bold_unnumbered: config.fetch(:bold_unnumbered, false))
             end
           end
           insert_schedule_tables!(doc, schedules, zip)
@@ -693,7 +694,7 @@ class ProposalDocxFiller
     # (mesmo princípio de "consecutivo, não valor único" já usado pra agrupar cronograma por
     # fase). `auto_number`/`trim`/`header_rows` continuam funcionando normalmente antes disso —
     # o merge é sempre o último passo, sobre as linhas já definitivas.
-    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1, merge_first_column: false)
+    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1, merge_first_column: false, bold_unnumbered: false)
       return unless tbl
 
       all_rows = tbl.xpath(".//w:tr", NS)
@@ -714,8 +715,10 @@ class ProposalDocxFiller
 
           set_cell_text!(cell, value.to_s)
         end
-        # Linha de total (Quadro de Preço discriminado, ver Proposal#docx_price_rows) em negrito.
-        row_node.xpath(".//w:t", NS).each { |text_node| bold_run!(text_node) } if row_values.include?("TOTAL")
+        # Linha de total (Quadro de Preço discriminado, ver Proposal#docx_price_rows) em negrito — e, com
+        # bold_unnumbered, toda linha sem número (subtítulo de item, subtotal, "TOTAL – empreendimento").
+        bold = row_values.include?("TOTAL") || (bold_unnumbered && row_values.first.to_s.empty?)
+        row_node.xpath(".//w:t", NS).each { |text_node| bold_run!(text_node) } if bold
 
         row_node
       end

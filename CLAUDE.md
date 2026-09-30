@@ -110,6 +110,10 @@ tela do show"; "o local do botão de precificação não tá bom").** `conversat
   limite. Painel recolhível (`side_panel_controller.js`): vira uma barra de ícones de 3,5rem (com o
   contador de pendências, `blockers_count_rail`); a escolha fica no cookie `side_panel_collapsed`, então
   o servidor já desenha recolhido e o morph não pisca. Clicar num ícone reabre naquela aba.
+- **Painel com mais presença (mesmo dia, Bruno: "o box ficou pequeno, sensação de pouca importância").**
+  26rem (30rem a partir de `2xl`); abas com ícone em cima do rótulo (contador no canto do ícone), aba
+  ativa em `primary/10`; títulos das seções em `font-display text-base`. O chat continua podendo
+  ganhar a largura toda recolhendo o painel.
 - Classe Tailwind nova só aparece depois de `bin/rails tailwindcss:build` (o `app/assets/builds` não
   vai pro git; o deploy compila). Teste de sistema com CSS velho dá layout empilhado/falso negativo.
 
@@ -446,6 +450,36 @@ detalhamento da logística, o resumo lateral e as parcelas (evento `pricing-prev
 `payment_schedule_controller#updateTotal`). É só prévia: nada grava até "Salvar e recalcular", e o
 selo "Prévia · não salvo" avisa. **Mudou a fórmula em Ruby? Mude no JS também**
 (`test/system/pricing_preview_test.rb` trava os números).
+
+**Composição do preço no resumo (2026-09-30, relato do consultor na conversa 65: "não tá saindo os
+impostos no custo total, tá o mesmo valor da equipe").** A conta sempre aplicou BDI × impostos, mas
+embutido em cada subtotal; sem logística nem custos, "Total" = "Equipe" e parecia imposto esquecido.
+O resumo (`proposals/_summary`) ganhou "Composição do preço": custo direto (sem margens) + BDI +
+impostos e ADM + externos = total (`ProjectPricing#price_composition`; `ProposalProfessional#
+direct_cost` é o C1+C2 que `expected_subtotal` já usava; os impostos absorvem o arredondamento, então
+fecha centavo a centavo). A prévia em JS refaz igual (`summaryDirect`/`summaryBdi`/`summaryTaxes`;
+o total da composição tem target próprio, `compositionTotal`, pra não duplicar `summaryTotal`), e o
+`pricing_preview_test` compara com o servidor. O `<aside>` do resumo, fixo ao rolar, ganhou
+`max-h` + rolagem própria: mais alto que a janela, "Aprovar"/"Reabrir" ficavam inalcançáveis.
+
+**Valor puro nas linhas, BDI e impostos embaixo + Quadro de Preço "detalhado" (mesmo dia, pedido do
+cliente: "deixar o valor puro e aplicar embaixo — tem cliente que quer saber HH, logística detalhada,
+BDI, impostos, tudo separado").**
+- **Tela**: linhas da equipe (`ProposalProfessional#direct_cost`), campos, custos e cards de item
+  (`PricingItem#team_cost`/`#direct_total`) mostram CUSTO PURO; o resumo é uma conta só (Equipe,
+  Logística, Custos dos itens → Custo direto → + BDI → + Impostos e ADM → + externos/terceirizados =
+  Total, partial `_composition_row`). O `subtotal` gravado continua COM margem (é o que o quadro de
+  preço, o rateio por empreendimento e o desembolso usam) — só a exibição mudou. A prévia JS guarda os
+  dois (puro pra mostrar, com margem pro total) e arredonda como o Ruby.
+- **`.docx`**: `ProjectPricing::PRICE_PRESENTATIONS` ganhou `detalhado` (vale mesmo com 1 item).
+  `Proposal#detailed_price_rows`: por item (subtítulo se >1), HH e diárias por profissional com
+  "quantidade × valor", logística de cada campo por categoria (`FieldCampaign#breakdown`), custos dos
+  itens, "SUBTOTAL – CUSTO DIRETO", BDI, impostos, externos, TOTAL; a última linha de custo absorve o
+  arredondamento. Terceirizado vira "Serviços especializados", sem descrição. Linha sem número sai em
+  negrito (`fill_table!(bold_unnumbered:)`). A IA liga pelo `apresentacao_preco` (ferramenta e sugestão
+  de equipe, lendo o ET); a prévia do quadro na tela usa as mesmas linhas (`docx_price_rows`).
+- **Pendente**: preencher as PLANILHAS próprias dos clientes (PPU/DFP da Petrobras etc.) — depende dos
+  modelos reais.
 
 **Reabrir precificação aprovada (2026-09-27, pedido do consultor: "às vezes aprovo e o cliente
 pede pra mudar algo").** `Proposal#reopen!(user:, reason:)` → status volta a `priced` (editável),

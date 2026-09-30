@@ -11,7 +11,7 @@
     <div>
       <h2 class="font-semibold text-base-content">Itens e logística de campo</h2>
       <p class="text-sm text-base-content/60 mt-0.5">
-        Cada item soma a equipe dele, os campos (idas a campo) e os custos fechados — tudo × BDI × impostos, como na planilha.
+        Cada item soma a equipe dele, os campos (idas a campo) e os custos fechados. Valores puros; BDI e impostos entram no resumo ao lado.
       </p>
     </div>
     <% if editable %>
@@ -70,7 +70,7 @@
           <div class="flex items-baseline gap-1.5"><dt class="text-base-content/60"><%= name %></dt><dd class="tabular-nums font-medium"><%= brl(value) %></dd></div>
         <% end %>
       </dl>
-      <p class="text-xs text-base-content/50 mt-1">Totais por empreendimento do último "Salvar e recalcular".</p>
+      <p class="text-xs text-base-content/50 mt-1">Totais por empreendimento com BDI e impostos (é o que vai no quadro de preço), do último "Salvar e recalcular".</p>
     <% end %>
   </div>
 
@@ -92,11 +92,11 @@
           <% end %>
           <div class="text-right ml-auto">
             <p class="text-xs text-base-content/50">
-              Equipe <span data-role="item-team"><%= brl(item.team_total) %></span> ·
-              Campos <span data-role="item-campaigns"><%= brl(item.campaigns_total) %></span> ·
-              Custos <span data-role="item-costs"><%= brl(item.costs_total) %></span>
+              Equipe <span data-role="item-team"><%= brl(item.team_cost.round(2)) %></span> ·
+              Campos <span data-role="item-campaigns"><%= brl(item.campaigns_cost.round(2)) %></span> ·
+              Custos <span data-role="item-costs"><%= brl(item.costs_cost.round(2)) %></span>
             </p>
-            <p class="font-semibold tabular-nums text-base-content" data-role="item-total"><%= brl(item.total) %></p>
+            <p class="font-semibold tabular-nums text-base-content" data-role="item-total"><%= brl(item.direct_total.round(2)) %></p>
           </div>
           <% if editable && items.size > 1 %>
             <%= structure_button("Remover item", "remove_item:#{item.id}", editable: editable, css: "btn btn-ghost btn-xs text-error",
@@ -122,7 +122,7 @@
                   <%= campaign_form.hidden_field :id %>
                   <div class="flex items-center gap-2">
                     <%= campaign_form.text_field :description, disabled: !editable, required: true, class: "input input-sm grow", aria: { label: "Descrição do campo" } %>
-                    <span class="text-sm font-semibold tabular-nums whitespace-nowrap" data-role="campaign-total"><%= brl((campaign_form.object.cost(pricing) * pricing.multiplier).round(2)) %></span>
+                    <span class="text-sm font-semibold tabular-nums whitespace-nowrap" data-role="campaign-total"><%= brl(campaign_form.object.cost(pricing).round(2)) %></span>
                     <% if editable %>
                       <%= structure_button("✕", "remove_campaign:#{campaign_form.object.id}", editable: editable, css: "btn btn-ghost btn-xs btn-square text-error",
                             confirm: "Remover o campo #{campaign_form.object.description}?") %>
@@ -152,7 +152,7 @@
             </div>
             <p class="text-[11px] text-base-content/50 mt-1">
               Custo = veículos × (dias em campo + viagem) × diária do veículo + combustível (distância da sede ida e volta + <%= number_with_delimiter(pricing.daily_km.to_f, delimiter: ".", separator: ",") %> km/dia em campo + ida e volta diária até a hospedagem)
-              + alimentação por pessoa-dia + hospedagem por pessoa-noite + extras, × BDI × impostos.
+              + alimentação por pessoa-dia + hospedagem por pessoa-noite + extras (valor puro).
               Deslocamento acima de <%= hours_label(FieldCampaign::COMMUTE_TOLERANCE_HOURS) %> por trecho tira horas da jornada de <%= FieldCampaign::WORKDAY_HOURS %>h e alonga os dias em campo (e as diárias da equipe do item).
             </p>
           <% else %>
@@ -169,7 +169,7 @@
           <% if item.costs.any? %>
             <table class="table table-xs mt-1 max-w-2xl">
               <thead>
-                <tr class="text-[11px] uppercase text-base-content/50"><th>Descrição</th><th>Qtd.</th><th>Valor unit. (R$)</th><th class="text-right">Com BDI</th><th></th></tr>
+                <tr class="text-[11px] uppercase text-base-content/50"><th>Descrição</th><th>Qtd.</th><th>Valor unit. (R$)</th><th class="text-right">Total</th><th></th></tr>
               </thead>
               <tbody>
                 <% item.costs.each_with_index do |cost, index| %>
@@ -178,7 +178,7 @@
                     <td class="min-w-56"><%= text_field_tag "#{prefix}[description]", cost["description"], id: nil, disabled: !editable, required: true, placeholder: "Ex.: ART, Inventário florestal (com logística)", class: "input input-xs w-full" %></td>
                     <td><%= number_field_tag "#{prefix}[quantity]", cost["quantity"], id: nil, step: "any", min: 0, disabled: !editable, class: "input input-xs w-16 text-right", data: { field: "quantity" } %></td>
                     <td><%= number_field_tag "#{prefix}[unit_value]", cost["unit_value"], id: nil, step: "any", min: 0, disabled: !editable, class: "input input-xs w-28 text-right", data: { field: "unit_value" } %></td>
-                    <td class="text-right tabular-nums whitespace-nowrap" data-role="cost-total"><%= brl((cost["quantity"].to_d * cost["unit_value"].to_d * pricing.multiplier).round(2)) %></td>
+                    <td class="text-right tabular-nums whitespace-nowrap" data-role="cost-total"><%= brl((cost["quantity"].to_d * cost["unit_value"].to_d).round(2)) %></td>
                     <td>
                       <% if editable %>
                         <%= structure_button("✕", "remove_cost:#{item.id}:#{index}", editable: editable, css: "btn btn-ghost btn-xs btn-square text-error") %>

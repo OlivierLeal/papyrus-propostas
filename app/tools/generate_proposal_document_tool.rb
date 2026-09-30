@@ -204,8 +204,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
   param :apresentacao_preco, required: false,
     desc: "Como o Quadro de Preço sai: \"total\" (só o preço global), \"itens\" (aberto por item/etapa, " \
-          "quando o ET/TR ou o consultor pedir custos discriminados) ou \"empreendimentos\" (por item e com o " \
-          "total de cada empreendimento, quando a proposta cobre mais de um). Só envie quando o consultor pedir " \
+          "quando o ET/TR ou o consultor pedir custos discriminados), \"empreendimentos\" (por item e com o " \
+          "total de cada empreendimento, quando a proposta cobre mais de um) ou \"detalhado\" (composição do preço: " \
+          "horas-homem e diárias por profissional, logística por categoria, BDI e impostos em linhas próprias — quando " \
+          "o ET/TR ou o consultor pedir o preço detalhado). Só envie quando o consultor pedir " \
           "uma mudança no chat — senão a escolha já feita continua valendo. Os valores são sempre calculados " \
           "pelo sistema a partir dos itens; você nunca escreve valor nenhum."
 
@@ -744,7 +746,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         # um profissional cai no mesmo setor em linhas consecutivas (2026-09, pedido do consultor
         # — ver ProposalDocxFiller#merge_first_column!).
         2 => { rows: @proposal.team_rows_for_docx, merge_first_column: true },
-        3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: false },
+        3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: false, bold_unnumbered: true },
         4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
     end

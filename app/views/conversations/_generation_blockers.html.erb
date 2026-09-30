@@ -3,7 +3,7 @@
 <% blockers = conversation.generation_blockers %>
 <div id="generation_blockers" class="flex flex-col gap-3">
   <% if blockers.any? %>
-    <h2 class="font-display font-semibold text-base-content">Antes de gerar a proposta</h2>
+    <h2 class="font-display text-base font-semibold text-base-content">Antes de gerar a proposta</h2>
     <p class="text-xs text-base-content/60">
       <%= blockers.size %> <%= blockers.size == 1 ? "ponto sem resposta" : "pontos sem resposta" %>. Cada um se resolve no card
       do chat: respondendo, decidindo, ou liberando com o motivo.

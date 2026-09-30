@@ -6,7 +6,7 @@ class PricingPreviewTest < ApplicationSystemTestCase
   setup do
     @user = users(:one)
     @proposal = proposals(:priced_proposal)
-    @line = proposal_professionals(:coordenacao_line) # 40 HH × R$ 250 × 1,20 × 1,25 = R$ 15.000,00
+    @line = proposal_professionals(:coordenacao_line) # 40 HH × R$ 250 = R$ 10.000,00 de custo (× 1,5 no preço)
   end
 
   test "mudar horas-homem atualiza subtotal, total da equipe e total da proposta na hora, sem salvar" do
@@ -17,11 +17,11 @@ class PricingPreviewTest < ApplicationSystemTestCase
 
     within("tr", text: @line.professional.name) do
       find("input[name$='[man_hours]']").fill_in(with: "10")
-      assert_selector "[data-role='subtotal']", text: "R$ 3.750,00" # 10 × 250 × 1,5
+      assert_selector "[data-role='subtotal']", text: "R$ 2.500,00" # custo puro: 10 × 250
     end
 
     assert_text "Prévia · não salvo"
-    assert_selector "[data-pricing-preview-target='teamTotal']", text: "R$ 32.010,00" # 3.750 + 28.260
+    assert_selector "[data-pricing-preview-target='teamTotal']", text: "R$ 21.340,00" # custo puro: 2.500 + 18.840
     assert_no_selector "[data-pricing-preview-target='summaryTotal']", text: total_before
     assert_equal 15_000, @line.reload.subtotal, "prévia não grava nada"
   end
@@ -35,8 +35,10 @@ class PricingPreviewTest < ApplicationSystemTestCase
     end
     find("input[name='project_pricing[bdi]']").fill_in(with: "1")
 
-    # (40 × 250 + 2 × 350) × 1,00 × 1,25 = 13.375,00
-    within("tr", text: @line.professional.name) { assert_selector "[data-role='subtotal']", text: "R$ 13.375,00" }
+    # A linha mostra o custo puro (40 × 250 + 2 × 350 = 10.700,00); o BDI = 1 zera a linha "+ BDI" do resumo.
+    within("tr", text: @line.professional.name) { assert_selector "[data-role='subtotal']", text: "R$ 10.700,00" }
+    assert_selector "[data-pricing-preview-target='summaryBdi']", text: "R$ 0,00"
+    assert_equal find("[data-pricing-preview-target='summaryTotal']").text, find("[data-pricing-preview-target='compositionTotal']").text
   end
 
   # 2026-09-28: logística por campo, dentro do item, × BDI × impostos (FieldCampaign#breakdown).
@@ -51,14 +53,17 @@ class PricingPreviewTest < ApplicationSystemTestCase
     end
     # custo direto: veículo 2 × 750 = 1.500 + combustível 400 + alimentação 2 × 2 × 80 = 320
     # + hospedagem 0 + pedágios 240 = 2.460 → × 1,5 = 3.690,00
-    within(campaign_row) { assert_selector "[data-role='campaign-total']", text: "R$ 3.690,00" }
-    assert_selector "[data-pricing-preview-target='logistics']", text: "R$ 3.690,00"
+    within(campaign_row) { assert_selector "[data-role='campaign-total']", text: "R$ 2.460,00" } # custo puro (× 1,5 = 3.690)
+    assert_selector "[data-pricing-preview-target='logistics']", text: "R$ 2.460,00"
     assert_selector "[data-pricing-preview-target='summaryTotal']", text: "R$ 46.950,00" # 43.260 + 3.690
     preview_total = find("[data-pricing-preview-target='summaryTotal']").text
 
     click_button "Salvar e recalcular"
+    preview_composition = %w[summaryDirect summaryBdi summaryTaxes].map { |t| find("[data-pricing-preview-target='#{t}']").text }
     assert_text "Preço recalculado"
     assert_equal preview_total, find("[data-pricing-preview-target='summaryTotal']").text
+    # Composição (custo direto + BDI + impostos) da prévia bate com a do servidor.
+    assert_equal preview_composition, %w[summaryDirect summaryBdi summaryTaxes].map { |t| find("[data-pricing-preview-target='#{t}']").text }
     assert_equal 46_950, @proposal.project_pricing.reload.total_value
   end
 

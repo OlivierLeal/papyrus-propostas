@@ -19,8 +19,8 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
 
     get conversation_proposal_path(@conversation)
 
-    assert_equal 18_000, proposal_professionals(:coordenacao_line).reload.subtotal
-    assert_match "R$ 18.000,00", response.body
+    assert_equal 18_000, proposal_professionals(:coordenacao_line).reload.subtotal # com BDI × impostos
+    assert_match "R$ 12.000,00", response.body # a linha mostra o custo puro: 40 HH × R$ 300
     assert_match "R$ 300,00/h", response.body
   end
 

@@ -11,7 +11,7 @@
   <%= render "conversations/framing_panel", conversation: conversation %>
 <% end %>
 <%= turbo_stream.replace "blockers_count" do %>
-  <span id="blockers_count" class="badge badge-warning badge-xs font-bold <%= "hidden" if blockers_count.zero? %>"><%= blockers_count %></span>
+  <span id="blockers_count" class="badge badge-warning badge-xs font-bold absolute -top-1.5 -right-3 px-1 <%= "hidden" if blockers_count.zero? %>"><%= blockers_count %></span>
 <% end %>
 <%= turbo_stream.replace "blockers_count_rail" do %>
   <span id="blockers_count_rail" class="badge badge-warning badge-xs font-bold absolute -top-1 -right-1 px-1 <%= "hidden" if blockers_count.zero? %>"><%= blockers_count %></span>

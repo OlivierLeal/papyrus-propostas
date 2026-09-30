@@ -9,7 +9,7 @@
     <%# Chat largo à esquerda; contexto em abas à direita (no celular, o painel vem antes do chat). %>
     <%# Painel recolhível (side_panel_controller.js): o cookie faz o servidor já desenhar recolhido, sem
         piscar no refresh por morph. Recolhido, vira uma barra de ícones de 3,5rem. %>
-    <div class="group/panel grid grid-cols-1 gap-3 lg:flex-1 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_23rem] lg:data-[collapsed=true]:grid-cols-[minmax(0,1fr)_3.5rem]"
+    <div class="group/panel grid grid-cols-1 gap-3 lg:flex-1 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_30rem] lg:data-[collapsed=true]:grid-cols-[minmax(0,1fr)_3.5rem]"
          data-controller="side-panel" data-collapsed="<%= cookies[:side_panel_collapsed] == "1" %>">
       <div class="relative bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh] lg:h-full lg:min-h-0 min-w-0"
            data-controller="chat-scroll file-drop"

@@ -19,8 +19,8 @@ class ManHoursAndDaysTest < ApplicationSystemTestCase
       find("input[name$='[field_days]']").set("2")
     end
     click_button "Salvar e recalcular"
-    # (10 × 250 + 2 × 350) × 1,20 × 1,25 = 4.800,00
-    within("tr", text: line.professional.name) { assert_text "R$ 4.800,00" }
+    # A linha mostra o custo puro: 10 × 250 + 2 × 350 = 3.200,00 (BDI e impostos só no resumo)
+    within("tr", text: line.professional.name) { assert_text "R$ 3.200,00" }
 
     assert_equal 10.0, line.reload.man_hours
     assert_equal 2.0, line.field_days

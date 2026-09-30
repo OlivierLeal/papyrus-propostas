@@ -32,9 +32,13 @@ class ProposalProfessional < ApplicationRecord
   end
 
   def expected_subtotal(bdi:, tax_multiplier:, days_factor: nil)
-    c1 = man_hours * professional.rate_man_hour
-    c2 = (field_days + commute_extra_days(days_factor)) * professional.rate_daily
-    ((c1 + c2) * bdi * tax_multiplier).round(2)
+    (direct_cost(days_factor) * bdi * tax_multiplier).round(2)
+  end
+
+  # C1 + C2: horas-homem × valor/hora + diárias (com o acréscimo de deslocamento) × valor/diária,
+  # ANTES de BDI e impostos — é o "custo direto" da composição do preço na tela.
+  def direct_cost(days_factor = nil)
+    man_hours * professional.rate_man_hour + (field_days + commute_extra_days(days_factor)) * professional.rate_daily
   end
 
   # Hospedagem longe da área alonga os campos do item (FieldCampaign#effective_days) — quem vai a

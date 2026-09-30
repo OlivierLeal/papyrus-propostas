@@ -1,0 +1,12 @@
+<%# Uma linha da "Composição do preço" (_summary). locals: label, value, target (alvo da prévia ao vivo,
+    ou nil), strong, hint (texto miúdo ao lado do rótulo), hint_target. %>
+<% strong = local_assigns[:strong] %>
+<div class="flex justify-between gap-3 <%= "border-t border-base-300 pt-2 font-semibold" if strong %>">
+  <dt class="<%= strong ? "text-base-content" : "text-base-content/60" %>">
+    <%= label %>
+    <% if local_assigns[:hint] %>
+      <%= tag.span hint, class: "text-xs font-normal text-base-content/50", data: { pricing_preview_target: local_assigns[:hint_target] } %>
+    <% end %>
+  </dt>
+  <%= tag.dd brl(value), class: "text-base-content tabular-nums", data: { pricing_preview_target: local_assigns[:target] } %>
+</div>

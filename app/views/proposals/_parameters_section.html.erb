@@ -99,8 +99,8 @@
 
   <dl class="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-4 text-sm">
     <div class="flex items-baseline gap-1.5 ml-auto">
-      <dt class="text-base-content/60 font-medium">Logística dos campos (com BDI × impostos)</dt>
-      <dd class="font-semibold text-base-content tabular-nums" data-pricing-preview-target="logistics"><%= brl(pricing.logistics_total) %></dd>
+      <dt class="text-base-content/60 font-medium">Logística dos campos (valor puro)</dt>
+      <dd class="font-semibold text-base-content tabular-nums" data-pricing-preview-target="logistics"><%= brl(pricing.pricing_items.sum(&:campaigns_cost).round(2)) %></dd>
     </div>
   </dl>
 </section>

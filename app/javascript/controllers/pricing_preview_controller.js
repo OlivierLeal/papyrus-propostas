@@ -10,7 +10,8 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static targets = [
     "line", "teamHours", "teamDays", "teamTotal", "item", "campaign", "itemCost", "logistics",
-    "summaryTotal", "summaryTeam", "summaryLogistics", "summaryItemCosts", "installment", "dirty"
+    "summaryTotal", "summaryTeam", "summaryLogistics", "summaryItemCosts", "installment", "dirty",
+    "summaryDirect", "summaryBdi", "summaryTaxes", "summaryBdiRate", "summaryTaxRate", "compositionTotal"
   ]
   static values = { externalTotal: Number }
 
@@ -31,9 +32,15 @@ export default class extends Controller {
       this.updateCommuteNote(row)
     })
 
+    // A tela mostra valores PUROS por linha (2026-09-30, pedido do cliente) e aplica BDI e impostos só
+    // no resumo — ProjectPricing#price_composition. O total continua sendo a soma das partes COM margem,
+    // arredondadas como no Ruby (linha a linha / por item), pra bater com o servidor.
+    const perItemRaw = {}
+    const raw = (id) => (perItemRaw[id] ||= { team: 0, campaigns: 0, costs: 0 })
     let hours = 0
     let days = 0
     let team = 0
+    let teamDirect = 0
     this.lineTargets.forEach((row) => {
       const lineHours = this.number(row.querySelector("input[name$='[man_hours]']"))
       const lineDays = this.number(row.querySelector("input[name$='[field_days]']"))
@@ -46,56 +53,76 @@ export default class extends Controller {
         extraCell.hidden = !(extra > 0)
         extraCell.textContent = `+${this.short(extra)} desloc.`
       }
-      const subtotal = this.round((lineHours * Number(row.dataset.rateHour) + (lineDays + extra) * Number(row.dataset.rateDay)) * multiplier)
+      const lineDirect = lineHours * Number(row.dataset.rateHour) + (lineDays + extra) * Number(row.dataset.rateDay)
+      const subtotal = this.round(lineDirect * multiplier)
       hours += lineHours
       days += lineDays
       team += subtotal
-      if (itemId) bucket(itemId).team += subtotal
+      teamDirect += lineDirect
+      if (itemId) {
+        bucket(itemId).team += subtotal
+        raw(itemId).team += lineDirect
+      }
       const cell = row.querySelector("[data-role='subtotal']")
-      if (cell) cell.textContent = this.brl(subtotal)
+      if (cell) cell.textContent = this.brl(this.round(lineDirect))
     })
 
     let logistics = 0
+    let logisticsDirect = 0
     this.campaignTargets.forEach((row) => {
-      const total = this.round(this.campaignCost(row) * multiplier)
-      bucket(row.dataset.itemId).campaigns += total
+      const rawCampaign = this.campaignCost(row)
+      logisticsDirect += rawCampaign
+      raw(row.dataset.itemId).campaigns += rawCampaign
+      bucket(row.dataset.itemId).campaigns += rawCampaign * multiplier
       const cell = row.querySelector("[data-role='campaign-total']")
-      if (cell) cell.textContent = this.brl(total)
+      if (cell) cell.textContent = this.brl(this.round(rawCampaign))
     })
 
     let itemCosts = 0
+    let itemCostsDirect = 0
     this.itemCostTargets.forEach((row) => {
-      const cost = this.inner(row, "quantity") * this.inner(row, "unit_value") * multiplier
-      bucket(row.dataset.itemId).costs += cost
+      const rawCost = this.inner(row, "quantity") * this.inner(row, "unit_value")
+      itemCostsDirect += rawCost
+      raw(row.dataset.itemId).costs += rawCost
+      bucket(row.dataset.itemId).costs += rawCost * multiplier
       const cell = row.querySelector("[data-role='cost-total']")
-      if (cell) cell.textContent = this.brl(this.round(cost))
+      if (cell) cell.textContent = this.brl(this.round(rawCost))
     })
 
-    // PricingItem#campaigns_total/#costs_total arredondam por item.
     this.itemTargets.forEach((card) => {
-      const values = bucket(card.dataset.itemId)
-      values.campaigns = this.round(values.campaigns)
-      values.costs = this.round(values.costs)
-      this.setRole(card, "item-team", this.brl(values.team))
-      this.setRole(card, "item-campaigns", this.brl(values.campaigns))
-      this.setRole(card, "item-costs", this.brl(values.costs))
-      this.setRole(card, "item-total", this.brl(values.team + values.campaigns + values.costs))
+      const values = raw(card.dataset.itemId)
+      this.setRole(card, "item-team", this.brl(this.round(values.team)))
+      this.setRole(card, "item-campaigns", this.brl(this.round(values.campaigns)))
+      this.setRole(card, "item-costs", this.brl(this.round(values.costs)))
+      this.setRole(card, "item-total", this.brl(this.round(values.team + values.campaigns + values.costs)))
     })
+    // PricingItem#campaigns_total/#costs_total arredondam por item.
     Object.values(perItem).forEach((values) => {
       logistics += this.round(values.campaigns)
       itemCosts += this.round(values.costs)
     })
 
     const total = this.round(team + logistics + itemCosts + this.externalTotalValue)
+    const teamRounded = this.round(teamDirect)
+    const logisticsRounded = this.round(logisticsDirect)
+    const itemCostsRounded = this.round(itemCostsDirect)
+    const direct = this.round(teamRounded + logisticsRounded + itemCostsRounded)
+    const bdiAmount = this.round(direct * (this.field("bdi") - 1))
 
     this.set(this.teamHoursTargets, `${this.decimal(hours)} HH`)
     this.set(this.teamDaysTargets, this.decimal(days))
-    this.set(this.teamTotalTargets, this.brl(team))
-    this.set(this.logisticsTargets, this.brl(logistics))
-    this.set(this.summaryTeamTargets, this.brl(team))
-    this.set(this.summaryLogisticsTargets, this.brl(logistics))
-    this.set(this.summaryItemCostsTargets, this.brl(itemCosts))
+    this.set(this.teamTotalTargets, this.brl(teamRounded))
+    this.set(this.logisticsTargets, this.brl(logisticsRounded))
+    this.set(this.summaryTeamTargets, this.brl(teamRounded))
+    this.set(this.summaryLogisticsTargets, this.brl(logisticsRounded))
+    this.set(this.summaryItemCostsTargets, this.brl(itemCostsRounded))
+    this.set(this.summaryDirectTargets, this.brl(direct))
+    this.set(this.summaryBdiTargets, this.brl(bdiAmount))
+    this.set(this.summaryTaxesTargets, this.brl(this.round(team + logistics + itemCosts - direct - bdiAmount)))
+    this.set(this.summaryBdiRateTargets, `(× ${this.rate(this.field("bdi"))})`)
+    this.set(this.summaryTaxRateTargets, `(× ${this.rate(this.field("tax_multiplier"))})`)
     this.set(this.summaryTotalTargets, this.brl(total))
+    this.set(this.compositionTotalTargets, this.brl(total))
     this.updateInstallments(total)
     this.dirtyTargets.forEach((element) => { element.hidden = false })
 
@@ -104,6 +131,10 @@ export default class extends Controller {
   }
 
   // FieldCampaign#breakdown — custo DIRETO do campo, antes do BDI × impostos.
+  rate(value) {
+    return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+
   campaignCost(row) {
     const people = this.inner(row, "people")
     const days = this.effectiveDays(this.inner(row, "days"), this.inner(row, "commute_hours"), row)

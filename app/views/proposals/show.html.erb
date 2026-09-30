@@ -95,7 +95,9 @@
             costs: pricing.outsourced_costs, kind: "terceirizado", conversation: @conversation, editable: editable %>
     </div>
 
-    <aside class="flex flex-col gap-6 xl:sticky xl:top-6">
+    <%# Fixo ao rolar, mas nunca mais alto que a janela (sobra do shared/_layout: 92vh): com a composição
+        do preço o resumo passou da altura de telas de ~1000px e "Aprovar"/"Reabrir" ficavam inalcançáveis. %>
+    <aside class="flex flex-col gap-6 xl:sticky xl:top-6 xl:max-h-[calc(92vh-3rem)] xl:overflow-y-auto xl:overscroll-contain">
       <%= render "summary", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
       <%= render "precedents", matches: @precedent_matches %>
       <%= render "generated_documents", proposal: @proposal %>

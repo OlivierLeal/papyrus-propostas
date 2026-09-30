@@ -149,6 +149,7 @@ class Proposal < ApplicationRecord
   def docx_price_rows(descricao_fallback: nil)
     total = format_currency(project_pricing.total_value)
     return [ [ "1", docx_servico_label(fallback: descricao_fallback), total ] ] if price_presentation_mode == "total"
+    return detailed_price_rows + [ [ "", "TOTAL", total ] ] if price_presentation_mode == "detalhado"
 
     rows = project_pricing.price_rows.each_with_index.map { |(label, value), index| [ (index + 1).to_s, label, format_currency(value) ] }
     if price_presentation_mode == "empreendimentos"
@@ -161,10 +162,76 @@ class Proposal < ApplicationRecord
   # empreendimentos — nunca um quadro aberto de uma linha só.
   def price_presentation_mode
     mode = project_pricing.price_presentation
+    return mode if mode == "detalhado"
     return "total" if mode == "total" || project_pricing.pricing_items.size < 2
     return "itens" if mode == "empreendimentos" && project_pricing.pricing_enterprises.size < 2
 
     mode
+  end
+
+  CAMPAIGN_COST_LABELS = {
+    vehicle: "veículos", fuel: "combustível", meals: "alimentação", lodging: "hospedagem",
+    extras: "pedágios, lavagens, deslocamentos locais, mateiro e EPI"
+  }.freeze
+
+  # Quadro de Preço DETALHADO (2026-09-30, pedido do cliente: "tem cliente que quer saber valor de
+  # HH, logística detalhada, BDI, impostos, tudo separado"). Linhas de custo PURO (quantidade ×
+  # valor unitário), depois o subtotal do custo direto, BDI, impostos e externos — a mesma
+  # composição da Tela de Precificação (ProjectPricing#price_composition), que fecha centavo a
+  # centavo com o total. A última linha de custo absorve o arredondamento das linhas, pro subtotal
+  # bater com a soma. Linha sem número = subtítulo/subtotal, sai em negrito.
+  # Serviço terceirizado nunca aparece como tal (regra da proposta): entra como "Serviços
+  # especializados", sem descrição.
+  def detailed_price_rows
+    pricing = project_pricing
+    composition = pricing.price_composition
+    items = pricing.pricing_items.includes(:field_campaigns, proposal_professionals: :professional).to_a
+    rows = []
+    cost_rows = []
+
+    items.each do |item|
+      rows << [ "", item.name.upcase, "" ] if items.size > 1
+      factor = item.days_factor
+      item.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, line.id ] }.each do |line|
+        pro = line.professional
+        who = [ pro.name, line.deliverable_name.presence ].compact.join(" – ")
+        if line.man_hours.positive?
+          cost_rows << (rows << [ nil, "Horas-homem: #{who} (#{number_br(line.man_hours)} HH × R$ #{format_currency(pro.rate_man_hour)})", line.man_hours * pro.rate_man_hour ]).last
+        end
+        days = line.field_days + line.commute_extra_days(factor)
+        if days.positive?
+          cost_rows << (rows << [ nil, "Diárias de campo: #{who} (#{number_br(days)} × R$ #{format_currency(pro.rate_daily)})", days * pro.rate_daily ]).last
+        end
+      end
+      item.field_campaigns.each do |campaign|
+        campaign.breakdown(pricing).each do |key, value|
+          next unless value.positive?
+
+          cost_rows << (rows << [ nil, "Logística – #{campaign.description}: #{CAMPAIGN_COST_LABELS.fetch(key)}", value ]).last
+        end
+      end
+      item.costs.each do |cost|
+        value = cost["quantity"].to_d * cost["unit_value"].to_d
+        next unless value.positive?
+
+        cost_rows << (rows << [ nil, "#{cost['description']} (#{number_br(cost['quantity'])} × R$ #{format_currency(cost['unit_value'])})", value ]).last
+      end
+    end
+
+    cost_rows.each { |row| row[2] = row[2].to_d.round(2) }
+    cost_rows.last[2] += composition[:direct] - cost_rows.sum { |row| row[2] } if cost_rows.any?
+
+    rows << [ "", "SUBTOTAL – CUSTO DIRETO", composition[:direct] ]
+    rows << [ nil, "BDI (× #{format_currency(pricing.bdi)})", composition[:bdi] ]
+    rows << [ nil, "Impostos e despesas administrativas (× #{format_currency(pricing.tax_multiplier)})", composition[:taxes] ]
+    pricing.other_external_costs.each { |cost, _| rows << [ nil, cost["description"].to_s, cost["value"].to_d ] }
+    rows << [ nil, "Serviços especializados", composition[:outsourced] ] if composition[:outsourced].positive?
+
+    number = 0
+    rows.map do |label_number, label, value|
+      shown = value == "" ? "" : format_currency(value)
+      [ label_number.nil? ? (number += 1).to_s : label_number, label, shown ]
+    end
   end
 
   # Nome do serviço pro Quadro de Preço — deriva do(s) ato(s) de licenciamento já identificados
@@ -573,6 +640,10 @@ class Proposal < ApplicationRecord
       ""
     end
 
+    def number_br(value)
+      ActionController::Base.helpers.number_with_precision(value.to_d, precision: 2, separator: ",", delimiter: ".", strip_insignificant_zeros: true)
+    end
+
     def format_currency(value)
       ActionController::Base.helpers.number_to_currency(value, unit: "", separator: ",", delimiter: ".").strip
     end
@@ -725,8 +796,10 @@ class Proposal < ApplicationRecord
         que NÃO (documento único).
 
         E em "apresentacao_preco", como o ET/TR pede o preço: "total" (preço global — o padrão,
-        quando nada é dito), "itens" (custos discriminados por etapa/estudo/item) ou
-        "empreendimentos" (discriminado e com o valor de cada empreendimento).
+        quando nada é dito), "itens" (custos discriminados por etapa/estudo/item),
+        "empreendimentos" (discriminado e com o valor de cada empreendimento) ou "detalhado" (quando
+        pede a composição do preço: horas-homem, diárias, logística, BDI e impostos separados, ou uma
+        planilha de composição de custos).
         #{price_presentation_context}
 
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente

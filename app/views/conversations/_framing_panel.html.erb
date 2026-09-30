@@ -6,7 +6,7 @@
 <% blockers = conversation.generation_blockers %>
 <div id="framing_panel" class="flex flex-col gap-4">
   <section class="flex flex-col gap-3">
-    <h2 class="text-[11px] font-semibold uppercase tracking-wider text-base-content/60">Enquadramento</h2>
+    <h2 class="font-display text-base font-semibold text-base-content">Enquadramento</h2>
 
     <dl class="flex flex-col gap-3 text-sm">
       <div>
@@ -81,14 +81,15 @@
   </section>
 
   <section class="flex flex-col gap-2 border-t border-base-300 pt-4">
-    <h2 class="text-[11px] font-semibold uppercase tracking-wider text-base-content/60">Próximo passo</h2>
+    <h2 class="font-display text-base font-semibold text-base-content">Próximo passo</h2>
     <p class="text-sm text-base-content">
       <% if conversation.framing_confirmation_required? %>
-        Confirme o enquadramento<%= " e resolva os #{blockers.size} pontos em Pendências" if blockers.any? %>; depois siga para a precificação.
+        <% pontos = blockers.size == 1 ? "o ponto aberto" : "os #{blockers.size} pontos abertos" %>
+        Confirme o enquadramento<%= " e resolva #{pontos} em Pendências" if blockers.any? %>; depois siga para a precificação.
       <% elsif conversation.status == "reviewing" %>
         Siga para a precificação: a equipe é sugerida pela IA e você ajusta horas, campo e preço.
       <% elsif blockers.any? %>
-        Resolva os <%= blockers.size %> pontos em Pendências para liberar a geração da proposta.
+        Resolva <%= blockers.size == 1 ? "o ponto aberto" : "os #{blockers.size} pontos abertos" %> em Pendências para liberar a geração da proposta.
       <% else %>
         Peça a proposta (ou ajustes) no chat. Cada geração vira uma nova revisão em Arquivos.
       <% end %>

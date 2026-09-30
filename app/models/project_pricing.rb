@@ -28,7 +28,8 @@ class ProjectPricing < ApplicationRecord
   PRICE_PRESENTATIONS = {
     "total" => "Só o preço total",
     "itens" => "Aberto por item",
-    "empreendimentos" => "Por item, com total de cada empreendimento"
+    "empreendimentos" => "Por item, com total de cada empreendimento",
+    "detalhado" => "Detalhado: HH, diárias, logística, BDI e impostos"
   }.freeze
   DEFAULT_ITEM_NAME = "Execução do serviço"
   EXTERNAL_COSTS_LABEL = "Custos externos (taxas e demais despesas)"
@@ -65,6 +66,27 @@ class ProjectPricing < ApplicationRecord
 
   def professionals_total
     proposal_professionals.sum(&:subtotal)
+  end
+
+  # De onde vem o total (2026-09-30, relato do consultor: "não tá saindo os impostos no custo total,
+  # tá o mesmo valor da equipe" — estavam, embutidos em cada subtotal, mas a tela não mostrava).
+  # Custo direto (equipe + logística + custos dos itens, SEM margem) + BDI + impostos + externos.
+  # Os impostos absorvem o arredondamento, então as quatro partes somam exatamente total_value.
+  def price_composition
+    items = pricing_items.includes(:field_campaigns).to_a
+    factors = items.to_h { |item| [ item.id, item.days_factor ] }
+    team = proposal_professionals.includes(:professional).sum { |pp| pp.direct_cost(factors[pp.pricing_item_id]) }.round(2)
+    logistics = items.sum(&:campaigns_cost).round(2)
+    item_costs = items.sum(&:costs_cost).round(2)
+    direct = team + logistics + item_costs
+    with_margins = professionals_total + items.sum { |item| item.campaigns_total + item.costs_total }
+    bdi_amount = (direct * (bdi - 1)).round(2)
+    outsourced = outsourced_costs.sum { |cost, _| cost["value"].to_d }
+    {
+      team: team, logistics: logistics, item_costs: item_costs, direct: direct,
+      bdi: bdi_amount, taxes: (with_margins - direct - bdi_amount).round(2),
+      external: external_costs_total.to_d - outsourced, outsourced: outsourced
+    }
   end
 
   # C4 = logística dos campos de todos os itens, já com BDI × impostos (2026-09-28: antes era um
