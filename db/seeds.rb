@@ -165,17 +165,17 @@ end
                  "Pós-Graduada em Engenharia de Segurança do Trabalho. MBA em Auditoria e Gestão " \
                  "Ambiental. Engenheira de Produção Mecânica. Bacharel em Urbanismo. Técnica em " \
                  "Meio Ambiente.",
-    always_included: true },
+    always_included: true, cost_in_bdi: true },
   { name: "Ricardo Hortélio", role: "Diretor Técnico", registration: "CRBio 46177/5-D",
     specialties: "MBA em Auditoria e Gestão Ambiental. Biólogo Sênior. Perito Ambiental.",
-    always_included: true },
+    always_included: true, cost_in_bdi: true },
   # Nota operacional (fora do campo specialties de propósito — ele vai pro .docx impresso, e "só
   # entra em propostas da Região Sul" não é habilitação): Sara só deve ser incluída na equipe de
   # propostas de projetos na Região Sul — hoje isso não é aplicado por código nenhum, é só
   # orientação pro consultor ajustar manualmente na Tela de Precificação quando não se aplicar.
   { name: "Sara Marçal", role: "Diretora Regional – Região Sul", registration: "CREA 76207",
     specialties: "MBA Gestão Estratégica de Projetos. Engenheira de Segurança do Trabalho. " \
-                 "Engenheira Ambiental." },
+                 "Engenheira Ambiental.", cost_in_bdi: true },
   { name: "Pedro Skinner", role: "Coordenador de Projetos", registration: nil,
     specialties: "Doutor e Mestre em Antropologia. Antropólogo.", always_included: true },
   { name: "Francisco Reis", role: "Biólogo Fauna", registration: nil,
@@ -230,6 +230,7 @@ end
     professional.rate_man_hour = 0
     professional.rate_daily = 0
     professional.active = true
+    professional.cost_in_bdi = attrs[:cost_in_bdi] || false
   end
   professional.save!
 end

@@ -44,7 +44,7 @@ module Settings
       def professional_params
         params.require(:professional).permit(
           :name, :role, :rate_man_hour, :rate_daily, :registration, :specialties, :active, :always_included,
-          :social_charges_percent_display
+          :social_charges_percent_display, :cost_in_bdi
         )
       end
   end

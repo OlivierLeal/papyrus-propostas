@@ -7,6 +7,10 @@ class Professional < ApplicationRecord
   validates :rate_daily, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :social_charges_percent, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
 
+  # Custo incluso no BDI (Diretoria, 2026-09-30): continua na equipe e no quadro do .docx, mas sem
+  # valor de hora-homem/diária — senão o custo dela entraria duas vezes (no BDI e na linha).
+  before_validation :zero_rates_when_in_bdi
+
   # Encargos sociais: gravado como fração (0.8), digitado como porcentagem (80) — ver
   # Spreadsheets::FactCatalog, que usa pra separar salário e encargos em planilha de formação de preço.
   def social_charges_percent_display
@@ -25,6 +29,13 @@ class Professional < ApplicationRecord
   after_update_commit :recalculate_open_pricings, if: -> { saved_change_to_rate_man_hour? || saved_change_to_rate_daily? }
 
   private
+    def zero_rates_when_in_bdi
+      return unless cost_in_bdi?
+
+      self.rate_man_hour = 0
+      self.rate_daily = 0
+    end
+
     # O subtotal de cada linha é gravado (ProjectPricing#recalculate!), não calculado na hora — sem
     # isto, preencher o valor da hora-homem/diária em Configurações DEPOIS de a proposta existir
     # deixava a Tela de Precificação com o valor antigo (R$ 0,00) até alguém clicar em "Recalcular

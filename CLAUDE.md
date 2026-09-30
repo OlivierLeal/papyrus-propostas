@@ -251,6 +251,16 @@ Entradas: tipo de estudo (confirmado pela IA), municípios/distância logística
    - Os fixos que a IA não citar entram sozinhos (`ensure_always_included_lines!`, cargo como entregável, 0h). Falha/JSON inválido → `build_base_team!` (só os fixos, 0h — era `build_from_template!`).
    - Pelo chat (`ensure_proposal!(ai_suggestions: false)`, sem IA síncrona por reentrância) a proposta nasce com `build_base_team!` e `SuggestTeamJob` completa em background enquanto `Proposal#team_untouched?` (só fixos, todos sem HH nem diária). Linha da IA pra um fixo SUBSTITUI a linha-placeholder dele (cargo, 0h) em vez de duplicar. Idempotente: qualquer linha fora dos fixos, ou esforço dado a um fixo, trava a sugestão.
    - O consultor ajusta tudo na Tela de Precificação.
+   - **Pessoa repetida (2026-09-30, conversas 63/65):** a mesma pessoa no MESMO item vira uma linha
+     só em `apply_team_lines!` (soma HH/diárias, junta os entregáveis com "; "); em itens diferentes
+     é legítimo, e o prompt proíbe dividir a mesma frente (campo + elaboração do mesmo diagnóstico)
+     entre itens. Na Tela de Precificação as linhas da mesma pessoa ficam juntas (a 2ª com "↳").
+     Propostas antigas não são reescritas.
+   - **Custo incluso no BDI** (`professionals.cost_in_bdi`, Charlene: Diretoria — Charlene, Ricardo,
+     Sara — não cobra HH/diária, o custo já está no BDI): valores zerados no cadastro
+     (`Professional#zero_rates_when_in_bdi`, o callback de sempre recalcula as propostas abertas), a
+     IA dá 0 HH/diárias, a tela mostra "custo no BDI", e ela não vira peça de rateio nas planilhas.
+     Continua na equipe e no quadro do `.docx`. Migração `AddCostInBdiToProfessionals` marca os três.
 2. **Ajuste manual**: grade editável na Tela de Precificação (`proposals#show`/`#update`) — Profissional × Entregável × Horas-homem/Diárias, mais adição/remoção de linhas (`proposal_professionals#create`/`#destroy`). Recalcula ao submeter o formulário.
 3. **Cálculo** (`ProjectPricing#recalculate!` / `ProposalProfessional#recalculate_subtotal`):
    - `C1` = horas-homem × valor da hora-homem

@@ -454,4 +454,24 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match "ART", response.body
     assert_match "Topografia", response.body
   end
+
+  # 2026-09-30: linhas da mesma pessoa juntas (a 2ª com "↳") e Diretoria com "custo no BDI".
+  test "equipe agrupa as linhas da mesma pessoa e mostra quem tem custo no BDI" do
+    pricing = @conversation.proposal.project_pricing
+    biologa = professionals(:biologa)
+    diretora = professionals(:diretora)
+    diretora.update!(cost_in_bdi: true)
+    pricing.proposal_professionals.create!(professional: diretora, deliverable_name: "Direção", pricing_item: pricing.default_item)
+    pricing.proposal_professionals.create!(professional: biologa, deliverable_name: "Relatório final", pricing_item: pricing.default_item, man_hours: 5)
+
+    get conversation_proposal_path(@conversation)
+
+    rows = css_select("tr[data-pricing-preview-target='line']")
+    names = rows.map { |row| row.text.squish }
+    biologa_rows = names.each_index.select { |i| names[i].include?(biologa.name.split.first) }
+    assert_equal 2, biologa_rows.size
+    assert_equal 1, biologa_rows.last - biologa_rows.first, "as duas linhas da bióloga ficam juntas"
+    assert_includes names[biologa_rows.last], "↳"
+    assert_select "tr[data-pricing-preview-target='line']", text: /custo no BDI/
+  end
 end

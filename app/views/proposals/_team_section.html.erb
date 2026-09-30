@@ -1,8 +1,11 @@
 <%# Equipe da proposta. locals: form (form principal, #pricing-form), pricing, editable,
     conversation, professionals (ativos, pra busca de "Adicionar à equipe"). %>
 <% days_factors = pricing.days_factors %>
-<% lines = pricing.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, line.id ] } %>
-<% sem_valor = lines.map(&:professional).uniq.select { |pro| pro.rate_man_hour.zero? && pro.rate_daily.zero? } %>
+<%# As linhas da mesma pessoa ficam juntas (a 1ª com nome e avatar, as outras com "↳"): uma pessoa pode
+    ter uma linha por item, e espalhadas pareciam gente repetida. %>
+<% first_id = pricing.proposal_professionals.group_by(&:professional_id).transform_values { |ls| ls.map(&:id).min } %>
+<% lines = pricing.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, first_id[line.professional_id], line.id ] } %>
+<% sem_valor = lines.map(&:professional).uniq.select { |pro| !pro.cost_in_bdi? && pro.rate_man_hour.zero? && pro.rate_daily.zero? } %>
 <% item_options = pricing.pricing_items.map { |item| [ item.name, item.id ] } %>
 
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
@@ -46,10 +49,14 @@
         <%= form.fields_for :proposal_professionals, lines do |pp_form| %>
           <% line = pp_form.object %>
           <% professional = line.professional %>
-          <tr class="align-top hover:bg-base-200/30" data-pricing-preview-target="line"
+          <% continuation = pp_form.index.positive? && lines[pp_form.index - 1].professional_id == line.professional_id %>
+          <tr class="align-top hover:bg-base-200/30 <%= "border-t-0" if continuation %>" data-pricing-preview-target="line"
               data-rate-hour="<%= professional.rate_man_hour.to_f %>" data-rate-day="<%= professional.rate_daily.to_f %>">
             <td class="min-w-44">
               <%= pp_form.hidden_field :id %>
+              <% if continuation %>
+                <div class="pl-12 pt-2 text-xs text-base-content/50" title="<%= professional.name %> — outra linha da mesma pessoa">↳ <%= professional.name.split.first %></div>
+              <% else %>
               <div class="flex items-center gap-3">
                 <div class="size-9 rounded-full <%= professional.always_included ? "bg-info/15 text-info" : "bg-primary/10 text-primary" %> text-xs font-semibold flex items-center justify-center shrink-0">
                   <%= initials(professional.name) %>
@@ -64,6 +71,7 @@
                   <div class="text-xs text-base-content/60 truncate max-w-44"><%= professional.role %></div>
                 </div>
               </div>
+              <% end %>
             </td>
             <td class="min-w-40">
               <%= pp_form.text_field :deliverable_name, disabled: !editable, class: "input input-sm w-full", required: true %>
@@ -75,12 +83,18 @@
             <td class="text-right">
               <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
                     class: "input input-sm w-20 text-right tabular-nums" %>
-              <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_man_hour.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_man_hour) %>/h</div>
+              <% if professional.cost_in_bdi? %>
+                <div class="text-xs mt-1 whitespace-nowrap text-base-content/50" title="Custo incluso no BDI — sem valor de hora-homem/diária">custo no BDI</div>
+              <% else %>
+                <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_man_hour.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_man_hour) %>/h</div>
+              <% end %>
             </td>
             <td class="text-right">
               <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
                     class: "input input-sm w-20 text-right tabular-nums" %>
-              <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
+              <% unless professional.cost_in_bdi? %>
+                <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
+              <% end %>
               <% extra = line.commute_extra_days(days_factors[line.pricing_item_id]) %>
               <%= tag.div("+#{decimal_label(extra)} desloc.", class: "text-xs mt-0.5 whitespace-nowrap text-info", hidden: !extra.positive?,
                     data: { role: "commute-extra" }, title: "Hospedagem longe da área alonga os campos do item — as diárias crescem na mesma proporção") %>

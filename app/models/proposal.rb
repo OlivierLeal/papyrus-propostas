@@ -744,7 +744,8 @@ class Proposal < ApplicationRecord
     def team_suggestion_prompt
       describe = lambda do |professional|
         "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
-        "habilitação: #{professional.specialties.presence || '—'}"
+        "habilitação: #{professional.specialties.presence || '—'}" \
+        "#{' | CUSTO NO BDI: entra só com o papel, man_hours e field_days = 0' if professional.cost_in_bdi?}"
       end
       active = Professional.active.order(:name).to_a
       fixed, roster = active.partition(&:always_included)
@@ -769,7 +770,13 @@ class Proposal < ApplicationRecord
         - Use só professional_id das listas acima — nunca invente.
         - "deliverable_name" é o entregável/frente de trabalho da pessoa NESTA proposta (ex.:
           "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Coordenação Geral").
-        - Um mesmo profissional pode ter mais de uma linha se entregar frentes distintas.
+        - UMA linha por pessoa em cada item: se ela entrega várias coisas no mesmo item, junte
+          num entregável só ("Diagnóstico de Fauna e Avifauna") somando o esforço. A mesma pessoa
+          só aparece em outro item quando faz um trabalho de fato diferente lá — nunca divida a
+          mesma frente em dois itens (campo de um diagnóstico e a elaboração DELE ficam no mesmo
+          item e na mesma linha, com HH e diárias juntos), senão o esforço conta duas vezes.
+        - Quem está marcado CUSTO NO BDI (Diretoria) entra na equipe com o papel dele, sempre com
+          man_hours e field_days = 0: o custo já está no BDI.
         - Esforço em duas quantidades:
           #{EFFORT_UNITS_GUIDE}
           Estime pelo porte e complexidade do escopo. Se realmente não houver base, use 0 (o
@@ -1025,6 +1032,9 @@ class Proposal < ApplicationRecord
     # descarta duplicata (mesmo profissional + mesmo entregável). Linha de um profissional FIXO
     # reaproveita a linha-placeholder dele (papel como entregável, 0h — deixada por
     # build_base_team!) em vez de criar outra ao lado — e passa pro item da sugestão.
+    # A mesma pessoa duas vezes no MESMO item vira uma linha só (2026-09-30, conversa 65: Maria e
+    # Francisco com duas linhas cada no mesmo item) — soma o esforço e junta os entregáveis. Quem
+    # tem o custo no BDI entra sempre com 0 HH/diárias.
     def apply_team_lines!(pricing, lines, item)
       valid = Professional.active.index_by(&:id)
       seen = pricing.proposal_professionals.pluck(:professional_id, :deliverable_name)
@@ -1039,12 +1049,17 @@ class Proposal < ApplicationRecord
         next if seen.include?(key)
 
         seen << key
-        attrs = { deliverable_name: deliverable, pricing_item: item,
-                  man_hours: effort(line["man_hours"]), field_days: effort(line["field_days"]) }
-        placeholder = professional.always_included && pricing.proposal_professionals
-          .find_by(professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0)
+        man_hours, field_days = professional.cost_in_bdi? ? [ 0, 0 ] : [ effort(line["man_hours"]), effort(line["field_days"]) ]
+        attrs = { deliverable_name: deliverable, pricing_item: item, man_hours: man_hours, field_days: field_days }
+        placeholder = if professional.always_included
+          pricing.proposal_professionals.find_by(professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0)
+        end
+        same_item = pricing.proposal_professionals.where(professional: professional, pricing_item: item).where.not(id: placeholder&.id).first
 
-        if placeholder
+        if same_item
+          merged = [ same_item.deliverable_name, deliverable ].uniq { |name| name.strip.downcase }.join("; ").truncate(255)
+          same_item.update!(deliverable_name: merged, man_hours: same_item.man_hours + man_hours, field_days: same_item.field_days + field_days)
+        elsif placeholder
           placeholder.update!(attrs)
         else
           pricing.proposal_professionals.create!(attrs.merge(professional: professional))

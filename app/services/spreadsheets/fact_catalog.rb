@@ -93,7 +93,9 @@ module Spreadsheets
         k = "L#{line.id}"
         charges = pro.social_charges_percent&.to_d
         days = line.field_days + line.commute_extra_days(factors[line.pricing_item_id])
-        add("#{k}", "#{pro.name} – #{line.deliverable_name}", line.direct_cost(factors[line.pricing_item_id]).round(2), :money, piece: true)
+        cost = line.direct_cost(factors[line.pricing_item_id]).round(2)
+        # Sem custo (Diretoria com custo no BDI, linha a 0h) não é peça: não há o que ratear.
+        add("#{k}", "#{pro.name} – #{line.deliverable_name}#{' (custo incluso no BDI)' if pro.cost_in_bdi?}", cost, :money, piece: cost.positive?)
         add("#{k}.descricao", "Descrição (profissional – entregável)", "#{pro.name} – #{line.deliverable_name}", :text)
         add("#{k}.profissional", "Nome", pro.name, :text)
         add("#{k}.cargo", "Cargo", pro.role, :text)
