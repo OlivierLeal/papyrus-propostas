@@ -27,17 +27,20 @@ class FillClientSpreadsheetJob < ApplicationJob
     return fail!(fill, "A IA não devolveu um plano de preenchimento legível.") unless plan
     return not_applicable!(fill, plan) if plan["preencher"] == false && !fill.forced?
 
+    plan = apply_mirrored_prices(plan, fill, catalog, pricing)
+
     result, sheet_total = execute(plan, source_bytes, catalog, fill)
     # Rodada de correção: o total que a PRÓPRIA planilha calcula não bateu com a proposta (ex.: a IA
     # pôs diárias numa coluna de horas). A IA recebe as abas com os valores calculados e refaz o plano.
     if sheet_total && (sheet_total - target).abs > TOTAL_TOLERANCE
       revised = ask_plan(conversation, correction_prompt(plan, result, sheet_total, target, catalog))
+      revised &&= apply_mirrored_prices(revised, fill, catalog, pricing)
       plan, result, sheet_total = [ revised, *execute(revised, source_bytes, catalog, fill) ] if revised
     end
 
     fill.result.attach(io: StringIO.new(result.bytes), filename: fill.result_filename, content_type: fill.source_blob.content_type)
     totals = sheet_total ? { planilha: sheet_total.to_f, proposta: target.to_f } : result.totals
-    warnings = result.warnings
+    warnings = result.warnings + Array(@mirrored_warnings)
     warnings += [ "Não consegui recalcular a planilha pra conferir o total — confira ao abrir." ] if sheet_total.nil? && plan["celula_total"].present?
     if sheet_total && (sheet_total - target).abs > TOTAL_TOLERANCE && result.missing_keys.any? { |key| key.start_with?("bdi.") }
       warnings += [ "O total da planilha não fecha com o da proposta porque faltam os percentuais de BDI da Papyrus — o custo em si confere." ]
@@ -65,6 +68,43 @@ class FillClientSpreadsheetJob < ApplicationJob
   # no meio do JSON (achado ao vivo: 1 de 2 rodadas da DFP da conversa 65 falhou assim). Resposta
   # ilegível ganha UMA nova tentativa pedindo só o JSON, compacto.
   MAX_PLAN_TOKENS = 16_000
+
+  # Itens da precificação que espelham ESTA planilha (PricingItem#mirrored?): o preço unitário de
+  # cada um sai do custo do próprio item ÷ a quantidade do cliente — sem rateio decidido pela IA.
+  # O que não é de nenhum item espelhado (gestão num item comum, custos externos) é rateado entre
+  # eles na proporção do custo. Substitui os "precos_unitarios" que a IA tenha proposto.
+  def apply_mirrored_prices(plan, fill, catalog, pricing)
+    items = pricing.pricing_items.select { |item| item.mirrored? && item.client_sheet["blob_id"].to_i == fill.source_blob_id }
+    return plan if items.empty?
+
+    own = catalog.pieces.group_by { |piece| items.find { |item| item.id == catalog.item_of(piece.key) }&.id }
+    common = own.delete(nil) || []
+    weights = items.to_h { |item| [ item.id, Array(own[item.id]).sum(0.to_d) { |piece| piece.value * catalog.piece_multiplier(piece.key) } ] }
+    total_weight = weights.values.sum
+
+    prices = items.map do |item|
+      share = total_weight.positive? ? weights[item.id] / total_weight : 1.to_d / items.size
+      { "aba" => item.client_sheet["aba"], "celula" => item.client_sheet["celula_preco"],
+        "descricao" => [ item.client_code, item.name ].compact_blank.join(" "), "quantidade" => item.client_quantity.to_s,
+        "composicao" => Array(own[item.id]).map { |piece| { "peca" => piece.key, "fracao" => 1 } } +
+          common.map { |piece| { "peca" => piece.key, "fracao" => share.round(6).to_s } } }
+    end
+    @mirrored_warnings = quantity_mismatches(items, fill)
+    plan.merge("precos_unitarios" => prices, "tipo_planilha" => "preco")
+  end
+
+  # O consultor pode ter mudado a quantidade na Tela de Precificação: a planilha mede a DELE.
+  def quantity_mismatches(items, fill)
+    workbook = Spreadsheets::Workbook.open(fill.source_blob.download)
+    items.filter_map do |item|
+      sheet_quantity = workbook.value(item.client_sheet["aba"], item.client_sheet["celula_quantidade"])
+      next if !sheet_quantity.is_a?(Numeric) || sheet_quantity.to_d == item.client_quantity.to_d
+
+      "#{item.client_code || item.name}: a precificação usa #{item.client_quantity.to_d.to_s('F')} e a planilha do cliente diz #{sheet_quantity} — o preço unitário foi calculado com a da precificação."
+    end
+  rescue Spreadsheets::Workbook::Error
+    []
+  end
 
   def ask_plan(conversation, text)
     conversation.with_params(inferenceConfig: { maxTokens: MAX_PLAN_TOKENS })

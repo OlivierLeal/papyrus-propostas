@@ -42,8 +42,17 @@ export default class extends Controller {
     let team = 0
     let teamDirect = 0
     this.lineTargets.forEach((row) => {
-      const lineHours = this.number(row.querySelector("input[name$='[man_hours]']"))
-      const lineDays = this.number(row.querySelector("input[name$='[field_days]']"))
+      // Item espelhado da planilha do cliente: a linha tem o esforço POR UNIDADE, e o total é
+      // por-unidade × quantidade do cliente (ProposalProfessional#apply_per_unit_effort, 2 casas).
+      const unitQty = this.unitQuantity(row)
+      const perUnitHours = row.querySelector("input[name$='[man_hours_per_unit]']")
+      const perUnitDays = row.querySelector("input[name$='[field_days_per_unit]']")
+      const lineHours = perUnitHours ? this.round(this.number(perUnitHours) * unitQty) : this.number(row.querySelector("input[name$='[man_hours]']"))
+      const lineDays = perUnitDays ? this.round(this.number(perUnitDays) * unitQty) : this.number(row.querySelector("input[name$='[field_days]']"))
+      const hoursNote = row.querySelector("[data-role='per-unit-hours']")
+      if (hoursNote) hoursNote.textContent = `por unid. · total ${this.short(lineHours)}`
+      const daysNote = row.querySelector("[data-role='per-unit-days']")
+      if (daysNote) daysNote.textContent = `por unid. · total ${this.short(lineDays)}`
       const itemSelect = row.querySelector("[data-role='line-item']")
       const itemId = itemSelect ? itemSelect.value : null
       const factor = itemId && planned[itemId] > 0 ? effective[itemId] / planned[itemId] : 1
@@ -251,6 +260,13 @@ export default class extends Controller {
 
   inner(row, name) {
     return this.number(row.querySelector(`[data-field='${name}']`))
+  }
+
+  // Quantidade do cliente do item da linha: o campo do item (se o consultor estiver mudando) ou a salva.
+  unitQuantity(row) {
+    const itemSelect = row.querySelector("[data-role='line-item']")
+    const input = itemSelect && this.element.querySelector(`[data-pricing-preview-target='item'][data-item-id='${itemSelect.value}'] [data-role='client-quantity']`)
+    return input ? this.number(input) : Number(row.dataset.unitQty) || 0
   }
 
   number(input) {

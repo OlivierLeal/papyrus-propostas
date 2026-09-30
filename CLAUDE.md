@@ -2929,6 +2929,30 @@ sempre (seção 1): **a IA interpreta a planilha e monta um PLANO; o Ruby calcul
   não conferida com botão "Preencher"). "Enviados" (aba Arquivos) guarda só a situação de cada
   planilha (`spreadsheet_fills/_status`: referência + motivo, falha, "Preencher mesmo assim") —
   `SpreadsheetFillsController#create`. Sem precificação ainda, só avisa.
+- **Precificação espelhando a lista de preços do cliente (2026-09-30, conversa 65: a PPU pedia 2.994
+  diárias embarcadas, a equipe estimada pelo escopo tinha 600 e a diária saiu a R$ 71 — inexequível).**
+  Quando há PPU/planilha de quantitativos anexada (`Proposal#client_price_lists`: aba VISÍVEL com
+  "preço/valor unitário" E "quantidade"; o texto vai no `team_suggestion_prompt` com teto de 14 mil
+  caracteres), a sugestão de equipe cria um `PricingItem` por item da lista com `client_quantity`
+  (lida da CÉLULA pelo Ruby, nunca da IA — `mirror_attributes`), `client_unit`, `client_code` e
+  `client_sheet` (blob, aba, célula do preço e da quantidade). A IA dá o esforço POR UNIDADE
+  (`proposal_professionals.man_hours_per_unit`/`field_days_per_unit`; rodízio divide a unidade entre
+  as pessoas) e os custos por unidade (só quantidade, valor R$ 0 pro consultor — a tela avisa "custo
+  sem valor unitário"). `ProposalProfessional#apply_per_unit_effort` mantém o TOTAL = por unidade ×
+  quantidade (quem mudou vale), então todo o resto do sistema segue usando `man_hours`/`field_days`;
+  mudar a quantidade no item refaz as linhas. Gestão pode ficar num item comum.
+  - Na PPU, `FillClientSpreadsheetJob#apply_mirrored_prices` substitui o rateio da IA: preço unitário
+    = peças do próprio item + parte dos comuns (proporcional ao custo) ÷ quantidade; avisa se a
+    quantidade da tela difere da planilha.
+  - Tela: selo "Planilha do cliente · Item 1.1 · 2.994 diárias", quantidade editável, custo por
+    unidade, e HH/diárias POR UNIDADE nas linhas desses itens (prévia JS igual:
+    `pricing_preview_controller#unitQuantity`). Botão "Reorganizar pela planilha do cliente"
+    (`RebuildPricingFromClientSheetJob` → `Proposal#rebuild_team_from_client_sheet!`, pede a sugestão
+    ANTES de apagar; troca itens/equipe/campos/custos, mantém BDI e parâmetros; avisa no chat).
+  - Sem lista de preços, nada muda. Verificado ao vivo na 65 (Bedrock, transação desfeita): 6 itens
+    espelhados, 4 observadores × 0,25 = 2.994 diárias, total R$ 342 mil → R$ 1,31 milhão, e a PPU
+    recalculada no LibreOffice com a diária a R$ 407,91 e o total igual ao da proposta (R$ 0,01 de
+    arredondamento). A IA não é determinística: outra rodada deu R$ 1,30 milhão.
 - `professionals.social_charges_percent` (fração; digitado em % no cadastro) — só pra planilha que
   separa salário e encargos. Em branco, vai cheio (encargos 0%).
 - Verificado ao vivo na conversa 65 (Bedrock real): PPU → TOTAL GERAL recalculado R$ 353.925,00 =

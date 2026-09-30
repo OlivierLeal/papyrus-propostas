@@ -91,6 +91,30 @@ class PricingPreviewTest < ApplicationSystemTestCase
     assert_equal 48, proposal_professionals(:fauna_flora_line).reload.commute_extra_days
   end
 
+  # 2026-09-30: item espelhado da planilha do cliente — a linha tem esforço POR UNIDADE e o total é
+  # por-unidade × quantidade do cliente. A prévia tem que bater com o que o servidor grava.
+  test "esforço por unidade num item espelhado: prévia = por unidade × quantidade, igual ao servidor" do
+    pricing = @proposal.project_pricing
+    item = pricing.pricing_items.create!(name: "Diária embarcada", position: 5, client_quantity: 100, client_unit: "diária", client_code: "1.1")
+    line = pricing.proposal_professionals.create!(professional: @line.professional, deliverable_name: "Observador", pricing_item: item,
+                                                  man_hours: 0, field_days: 0, field_days_per_unit: 0.5)
+    pricing.recalculate!
+    sign_in
+    visit conversation_proposal_path(@proposal.conversation)
+
+    within(find("input[name$='[field_days_per_unit]']").ancestor("tr")) do
+      find("input[name$='[field_days_per_unit]']").fill_in(with: "0.25")
+      assert_selector "[data-role='per-unit-days']", text: "total 25"
+      assert_selector "[data-role='subtotal']", text: "R$ 8.750,00" # 25 diárias × R$ 350
+    end
+    preview_total = find("[data-pricing-preview-target='summaryTotal']").text
+
+    click_button "Salvar e recalcular"
+    assert_text "Preço recalculado"
+    assert_equal preview_total, find("[data-pricing-preview-target='summaryTotal']").text
+    assert_equal 25, line.reload.field_days
+  end
+
   private
 
   def sign_in

@@ -474,4 +474,33 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_includes names[biologa_rows.last], "↳"
     assert_select "tr[data-pricing-preview-target='line']", text: /custo no BDI/
   end
+
+  # 2026-09-30: precificação espelhando a lista de preços do cliente.
+  test "Reorganizar pela planilha do cliente enfileira o job; item espelhado mostra quantidade e esforço por unidade" do
+    pricing = @conversation.proposal.project_pricing
+    message = @conversation.messages.create!(role: "user", content: "PPU")
+    message.attachments.attach(io: StringIO.new(client_xlsx_bytes), filename: "PPU.xlsx")
+    item = pricing.pricing_items.create!(name: "Diária embarcada", position: 5, client_quantity: 2994, client_unit: "diária", client_code: "1.1",
+                                         client_sheet: { "blob_id" => message.attachments.first.blob_id, "aba" => "PPU", "celula_preco" => "F3", "celula_quantidade" => "E3" })
+    pricing.proposal_professionals.create!(professional: professionals(:biologa), deliverable_name: "Observadora", pricing_item: item, man_hours: 0, field_days: 0, field_days_per_unit: 0.25)
+
+    get conversation_proposal_path(@conversation)
+    assert_select "button[form='rebuild-from-sheet-form']", text: /Reorganizar pela planilha do cliente/
+    assert_select "#item-#{item.id} .badge", text: /Item 1\.1 · 2\.994 diária/
+    assert_select "input[name$='[field_days_per_unit]'][value='0.25']"
+    assert_select "[data-role='per-unit-days']", text: /total 748,5/
+    item.update!(costs: [ { "description" => "Passagem por troca de turma", "quantity" => 214, "unit_value" => 0 } ])
+    get conversation_proposal_path(@conversation)
+    assert_select ".alert", text: /1 custo está sem valor unitário/
+
+    assert_enqueued_with(job: RebuildPricingFromClientSheetJob) do
+      post rebuild_from_client_sheet_conversation_proposal_path(@conversation)
+    end
+    assert_redirected_to conversation_proposal_path(@conversation)
+  end
+
+  test "proposta aprovada não é reorganizada" do
+    @conversation.proposal.update!(status: "approved")
+    assert_no_enqueued_jobs(only: RebuildPricingFromClientSheetJob) { post rebuild_from_client_sheet_conversation_proposal_path(@conversation) }
+  end
 end

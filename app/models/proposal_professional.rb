@@ -12,6 +12,10 @@ class ProposalProfessional < ApplicationRecord
   before_validation { self.pricing_item = project_pricing&.default_item if pricing_item_id.nil? && pricing_item.nil? }
   validate :item_belongs_to_same_pricing, if: :pricing_item_id_changed?
 
+  # Item espelhado da planilha do cliente (PricingItem#mirrored?): o esforço é digitado POR UNIDADE
+  # e o total (o que todo o resto do sistema usa) é por-unidade × quantidade do cliente.
+  before_save :apply_per_unit_effort
+
   validates :deliverable_name, presence: true
   validates :man_hours, :field_days, presence: true, numericality: { greater_than_or_equal_to: 0 }
 
@@ -54,7 +58,28 @@ class ProposalProfessional < ApplicationRecord
     (field_days * (days_factor - 1) * 2).round(6).ceil.to_d / 2
   end
 
+  def per_unit? = pricing_item&.mirrored? || false
+
   private
+    def apply_per_unit_effort
+      # Linha comum que não mudou de item: nada a fazer (e sem carregar o item — recalculate! salva
+      # todas as linhas da proposta).
+      return if man_hours_per_unit.nil? && field_days_per_unit.nil? && !pricing_item_id_changed?
+
+      quantity = association(:pricing_item).loaded? ? pricing_item&.client_quantity : PricingItem.where(id: pricing_item_id).pick(:client_quantity)
+      unless quantity&.positive?
+        self.man_hours_per_unit = self.field_days_per_unit = nil
+        return
+      end
+
+      # Quem mudou vale: total editado sozinho (junção de linhas, linha que acabou de entrar no item)
+      # recalcula o por-unidade; senão o por-unidade manda no total.
+      self.man_hours_per_unit = man_hours / quantity if man_hours_per_unit.nil? || (man_hours_changed? && !man_hours_per_unit_changed?)
+      self.field_days_per_unit = field_days / quantity if field_days_per_unit.nil? || (field_days_changed? && !field_days_per_unit_changed?)
+      self.man_hours = (man_hours_per_unit * quantity).round(2)
+      self.field_days = (field_days_per_unit * quantity).round(2)
+    end
+
     def item_belongs_to_same_pricing
       return if pricing_item.nil? || pricing_item.project_pricing_id == project_pricing_id
 

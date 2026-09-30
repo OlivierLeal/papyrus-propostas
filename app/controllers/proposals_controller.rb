@@ -1,6 +1,6 @@
 class ProposalsController < ApplicationController
   before_action :set_conversation
-  before_action :set_proposal, only: %i[ show update approve reopen suggest_logistics add_external_cost remove_external_cost ]
+  before_action :set_proposal, only: %i[ show update approve reopen suggest_logistics rebuild_from_client_sheet add_external_cost remove_external_cost ]
 
   def show
     @professionals = Professional.active.order(:name)
@@ -9,7 +9,7 @@ class ProposalsController < ApplicationController
     # preço aprovado fica congelado.
     @proposal.project_pricing.recalculate! if editable? && @proposal.project_pricing.stale_subtotals?
     @precedent_matches = precedent_matches
-    @proposal.project_pricing.proposal_professionals.includes(:professional).load
+    @proposal.project_pricing.proposal_professionals.includes(:professional, :pricing_item).load
   end
 
   def create
@@ -74,6 +74,15 @@ class ProposalsController < ApplicationController
                 "e o preço foi recalculado de #{helpers.brl(before)} para #{helpers.brl(after)}."
     end
     redirect_to conversation_proposal_path(@conversation), notice: notice
+  end
+
+  # Refaz itens e equipe espelhando a lista de preços do cliente (RebuildPricingFromClientSheetJob).
+  def rebuild_from_client_sheet
+    return redirect_to(conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada.") unless editable?
+
+    RebuildPricingFromClientSheetJob.perform_later(@proposal.id)
+    redirect_to conversation_proposal_path(@conversation),
+      notice: "Reorganizando a precificação pela planilha do cliente (cerca de 1 minuto). A conversa avisa quando terminar — recarregue esta tela depois."
   end
 
   def suggest_logistics
@@ -164,10 +173,10 @@ class ProposalsController < ApplicationController
         :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
         payment_schedule_items: %i[ label percentage date ],
-        proposal_professionals_attributes: %i[ id deliverable_name pricing_item_id man_hours field_days ],
+        proposal_professionals_attributes: %i[ id deliverable_name pricing_item_id man_hours field_days man_hours_per_unit field_days_per_unit ],
         pricing_enterprises_attributes: %i[ id name ],
         pricing_items_attributes: [
-          :id, :name, :pricing_enterprise_id, { cost_items: %i[ description quantity unit_value ] },
+          :id, :name, :pricing_enterprise_id, :client_quantity, { cost_items: %i[ description quantity unit_value ] },
           { field_campaigns_attributes: %i[ id description people days travel_days vehicles vehicle_type
                                             tolls washes uber_trips mateiro_days epi_count municipality_query
                                             lodging_mode lodging_name lodging_price_per_night commute_km commute_hours ] }

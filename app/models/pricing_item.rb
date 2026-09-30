@@ -10,6 +10,18 @@ class PricingItem < ApplicationRecord
   accepts_nested_attributes_for :field_campaigns, update_only: true
 
   validates :name, presence: true
+  validates :client_quantity, numericality: { greater_than: 0 }, allow_nil: true
+  # Quantidade do cliente mudou: o total da equipe acompanha (esforço por unidade × quantidade).
+  after_update :resync_per_unit_lines, if: :saved_change_to_client_quantity?
+
+  # Item que espelha um item da lista de preços do cliente (PPU): quantidade e unidade são DELE.
+  def mirrored? = client_quantity.present? && client_quantity.positive?
+
+  def client_label
+    quantity = ActiveSupport::NumberHelper.number_to_rounded(client_quantity.to_d, precision: 2, strip_insignificant_zeros: true, delimiter: ".", separator: ",") if mirrored?
+    [ client_code.presence && "Item #{client_code}", quantity && "#{quantity} #{client_unit}".strip ].compact_blank.join(" · ")
+  end
+
   validate :enterprise_belongs_to_same_pricing, if: :pricing_enterprise_id_changed?
 
   def team_total
@@ -71,6 +83,10 @@ class PricingItem < ApplicationRecord
   end
 
   private
+
+    def resync_per_unit_lines
+      proposal_professionals.each(&:save!)
+    end
 
     def decimal(value, default:)
       text = value.to_s.strip.tr(",", ".")

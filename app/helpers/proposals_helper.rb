@@ -45,6 +45,11 @@ module ProposalsHelper
     "#{minutes / 60}h#{(minutes % 60).nonzero?&.to_s&.rjust(2, '0')}"
   end
 
+  # Valor de campo numérico sem zeros à toa (0.25 e não 0.2500) — esforço por unidade tem 4 casas.
+  def decimal_input(value)
+    value && value.to_d.round(4).to_s("F").sub(/\.?0+\z/, "")
+  end
+
   def decimal_label(value)
     number_with_delimiter(value.to_f.round(1), delimiter: ".", separator: ",").sub(/,0\z/, "")
   end

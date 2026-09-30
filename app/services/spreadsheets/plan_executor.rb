@@ -182,13 +182,13 @@ module Spreadsheets
             "#{part['peca']}#{" × #{number(fraction)}" unless fraction == 1}"
           end.join(" + ")
           @entries << { aba: spec["aba"], celula: spec["celula"], valor: display(row[:unit]),
-                        origem: "#{spec['descricao'].presence || 'preço unitário'}: (#{parts}) × BDI e impostos ÷ #{number(row[:quantity])}" }
+                        origem: "#{spec['descricao'].presence || 'preço unitário'}: (#{parts.truncate(260)}) × BDI e impostos ÷ #{number(row[:quantity])}" }
         end
       end
 
       sheet_total = rows.sum(0.to_d) { |row| row[:unit] * row[:quantity] }
       residual = (sheet_total - target).round(2)
-      @warnings << "A planilha soma R$ #{display(sheet_total)}, #{residual.positive? ? 'acima' : 'abaixo'} do total da proposta em R$ #{display(residual.abs)} ." unless residual.zero?
+      @warnings << "A planilha soma R$ #{display(sheet_total)}, #{residual.positive? ? 'acima' : 'abaixo'} do total da proposta em R$ #{display(residual.abs)} (arredondamento do preço unitário)." unless residual.zero?
       { planilha: sheet_total.to_f, proposta: target.to_f }
     end
 

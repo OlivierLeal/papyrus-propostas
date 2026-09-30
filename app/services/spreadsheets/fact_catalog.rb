@@ -24,6 +24,7 @@ module Spreadsheets
       @proposal = proposal
       @pricing = proposal.project_pricing
       @facts = {}
+      @piece_items = {}
       build!
     end
 
@@ -32,6 +33,9 @@ module Spreadsheets
     def pieces = facts.select(&:piece)
 
     # Multiplicador de uma peça no PREÇO: BDI × impostos, menos os externos (repasse).
+    # Item da precificação de onde a peça vem (nil = externo, comum a todos).
+    def item_of(key) = @piece_items[key.to_s]
+
     def piece_multiplier(key) = key.to_s.start_with?("E") ? 1 : pricing.multiplier
 
     # Impressão digital dos fatos que um preenchimento usou: se mudar, a planilha preenchida está
@@ -96,6 +100,7 @@ module Spreadsheets
         cost = line.direct_cost(factors[line.pricing_item_id]).round(2)
         # Sem custo (Diretoria com custo no BDI, linha a 0h) não é peça: não há o que ratear.
         add("#{k}", "#{pro.name} – #{line.deliverable_name}#{' (custo incluso no BDI)' if pro.cost_in_bdi?}", cost, :money, piece: cost.positive?)
+        @piece_items[k] = line.pricing_item_id
         add("#{k}.descricao", "Descrição (profissional – entregável)", "#{pro.name} – #{line.deliverable_name}", :text)
         add("#{k}.profissional", "Nome", pro.name, :text)
         add("#{k}.cargo", "Cargo", pro.role, :text)
@@ -123,6 +128,7 @@ module Spreadsheets
             next unless value.positive?
 
             add("#{k}.#{category}", "#{CAMPAIGN_CATEGORIES.fetch(category)} – #{campaign.description}", value.round(2), :money, piece: true)
+            @piece_items["#{k}.#{category}"] = item.id
           end
         end
       end
@@ -146,7 +152,8 @@ module Spreadsheets
         item.costs.each_with_index do |cost, index|
           k = "K#{item.id}_#{index}"
           value = cost["quantity"].to_d * cost["unit_value"].to_d
-          add(k, "#{cost['description']} (#{item.name})", value.round(2), :money, piece: true)
+          add(k, "#{cost['description']} (#{item.name})", value.round(2), :money, piece: value.positive?)
+          @piece_items[k] = item.id
           add("#{k}.quantidade", "Quantidade", cost["quantity"].to_d, :number)
           add("#{k}.valor_unitario", "Valor unitário", cost["unit_value"].to_d, :money)
         end

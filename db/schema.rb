@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -386,6 +386,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_170000) do
   end
 
   create_table "pricing_items", force: :cascade do |t|
+    t.string "client_code"
+    t.decimal "client_quantity", precision: 14, scale: 4
+    t.jsonb "client_sheet", default: {}, null: false
+    t.string "client_unit"
     t.jsonb "costs", default: [], null: false
     t.datetime "created_at", null: false
     t.string "name", null: false
@@ -515,7 +519,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_170000) do
     t.datetime "created_at", null: false
     t.string "deliverable_name", null: false
     t.decimal "field_days", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "field_days_per_unit", precision: 12, scale: 4
     t.decimal "man_hours", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "man_hours_per_unit", precision: 12, scale: 4
     t.bigint "pricing_item_id"
     t.bigint "professional_id", null: false
     t.bigint "project_pricing_id", null: false

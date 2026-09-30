@@ -51,6 +51,8 @@
   <% if editable %>
     <%= tag.form(id: "add-member-form", action: conversation_proposal_proposal_professionals_path(@conversation), method: "post", class: "hidden") { token_tag } %>
     <%= tag.form(id: "suggest-logistics-form", action: suggest_logistics_conversation_proposal_path(@conversation), method: "post", class: "hidden") { token_tag } %>
+    <%= tag.form(id: "rebuild-from-sheet-form", action: rebuild_from_client_sheet_conversation_proposal_path(@conversation), method: "post", class: "hidden",
+          data: { turbo_confirm: "Refazer os itens e a equipe a partir da planilha do cliente? Itens, equipe, campos e custos atuais são substituídos (BDI, impostos e parâmetros ficam)." }) { token_tag } %>
     <% ScheduleItem::SCHEDULE_TYPE_LABELS.each_key do |schedule_type| %>
       <%= tag.form(id: "add-schedule-#{schedule_type}", action: conversation_proposal_schedule_items_path(@conversation), method: "post", class: "hidden") { token_tag } %>
     <% end %>

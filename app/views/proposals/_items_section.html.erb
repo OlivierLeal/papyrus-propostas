@@ -15,9 +15,27 @@
       </p>
     </div>
     <% if editable %>
-      <%= structure_button("+ Item", "add_item", editable: editable, css: "btn btn-outline btn-primary btn-sm") %>
+      <div class="flex flex-wrap gap-2">
+        <% if SpreadsheetFill.client_spreadsheets(pricing.proposal.conversation).any? %>
+          <button type="submit" form="rebuild-from-sheet-form" class="btn btn-ghost btn-sm text-primary"
+                  title="Cria um item para cada item da lista de preços do cliente (PPU), com as quantidades dele, e dimensiona a equipe por unidade">
+            Reorganizar pela planilha do cliente
+          </button>
+        <% end %>
+        <%= structure_button("+ Item", "add_item", editable: editable, css: "btn btn-outline btn-primary btn-sm") %>
+      </div>
     <% end %>
   </div>
+
+  <% unpriced = items.flat_map { |item| item.costs.select { |cost| cost["unit_value"].to_d.zero? && cost["quantity"].to_d.positive? } } %>
+  <% if unpriced.any? %>
+    <div class="mx-6 mb-4 alert alert-warning alert-soft text-xs py-2">
+      <span>
+        <strong><%= unpriced.size == 1 ? "1 custo está" : "#{unpriced.size} custos estão" %> sem valor unitário</strong>
+        (<%= unpriced.map { |cost| cost["description"] }.first(6).to_sentence %><%= "…" if unpriced.size > 6 %>) — a IA lista a quantidade, o valor em R$ é da Papyrus. Enquanto estiver zerado, não entra no preço.
+      </span>
+    </div>
+  <% end %>
 
   <% pending = items.flat_map(&:field_campaigns).select(&:lodging_pending?) %>
   <% if pending.any? %>
@@ -81,9 +99,24 @@
         <%= item_form.hidden_field :id %>
         <div class="flex flex-wrap items-end gap-3">
           <fieldset class="fieldset p-0 grow min-w-60">
-            <legend class="fieldset-legend pt-0">Item</legend>
+            <legend class="fieldset-legend pt-0 flex items-center gap-2">
+              Item
+              <% if item.mirrored? %>
+                <span class="badge badge-soft badge-primary badge-xs" title="Espelha a lista de preços do cliente (<%= item.client_sheet["aba"] %>!<%= item.client_sheet["celula_preco"] %>)">Planilha do cliente · <%= item.client_label %></span>
+              <% end %>
+            </legend>
             <%= item_form.text_field :name, disabled: !editable, required: true, class: "input input-sm w-full font-medium" %>
           </fieldset>
+          <% if item.mirrored? %>
+            <fieldset class="fieldset p-0">
+              <legend class="fieldset-legend pt-0">Quantidade do cliente</legend>
+              <label class="input input-sm w-44">
+                <%= item_form.number_field :client_quantity, step: "any", min: 0, disabled: !editable, autocomplete: "off", class: "grow text-right tabular-nums",
+                      data: { role: "client-quantity" } %>
+                <span class="text-xs text-base-content/50 truncate max-w-20" title="<%= item.client_unit %>"><%= item.client_unit %></span>
+              </label>
+            </fieldset>
+          <% end %>
           <% if enterprises.any? %>
             <fieldset class="fieldset p-0">
               <legend class="fieldset-legend pt-0">Empreendimento</legend>
@@ -97,6 +130,11 @@
               Custos <span data-role="item-costs"><%= brl(item.costs_cost.round(2)) %></span>
             </p>
             <p class="font-semibold tabular-nums text-base-content" data-role="item-total"><%= brl(item.direct_total.round(2)) %></p>
+            <% if item.mirrored? %>
+              <p class="text-xs text-base-content/50" title="Custo puro do item ÷ quantidade do cliente, antes de BDI, impostos e do rateio dos itens comuns">
+                <%= brl((item.direct_total / item.client_quantity).round(2)) %> por <%= item.client_unit.presence || "unidade" %> (custo)
+              </p>
+            <% end %>
           </div>
           <% if editable && items.size > 1 %>
             <%= structure_button("Remover item", "remove_item:#{item.id}", editable: editable, css: "btn btn-ghost btn-xs text-error",

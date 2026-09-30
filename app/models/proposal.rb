@@ -344,6 +344,29 @@ class Proposal < ApplicationRecord
     build_base_team!
   end
 
+  # "Reorganizar pela planilha do cliente" (Tela de Precificação): refaz itens e equipe do zero a
+  # partir da sugestão da IA, agora espelhando a lista de preços do cliente. Pede a sugestão ANTES de
+  # apagar — se a IA falhar, a precificação atual fica intacta. BDI, logística e parâmetros ficam.
+  def rebuild_team_from_client_sheet!
+    pricing = project_pricing
+    return :no_price_list if client_price_lists.empty?
+
+    suggestion = fetch_ai_team_suggestion
+    return :failed if Array(suggestion["itens"]).none? { |item| item.is_a?(Hash) && item["planilha"].is_a?(Hash) }
+
+    transaction do
+      pricing.proposal_professionals.destroy_all
+      pricing.pricing_items.destroy_all
+      pricing.pricing_enterprises.destroy_all
+      pricing.pricing_items.reset
+      apply_team_suggestion!(pricing, suggestion)
+      pricing.recalculate!
+    end
+    :done
+  end
+
+  def client_price_list? = client_price_lists.any?
+
   # Equipe mínima, sem IA: só os `always_included` (Diretoria/Coordenação) com 0h. Fallback de
   # segurança e o que `Conversation#ensure_proposal!(ai_suggestions: false)` usa de dentro de
   # tool call (IA síncrona ali reentraria `Conversation#complete`) — o resto da equipe vem depois,
@@ -741,6 +764,65 @@ class Proposal < ApplicationRecord
       "O que os documentos desta proposta dizem sobre a apresentação do preço:\n#{lines.join("\n")}"
     end
 
+    # Lista de preços do cliente (PPU, planilha de quantitativos) anexada: a precificação ESPELHA os
+    # itens dela, com as quantidades DELE (2026-09-30, conversa 65: a PPU pedia 2.994 diárias
+    # embarcadas e a equipe estimada pelo escopo tinha 600 — a diária saiu a R$ 71). Só entram abas
+    # com cara de lista de preços, e com teto de tamanho (a DFP inteira não cabe nem ajuda aqui).
+    PRICE_LIST_PATTERN = /pre[çc]o\s+unit|valor\s+unit|unit[áa]rio/i
+    QUANTITY_PATTERN = /quantidade|\bqtd|\bquant\./i
+    PRICE_LIST_MAX_CHARS = 14_000
+
+    def client_price_lists
+      @client_price_lists ||= SpreadsheetFill.client_spreadsheets(conversation).filter_map do |attachment|
+        workbook = Spreadsheets::Workbook.open(attachment.blob.download)
+        # Aba visível com preço unitário E quantidade (as abas ocultas de uma DFP também dizem
+        # "valor unitário", mas são formação de custo, não a lista que o cliente mede).
+        sheets = workbook.sheets.select do |sheet|
+          texts = workbook.cells(sheet.name).map { |cell| cell.value.to_s }
+          sheet.state == "visible" && texts.any? { |text| text.match?(PRICE_LIST_PATTERN) } && texts.any? { |text| text.match?(QUANTITY_PATTERN) }
+        end
+        next if sheets.empty?
+
+        text = workbook.to_prompt_text(only: sheets.map(&:name), max_cells_per_sheet: 250)
+        { attachment: attachment, workbook: workbook, text: text }
+      rescue Spreadsheets::Workbook::Error, Zip::Error
+        nil
+      end
+    end
+
+    def client_price_lists_context
+      return "" if client_price_lists.empty?
+
+      budget = PRICE_LIST_MAX_CHARS
+      sheets = client_price_lists.map do |list|
+        text = list[:text].truncate([ budget, 500 ].max)
+        budget -= text.size
+        "#### Arquivo \"#{list[:attachment].filename}\" (blob_id #{list[:attachment].blob_id})\n#{text}"
+      end
+      <<~TEXT
+        LISTA DE PREÇOS DO CLIENTE: o cliente mandou a(s) planilha(s) abaixo, com itens e QUANTIDADES
+        que ele vai medir e pagar (PPU/planilha de quantitativos). Nesse caso os itens da proposta
+        ESPELHAM a lista dele:
+        - Um item pra cada linha da lista que tem PREÇO UNITÁRIO a preencher (não pra títulos de
+          grupo nem totais), com "nome" = a descrição do cliente e "planilha" = { "blob_id", "aba",
+          "codigo" (ex.: "1.1"), "unidade" (ex.: "diária por pessoa"), "celula_preco" (a célula do
+          preço unitário), "celula_quantidade" (a célula da quantidade) }. A QUANTIDADE é lida pelo
+          sistema na planilha — não a informe.
+        - Nesses itens, o esforço da equipe é POR UNIDADE do cliente: "man_hours_por_unidade" e
+          "field_days_por_unidade" (quanto 1 diária, 1 relatório, 1 poço consome). Se várias pessoas
+          se revezam numa mesma unidade (ex.: "diária por pessoa" coberta por 4 observadores em
+          rodízio), divida entre elas (0,25 cada) — o total tem que dar exatamente 1 pessoa-dia por
+          diária. Nunca use o esforço total do contrato.
+        - Custos que a unidade consome (passagem por troca de turma, kit de equipamentos, curso
+          HUET/CBSP, hospedagem antes do embarque…) vão em "custos": [{ "descricao",
+          "quantidade_por_unidade" }] — só a quantidade; o valor em R$ o consultor preenche.
+        - Gestão/coordenação que atravessa o contrato pode ficar num item SEM "planilha" (esforço
+          total, como sempre): o sistema rateia o custo dele entre os itens do cliente.
+        - Dúvida que muda o dimensionamento: registre a interpretação no "deliverable_name".
+        #{sheets.join("\n\n")}
+      TEXT
+    end
+
     def team_suggestion_prompt
       describe = lambda do |professional|
         "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
@@ -808,6 +890,7 @@ class Proposal < ApplicationRecord
         pede a composição do preço: horas-homem, diárias, logística, BDI e impostos separados, ou uma
         planilha de composição de custos).
         #{price_presentation_context}
+        #{client_price_lists_context}
 
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
@@ -824,6 +907,16 @@ class Proposal < ApplicationRecord
               "campos": [
                 { "descricao": "Campo Meio Físico – 01 geólogo", "pessoas": 1, "dias": 2, "veiculos": 1, "tipo_veiculo": "4x4" }
               ]
+            },
+            {
+              "nome": "Relatório Técnico Consolidado do PMBM",
+              "planilha": { "blob_id": 650, "aba": "PPU", "codigo": "2.1", "unidade": "relatório",
+                            "celula_preco": "F9", "celula_quantidade": "E9" },
+              "equipe": [
+                { "professional_id": 20, "deliverable_name": "Relatório do PMBM", "man_hours_por_unidade": 40, "field_days_por_unidade": 0 }
+              ],
+              "custos": [ { "descricao": "Editoração e impressão", "quantidade_por_unidade": 1 } ],
+              "campos": []
             }
           ],
           "apresentacao_preco": "total",
@@ -981,9 +1074,10 @@ class Proposal < ApplicationRecord
           name = data["nome"].to_s.strip.truncate(120).presence || "Item #{index + 1}"
           item = pricing.pricing_items.detect { |existing| existing.name.casecmp?(name) } ||
             pricing.pricing_items.create!(name: name, position: next_position + index)
-          item.update!(pricing_enterprise: enterprises[data["empreendimento"].to_s.strip.downcase])
+          item.update!(pricing_enterprise: enterprises[data["empreendimento"].to_s.strip.downcase], **mirror_attributes(data["planilha"]))
           apply_team_lines!(pricing, Array(data["equipe"]), item)
           apply_campaigns!(pricing, item, Array(data["campos"]))
+          apply_item_costs!(item, Array(data["custos"]))
         end
         drop_empty_default_item!(pricing)
       end
@@ -992,6 +1086,47 @@ class Proposal < ApplicationRecord
       presentation = suggestion["apresentacao_preco"].to_s
       presentation = "itens" if presentation.blank? && suggestion["preco_discriminado"] == true
       pricing.update!(price_presentation: presentation) if ProjectPricing::PRICE_PRESENTATIONS.key?(presentation) && presentation != "total"
+    end
+
+    # Item que espelha uma linha da lista de preços do cliente. A quantidade vem da CÉLULA da
+    # planilha (Ruby), nunca da IA; célula sem número deixa o item comum (e registra achado).
+    def mirror_attributes(sheet)
+      return {} unless sheet.is_a?(Hash)
+
+      list = client_price_lists.find { |candidate| candidate[:attachment].blob_id == sheet["blob_id"].to_i } || client_price_lists.first
+      return {} unless list
+
+      quantity = begin
+        list[:workbook].value(sheet["aba"], sheet["celula_quantidade"])
+      rescue Spreadsheets::Workbook::Error
+        nil
+      end
+      unless quantity.is_a?(Numeric) && quantity.positive?
+        conversation.project_findings.create!(
+          field: "outro", value: "Item da planilha do cliente sem quantidade legível (#{sheet['aba']}!#{sheet['celula_quantidade']}) — ficou como item comum.",
+          nature: "sugestao", source_kind: "sistema"
+        )
+        return {}
+      end
+
+      { client_quantity: quantity, client_unit: sheet["unidade"].to_s.strip.truncate(60).presence,
+        client_code: sheet["codigo"].to_s.strip.truncate(20).presence,
+        client_sheet: { "blob_id" => list[:attachment].blob_id, "aba" => sheet["aba"].to_s,
+                        "celula_preco" => sheet["celula_preco"].to_s.upcase, "celula_quantidade" => sheet["celula_quantidade"].to_s.upcase } }
+    end
+
+    # Custos que a IA listou pro item: descrição e QUANTIDADE (por unidade do cliente, quando o item
+    # espelha a planilha — o Ruby multiplica). O valor unitário fica 0 pro consultor preencher:
+    # preço de passagem, kit ou curso não é conta da IA.
+    def apply_item_costs!(item, costs)
+      rows = costs.filter_map do |cost|
+        next unless cost.is_a?(Hash) && cost["descricao"].to_s.strip.present?
+
+        per_unit = cost["quantidade_por_unidade"] || cost["quantidade"]
+        quantity = item.mirrored? && cost.key?("quantidade_por_unidade") ? per_unit.to_d * item.client_quantity : per_unit.to_d
+        { "description" => cost["descricao"].to_s.strip.truncate(120), "quantity" => [ quantity.round(2), 0 ].max.to_f, "unit_value" => 0.0 }
+      end
+      item.update!(costs: item.costs + rows) if rows.any?
     end
 
     # Campos sugeridos pela IA: ela diz quem vai, quantos dias e com que veículo; o resto sai de
@@ -1051,6 +1186,10 @@ class Proposal < ApplicationRecord
         seen << key
         man_hours, field_days = professional.cost_in_bdi? ? [ 0, 0 ] : [ effort(line["man_hours"]), effort(line["field_days"]) ]
         attrs = { deliverable_name: deliverable, pricing_item: item, man_hours: man_hours, field_days: field_days }
+        if item.mirrored? # esforço POR UNIDADE do cliente; ProposalProfessional multiplica pela quantidade
+          per_unit = professional.cost_in_bdi? ? [ 0, 0 ] : [ effort(line["man_hours_por_unidade"]), effort(line["field_days_por_unidade"]) ]
+          attrs.merge!(man_hours_per_unit: per_unit[0], field_days_per_unit: per_unit[1], man_hours: 0, field_days: 0)
+        end
         placeholder = if professional.always_included
           pricing.proposal_professionals.find_by(professional: professional, deliverable_name: professional.role, man_hours: 0, field_days: 0)
         end
@@ -1058,7 +1197,12 @@ class Proposal < ApplicationRecord
 
         if same_item
           merged = [ same_item.deliverable_name, deliverable ].uniq { |name| name.strip.downcase }.join("; ").truncate(255)
-          same_item.update!(deliverable_name: merged, man_hours: same_item.man_hours + man_hours, field_days: same_item.field_days + field_days)
+          if item.mirrored?
+            same_item.update!(deliverable_name: merged, man_hours_per_unit: same_item.man_hours_per_unit.to_d + attrs[:man_hours_per_unit],
+                              field_days_per_unit: same_item.field_days_per_unit.to_d + attrs[:field_days_per_unit])
+          else
+            same_item.update!(deliverable_name: merged, man_hours: same_item.man_hours + man_hours, field_days: same_item.field_days + field_days)
+          end
         elsif placeholder
           placeholder.update!(attrs)
         else

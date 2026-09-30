@@ -50,7 +50,9 @@
           <% line = pp_form.object %>
           <% professional = line.professional %>
           <% continuation = pp_form.index.positive? && lines[pp_form.index - 1].professional_id == line.professional_id %>
-          <tr class="align-top hover:bg-base-200/30 <%= "border-t-0" if continuation %>" data-pricing-preview-target="line"
+          <% per_unit = line.per_unit? %>
+          <% unit_qty = per_unit ? line.pricing_item.client_quantity.to_f : nil %>
+          <tr class="align-top hover:bg-base-200/30 <%= "border-t-0" if continuation %>" data-pricing-preview-target="line" data-unit-qty="<%= unit_qty %>"
               data-rate-hour="<%= professional.rate_man_hour.to_f %>" data-rate-day="<%= professional.rate_daily.to_f %>">
             <td class="min-w-44">
               <%= pp_form.hidden_field :id %>
@@ -81,8 +83,14 @@
                     data: { role: "line-item" } %>
             </td>
             <td class="text-right">
-              <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
-                    class: "input input-sm w-20 text-right tabular-nums" %>
+              <% if per_unit %>
+                <%= pp_form.number_field :man_hours_per_unit, value: decimal_input(line.man_hours_per_unit), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                      class: "input input-sm w-20 text-right tabular-nums", title: "Horas-homem por #{line.pricing_item.client_unit.presence || 'unidade'} do cliente" %>
+                <div class="text-[11px] mt-0.5 whitespace-nowrap text-primary" data-role="per-unit-hours">por unid. · total <%= decimal_label(line.man_hours) %></div>
+              <% else %>
+                <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                      class: "input input-sm w-20 text-right tabular-nums" %>
+              <% end %>
               <% if professional.cost_in_bdi? %>
                 <div class="text-xs mt-1 whitespace-nowrap text-base-content/50" title="Custo incluso no BDI — sem valor de hora-homem/diária">custo no BDI</div>
               <% else %>
@@ -90,8 +98,14 @@
               <% end %>
             </td>
             <td class="text-right">
-              <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
-                    class: "input input-sm w-20 text-right tabular-nums" %>
+              <% if per_unit %>
+                <%= pp_form.number_field :field_days_per_unit, value: decimal_input(line.field_days_per_unit), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                      class: "input input-sm w-20 text-right tabular-nums", title: "Diárias por #{line.pricing_item.client_unit.presence || 'unidade'} do cliente" %>
+                <div class="text-[11px] mt-0.5 whitespace-nowrap text-primary" data-role="per-unit-days">por unid. · total <%= decimal_label(line.field_days) %></div>
+              <% else %>
+                <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                      class: "input input-sm w-20 text-right tabular-nums" %>
+              <% end %>
               <% unless professional.cost_in_bdi? %>
                 <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
               <% end %>
