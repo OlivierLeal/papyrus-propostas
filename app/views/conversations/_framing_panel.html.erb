@@ -1,52 +1,97 @@
-<%# Trava de confirmação do enquadramento (Conversation#framing_confirmation_required?): o consultor
-    confere licença e estudo(s) — o que foi pedido e o que a legislação diz — antes de precificar ou
-    gerar o 1º documento. Relato da Sara (2026-09-29): lendo o resumo "no automático", o enquadramento
-    diferente do sistema passou despercebido até a proposta estar pronta. %>
+<%# Aba "Visão geral" do painel da proposta: o enquadramento que o consultor confere antes de seguir
+    (Conversation#framing_confirmation_required?) e os estudos, como etiquetas — a lista inteira de
+    tipos só aparece ao editar, numa janela com busca. A ação de confirmar fica no cabeçalho. %>
 <% overview = conversation.framing_overview %>
 <% pending_conflicts = conversation.open_legal_framing_conflicts %>
-<div class="bg-base-100 rounded-box border shadow-sm p-6 <%= conversation.framing_confirmation_required? ? "border-warning" : "border-base-300" %>">
-  <h2 class="font-semibold text-base-content mb-3">Enquadramento</h2>
+<% blockers = conversation.generation_blockers %>
+<div id="framing_panel" class="flex flex-col gap-4">
+  <section class="flex flex-col gap-3">
+    <h2 class="text-[11px] font-semibold uppercase tracking-wider text-base-content/60">Enquadramento</h2>
 
-  <dl class="flex flex-col gap-2 text-sm">
-    <div>
-      <dt class="text-xs uppercase tracking-wide text-base-content/50">Licença pedida</dt>
-      <dd class="text-base-content"><%= overview[:licenses].join(" · ").presence || "não identificada" %></dd>
-    </div>
-    <div>
-      <dt class="text-xs uppercase tracking-wide text-base-content/50">Estudo(s) desta proposta</dt>
-      <dd class="text-base-content"><%= conversation.study_types_label %></dd>
-    </div>
-    <div>
-      <dt class="text-xs uppercase tracking-wide text-base-content/50">Pela legislação (CAL)</dt>
+    <dl class="flex flex-col gap-3 text-sm">
+      <div>
+        <dt class="text-base-content/60">Licença pedida</dt>
+        <dd class="font-semibold text-base-content"><%= overview[:licenses].join(" · ").presence || "não identificada" %></dd>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <dt class="text-base-content/60">Estudos desta proposta</dt>
+        <dd class="flex flex-wrap gap-1.5">
+          <% if conversation.study_types.any? %>
+            <% conversation.study_types.sort_by(&:name).each do |study_type| %>
+              <span class="badge badge-soft badge-primary"><%= study_type.name %></span>
+            <% end %>
+          <% else %>
+            <span class="text-base-content/60">Nenhum — vale como acompanhamento/assessoria</span>
+          <% end %>
+        </dd>
+        <div data-controller="image-viewer">
+          <button type="button" class="link link-accent text-xs font-medium no-underline" data-action="image-viewer#open">Editar estudos</button>
+          <dialog class="modal" data-image-viewer-target="dialog" data-action="click->image-viewer#closeOnBackdrop">
+            <div class="modal-box max-w-md" data-controller="list-filter">
+              <h3 class="font-display font-semibold text-lg text-base-content">Estudos desta proposta</h3>
+              <p class="text-sm text-base-content/60 mt-1">Marque os estudos que a proposta vai contemplar.</p>
+              <input type="search" autocomplete="off" placeholder="Filtrar tipos de estudo" aria-label="Filtrar tipos de estudo"
+                     class="input input-bordered input-sm w-full mt-4" data-action="input->list-filter#filter">
+              <%= form_with model: conversation, url: conversation_path(conversation), method: :patch, class: "flex flex-col gap-3 mt-3" do |form| %>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  <%= form.collection_check_boxes :study_type_ids, StudyType.order(:name), :id, :name do |b| %>
+                    <label class="flex items-center gap-2 text-sm text-base-content" data-list-filter-target="item">
+                      <%= b.check_box(class: "checkbox checkbox-sm checkbox-primary") %>
+                      <%= b.text %>
+                    </label>
+                  <% end %>
+                </div>
+                <div class="modal-action mt-2">
+                  <button type="button" class="btn btn-ghost btn-sm" data-action="image-viewer#close">Cancelar</button>
+                  <%= form.submit "Salvar", class: "btn btn-primary btn-sm" %>
+                </div>
+              <% end %>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    </dl>
+
+    <div class="rounded-field bg-base-200/60 px-3 py-2.5 flex flex-col gap-1 text-sm">
+      <span class="text-[11px] font-semibold uppercase tracking-wider text-base-content/60">Pela legislação (CAL)</span>
       <% if overview[:legal].any? %>
         <% overview[:legal].each do |label, value| %>
-          <dd class="text-base-content"><span class="text-base-content/60"><%= label %>:</span> <%= value.truncate(160) %></dd>
+          <span class="text-base-content"><span class="text-base-content/60"><%= label %>:</span> <%= value.truncate(160) %></span>
         <% end %>
       <% else %>
-        <dd class="text-base-content/60">não verificado — confira o enquadramento pela norma</dd>
+        <span class="text-base-content/60">Não verificado — confira o enquadramento pela norma.</span>
       <% end %>
     </div>
-  </dl>
 
-  <% if conversation.framing_confirmed_at %>
-    <p class="text-xs text-success mt-3">
-      Confirmado por <%= conversation.framing_confirmed_by&.name || "consultor" %>
-      em <%= conversation.framing_confirmed_at.strftime("%d/%m/%Y %H:%M") %>.
+    <% if conversation.framing_confirmed_at %>
+      <div class="alert alert-success alert-soft text-sm py-2">
+        Confirmado por <%= conversation.framing_confirmed_by&.name || "consultor" %> em <%= conversation.framing_confirmed_at.strftime("%d/%m/%Y %H:%M") %>.
+      </div>
+    <% elsif !conversation.framing_confirmation_required? %>
+      <p class="text-xs text-base-content/50">Proposta anterior à confirmação de enquadramento.</p>
+    <% elsif pending_conflicts.any? %>
+      <div class="alert alert-warning alert-soft text-sm py-2">
+        A legislação diverge do pedido em <%= pending_conflicts.map(&:field_label).join(", ") %>. Decida no card do chat e depois confirme no topo.
+      </div>
+    <% else %>
+      <div class="alert alert-warning alert-soft text-sm py-2">
+        Confira licença e estudos: o escopo e a equipe partem daqui. Está certo? Confirme no topo da tela.
+      </div>
+    <% end %>
+  </section>
+
+  <section class="flex flex-col gap-2 border-t border-base-300 pt-4">
+    <h2 class="text-[11px] font-semibold uppercase tracking-wider text-base-content/60">Próximo passo</h2>
+    <p class="text-sm text-base-content">
+      <% if conversation.framing_confirmation_required? %>
+        Confirme o enquadramento<%= " e resolva os #{blockers.size} pontos em Pendências" if blockers.any? %>; depois siga para a precificação.
+      <% elsif conversation.status == "reviewing" %>
+        Siga para a precificação: a equipe é sugerida pela IA e você ajusta horas, campo e preço.
+      <% elsif blockers.any? %>
+        Resolva os <%= blockers.size %> pontos em Pendências para liberar a geração da proposta.
+      <% else %>
+        Peça a proposta (ou ajustes) no chat. Cada geração vira uma nova revisão em Arquivos.
+      <% end %>
     </p>
-  <% elsif !conversation.framing_confirmation_required? %>
-    <p class="text-xs text-base-content/50 mt-3">Proposta anterior à confirmação de enquadramento.</p>
-  <% elsif pending_conflicts.any? %>
-    <p class="text-xs text-warning mt-3">
-      A legislação diverge do pedido em <%= pending_conflicts.map(&:field_label).join(", ") %>. Decida no card
-      do chat (seguir a lei, seguir o pedido ou levar ao cliente) e depois confirme aqui.
-    </p>
-    <button type="button" class="btn btn-warning btn-sm w-full mt-2" disabled>Confirmar enquadramento</button>
-  <% else %>
-    <p class="text-xs text-base-content/60 mt-3">
-      Confira licença e estudo antes de seguir — o escopo e a equipe da proposta partem daqui. Se algo
-      estiver errado, ajuste os tipos de estudo abaixo ou diga no chat.
-    </p>
-    <%= button_to "Confirmar enquadramento", confirm_framing_conversation_path(conversation),
-          class: "btn btn-warning btn-sm w-full mt-2" %>
-  <% end %>
+  </section>
 </div>

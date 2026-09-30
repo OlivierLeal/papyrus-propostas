@@ -32,15 +32,17 @@ class FramingConfirmationTest < ActionDispatch::IntegrationTest
     assert_nil @conversation.reload.proposal
   end
 
-  test "o painel mostra o enquadramento e o botão de confirmar; o avanço fica desabilitado" do
+  test "o painel mostra o enquadramento e o topo pede a confirmação; o avanço não aparece" do
     @conversation.project_findings.create!(field: "tipo_licenca", value: "LP", nature: "fato", source_kind: "et")
 
     get conversation_path(@conversation)
 
     assert_select "h2", text: "Enquadramento"
     assert_select "dd", text: "LP"
-    assert_select "form[action=?]", confirm_framing_conversation_path(@conversation)
-    assert_select "button[disabled]", text: "Avançar para Precificação"
+    # A ação principal do cabeçalho vira "Confirmar enquadramento"; o avanço pra precificação nem aparece.
+    assert_select "#proposal_header form[action=?]", confirm_framing_conversation_path(@conversation)
+    assert_select "#proposal_header button", text: "Confirmar enquadramento"
+    assert_select "form[action=?]", conversation_proposal_path(@conversation), count: 0
   end
 
   test "confirmar registra quem e quando, e libera" do

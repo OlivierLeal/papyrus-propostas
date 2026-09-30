@@ -38,9 +38,13 @@ export default class extends Controller {
       : this.placeholder
   }
 
+  // Barra de rolagem só quando passa do limite (max-h do campo); antes disso ela aparecia à toa
+  // numa linha só, porque o scrollHeight arredonda pra cima do height calculado.
   resize() {
-    this.inputTarget.style.height = "auto"
-    this.inputTarget.style.height = `${this.inputTarget.scrollHeight}px`
+    const input = this.inputTarget
+    input.style.height = "auto"
+    input.style.height = `${input.scrollHeight}px`
+    input.style.overflowY = input.scrollHeight > input.clientHeight + 2 ? "auto" : "hidden"
   }
 
   submitOnEnter(event) {

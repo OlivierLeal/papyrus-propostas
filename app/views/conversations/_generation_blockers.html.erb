@@ -1,21 +1,34 @@
-<%# O que trava a geração da proposta (Conversation#generation_blockers): divergência sem decisão e
-    pendência sem resposta. Os cards ficam no chat e rolam pra cima; aqui fica a lista. %>
+<%# Aba "Pendências": o que trava a geração da proposta (Conversation#generation_blockers). Os cards
+    ficam no chat e rolam pra cima; aqui fica a lista, e cada item leva ao card dele. %>
 <% blockers = conversation.generation_blockers %>
-<div id="generation_blockers">
+<div id="generation_blockers" class="flex flex-col gap-3">
   <% if blockers.any? %>
-    <div class="bg-base-100 rounded-box border border-warning shadow-sm p-6">
-      <h2 class="font-semibold text-base-content mb-1">Antes de gerar a proposta</h2>
-      <p class="text-xs text-base-content/60 mb-3">
-        <%= blockers.size %> ponto(s) sem resposta. Responda ou libere com motivo no card de cada um, no chat.
-      </p>
-      <ul class="flex flex-col gap-2 text-sm">
-        <% blockers.each do |blocker| %>
-          <li class="flex gap-2">
-            <span class="badge badge-warning badge-xs mt-1 shrink-0"><%= blocker.is_a?(ProjectConflict) ? "divergência" : "pendência" %></span>
-            <span class="text-base-content"><%= blocker.is_a?(ProjectConflict) ? blocker.field_label : blocker.question.truncate(120) %></span>
-          </li>
-        <% end %>
-      </ul>
+    <h2 class="font-display font-semibold text-base-content">Antes de gerar a proposta</h2>
+    <p class="text-xs text-base-content/60">
+      <%= blockers.size %> <%= blockers.size == 1 ? "ponto sem resposta" : "pontos sem resposta" %>. Cada um se resolve no card
+      do chat: respondendo, decidindo, ou liberando com o motivo.
+    </p>
+    <ul class="flex flex-col gap-2">
+      <% blockers.each do |blocker| %>
+        <% conflict = blocker.is_a?(ProjectConflict) %>
+        <li class="flex gap-3 items-start rounded-field bg-base-200/60 px-3 py-2.5">
+          <span class="badge badge-warning badge-soft badge-sm shrink-0 mt-0.5"><%= conflict ? "Divergência" : "Pendência" %></span>
+          <div class="flex flex-col gap-1 min-w-0">
+            <p class="text-sm text-base-content">
+              <%= conflict ? "#{blocker.field_label}: #{blocker.summary.truncate(140)}" : blocker.question.truncate(160) %>
+            </p>
+            <a href="#<%= dom_id(blocker) %>" class="link link-accent text-xs font-medium no-underline self-start"><%= conflict ? "Decidir no chat" : "Responder no chat" %></a>
+          </div>
+        </li>
+      <% end %>
+    </ul>
+  <% else %>
+    <div class="flex flex-col items-center text-center gap-2 py-8">
+      <span class="size-10 rounded-full bg-success/15 text-success grid place-items-center">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" /></svg>
+      </span>
+      <p class="font-semibold text-base-content">Nada travando a geração</p>
+      <p class="text-xs text-base-content/60 max-w-60">Divergências e pendências que a IA encontrar aparecem aqui.</p>
     </div>
   <% end %>
 </div>

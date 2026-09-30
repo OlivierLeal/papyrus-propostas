@@ -1,0 +1,18 @@
+<%# Depois de decidir/responder um card (divergência, pendência): atualiza o que depende disso fora
+    do card — o botão principal e as etapas, a aba Pendências e o contador, e o enquadramento. %>
+<% blockers_count = conversation.generation_blockers.size %>
+<%= turbo_stream.replace "proposal_header" do %>
+  <%= render "conversations/header", conversation: conversation %>
+<% end %>
+<%= turbo_stream.replace "generation_blockers" do %>
+  <%= render "conversations/generation_blockers", conversation: conversation %>
+<% end %>
+<%= turbo_stream.replace "framing_panel" do %>
+  <%= render "conversations/framing_panel", conversation: conversation %>
+<% end %>
+<%= turbo_stream.replace "blockers_count" do %>
+  <span id="blockers_count" class="badge badge-warning badge-xs font-bold <%= "hidden" if blockers_count.zero? %>"><%= blockers_count %></span>
+<% end %>
+<%= turbo_stream.replace "blockers_count_rail" do %>
+  <span id="blockers_count_rail" class="badge badge-warning badge-xs font-bold absolute -top-1 -right-1 px-1 <%= "hidden" if blockers_count.zero? %>"><%= blockers_count %></span>
+<% end %>

@@ -1,156 +1,17 @@
-<div class="p-2 mx-auto">
-  <div class="flex items-center gap-3 mb-6">
-    <%= link_to conversations_path, class: "btn btn-ghost btn-sm btn-square", title: "Voltar" do %>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
-      </svg>
-    <% end %>
-    <div>
-      <h1 class="font-display text-2xl font-bold text-base-content leading-tight">
-        <%= @conversation.client_name %>
-        <% if @conversation.proposal.present? %>
-          <span class="text-base-content/50 font-normal"><%= @conversation.proposal.docx_numero_proposta %></span>
-        <% end %>
-      </h1>
-      <p class="text-sm text-base-content/60"><%= @conversation.study_types_label %></p>
-    </div>
-    <%= conversation_status_badge(@conversation, extra_class: "ml-auto") %>
-  </div>
+<%# Ocupa exatamente a altura que sobra embaixo da barra do topo (shared/_layout: h-screen com
+    pt-[8vh]) — o chat estica até o fim da tela em qualquer monitor, sem altura calculada fixa. %>
+<div class="p-2 mx-auto flex flex-col gap-3 lg:h-[92vh]">
+  <%= render "conversations/header", conversation: @conversation %>
 
   <%= turbo_stream_from @conversation %>
 
   <% if @conversation.status.in?(%w[reviewing pricing completed]) %>
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 lg:h-[80vh]">
-      <div class="lg:col-span-1 flex flex-col gap-4 lg:overflow-y-auto lg:min-h-0 lg:pr-1">
-        <%= render "conversations/generation_blockers", conversation: @conversation %>
-        <%= render "conversations/framing_panel", conversation: @conversation %>
-
-        <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-          <h2 class="font-semibold text-base-content mb-4">Tipo(s) de estudo</h2>
-
-          <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, class: "flex flex-col gap-2" do |form| %>
-            <div class="flex flex-col gap-1 max-h-48 overflow-y-auto">
-              <%= form.collection_check_boxes :study_type_ids, StudyType.order(:name), :id, :name do |b| %>
-                <label class="flex items-center gap-2 text-sm text-base-content">
-                  <%= b.check_box(class: "checkbox checkbox-sm") %>
-                  <%= b.text %>
-                </label>
-              <% end %>
-            </div>
-            <%= form.submit "Salvar", class: "btn btn-ghost btn-sm self-start" %>
-          <% end %>
-          <p class="text-xs text-base-content/50 mt-2">
-            <% if @conversation.study_types.any? %>
-              Identificado pela IA a partir do ET/TR — ajuste aqui se achar que ela errou.
-            <% else %>
-              Nenhum tipo de estudo específico identificado — vale como proposta de acompanhamento/
-              assessoria. Marque um ou mais tipos aqui se a proposta pedir um estudo novo (ou
-              <%= link_to "cadastre o que falta", settings_study_types_path, class: "link" %>).
-            <% end %>
-          </p>
-        </div>
-
-        <% if @conversation.status == "reviewing" && @conversation.framing_confirmation_required? %>
-          <button type="button" class="btn btn-primary w-full" disabled title="Confirme o enquadramento primeiro">Avançar para Precificação</button>
-        <% elsif @conversation.status == "reviewing" %>
-          <%= button_to "Avançar para Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
-        <% elsif @conversation.status.in?(%w[pricing completed]) %>
-          <%= link_to "Ver Precificação", conversation_proposal_path(@conversation), class: "btn btn-primary w-full" %>
-        <% end %>
-
-        <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-          <h2 class="font-semibold text-base-content mb-4">Documentos</h2>
-
-          <ul class="flex flex-col gap-2">
-            <% @conversation.messages.includes([:attachments_attachments]).where(internal: false).order(:created_at).flat_map(&:attachments).each do |attachment| %>
-              <li class="flex items-center gap-2 px-3 py-2 rounded-field bg-base-200/50 min-w-0">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/50 shrink-0">
-                  <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
-                </svg>
-                <span class="truncate text-sm text-base-content flex-1"><%= attachment.filename %></span>
-                <% if (kind_label = document_kind_label(attachment)) %>
-                  <span class="badge badge-ghost badge-xs shrink-0"><%= kind_label %></span>
-                <% end %>
-                <%= link_to rails_blob_path(attachment, disposition: "attachment"),
-                      class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar" do %>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                    <path fill-rule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v6.638l1.96-2.158a.75.75 0 1 1 1.08 1.04l-3.25 3.5a.75.75 0 0 1-1.08 0l-3.25-3.5a.75.75 0 1 1 1.08-1.04l1.96 2.158V3.75A.75.75 0 0 1 10 3ZM3.75 13.5a.75.75 0 0 0-1.5 0v3.75a.75.75 0 0 0 .75.75h13.5a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-1.5 0v3H3.75v-3Z" clip-rule="evenodd" />
-                  </svg>
-                <% end %>
-              </li>
-            <% end %>
-          </ul>
-
-          <% generated_documents = @conversation.proposal&.generated_documents&.to_a || [] %>
-          <% if generated_documents.any? %>
-            <div class="divider text-xs text-base-content/50 my-3">Gerados pela IA</div>
-
-            <% sorted_documents = generated_documents.sort_by { |d| [ -(d.blob.metadata["version"] || 0), -d.created_at.to_i ] } %>
-            <ul class="flex flex-col gap-2">
-              <% sorted_documents.each do |document| %>
-                <li class="flex items-center gap-2 px-3 py-2 rounded-field bg-primary/5 min-w-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-primary shrink-0">
-                    <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
-                  </svg>
-                  <span class="truncate text-sm text-base-content flex-1"><%= document.filename %></span>
-                  <% if (kind_label = document_kind_label(document)) %>
-                    <span class="badge badge-soft badge-primary badge-xs shrink-0"><%= kind_label %></span>
-                  <% end %>
-                  <% if document.blob.metadata["version"] %>
-                    <span class="badge badge-ghost badge-xs shrink-0">v<%= document.blob.metadata["version"] %></span>
-                  <% end %>
-                  <%= link_to rails_blob_path(document, disposition: "attachment"),
-                        class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar" do %>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-                      <path fill-rule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v6.638l1.96-2.158a.75.75 0 1 1 1.08 1.04l-3.25 3.5a.75.75 0 0 1-1.08 0l-3.25-3.5a.75.75 0 1 1 1.08-1.04l1.96 2.158V3.75A.75.75 0 0 1 10 3ZM3.75 13.5a.75.75 0 0 0-1.5 0v3.75a.75.75 0 0 0 .75.75h13.5a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-1.5 0v3H3.75v-3Z" clip-rule="evenodd" />
-                    </svg>
-                  <% end %>
-                </li>
-              <% end %>
-            </ul>
-          <% end %>
-        </div>
-
-        <% if @conversation.geospatial_result.present? %>
-          <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-6">
-            <h2 class="font-semibold text-base-content mb-4"><%= @conversation.geospatial_result.area_label %></h2>
-
-            <% if @conversation.geospatial_result.area_image.attached? %>
-              <div class="relative group mb-3" data-controller="image-viewer">
-                <button type="button" class="block w-full cursor-zoom-in" data-action="image-viewer#open"
-                        title="Ampliar mapa da área de estudo">
-                  <%= image_tag @conversation.geospatial_result.area_image_src, alt: "Mapa da área de estudo",
-                        class: "w-full rounded-field border border-base-300" %>
-                </button>
-
-                <span class="btn btn-sm btn-square absolute top-2 right-2 pointer-events-none
-                             bg-base-100/80 border-base-300 opacity-70 group-hover:opacity-100 transition-opacity"
-                      aria-hidden="true">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-                    <path fill-rule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06L5.44 6.5H3.75a.75.75 0 0 0 0 1.5h3.5A.75.75 0 0 0 8 7.25v-3.5a.75.75 0 0 0-1.5 0v1.69L3.28 2.22ZM13.5 3.75a.75.75 0 0 0-1.5 0v3.5c0 .414.336.75.75.75h3.5a.75.75 0 0 0 0-1.5h-1.69l3.22-3.22a.75.75 0 0 0-1.06-1.06L13.5 5.44V3.75ZM3.75 12a.75.75 0 0 0 0 1.5h1.69l-3.22 3.22a.75.75 0 1 0 1.06 1.06l3.22-3.22v1.69a.75.75 0 0 0 1.5 0v-3.5a.75.75 0 0 0-.75-.75h-3.5ZM12 12.75a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-1.69l3.22 3.22a.75.75 0 1 1-1.06 1.06l-3.22-3.22v1.69a.75.75 0 0 1-1.5 0v-3.5Z" clip-rule="evenodd" />
-                  </svg>
-                </span>
-
-                <dialog class="modal" data-image-viewer-target="dialog" data-action="click->image-viewer#closeOnBackdrop">
-                  <div class="modal-box max-w-[95vw] w-fit p-2">
-                    <%= image_tag @conversation.geospatial_result.area_image_src, alt: "Mapa da área de estudo",
-                          class: "max-h-[85vh] w-auto max-w-full rounded-field" %>
-                    <p class="text-sm text-base-content/70 px-2 pt-2"><%= @conversation.geospatial_result.summary_text %></p>
-                  </div>
-
-                  <form method="dialog" class="modal-backdrop">
-                    <button>Fechar</button>
-                  </form>
-                </dialog>
-              </div>
-            <% end %>
-
-            <p class="text-sm text-base-content/70"><%= @conversation.geospatial_result.summary_text %></p>
-          </div>
-        <% end %>
-      </div>
-
-      <div class="relative lg:col-span-3 bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh] lg:h-full lg:min-h-0"
+    <%# Chat largo à esquerda; contexto em abas à direita (no celular, o painel vem antes do chat). %>
+    <%# Painel recolhível (side_panel_controller.js): o cookie faz o servidor já desenhar recolhido, sem
+        piscar no refresh por morph. Recolhido, vira uma barra de ícones de 3,5rem. %>
+    <div class="group/panel grid grid-cols-1 gap-3 lg:flex-1 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_23rem] lg:data-[collapsed=true]:grid-cols-[minmax(0,1fr)_3.5rem]"
+         data-controller="side-panel" data-collapsed="<%= cookies[:side_panel_collapsed] == "1" %>">
+      <div class="relative bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col h-[80vh] lg:h-full lg:min-h-0 min-w-0"
            data-controller="chat-scroll file-drop"
            data-action="dragover->file-drop#over dragleave->file-drop#leave drop->file-drop#drop">
         <div data-file-drop-target="overlay" hidden
@@ -158,10 +19,9 @@
           <span class="text-primary font-semibold">Solte o arquivo aqui para anexar</span>
         </div>
 
-        <h2 class="font-semibold text-base-content p-6 pb-4 shrink-0 border-b border-base-300">Conversa</h2>
-
-        <% visible_messages = @conversation.messages.includes(:user).where(internal: false).order(:created_at) %>
-        <div id="messages" class="flex-1 overflow-y-auto p-6 flex flex-col gap-4" data-chat-scroll-target="messages">
+        <h2 class="sr-only">Conversa</h2>
+        <% visible_messages = @conversation.messages.includes(:user, attachments_attachments: :blob).where(internal: false).order(:created_at) %>
+        <div id="messages" class="flex-1 overflow-y-auto px-4 py-5 sm:px-6 flex flex-col gap-4" data-chat-scroll-target="messages">
           <% visible_messages.each do |message| %>
             <%= render "message", message: message %>
           <% end %>
@@ -171,6 +31,10 @@
         </div>
 
         <%= render "message_composer", conversation: @conversation %>
+      </div>
+
+      <div class="order-first lg:order-none min-h-0">
+        <%= render "conversations/side_panel", conversation: @conversation %>
       </div>
     </div>
   <% else %>

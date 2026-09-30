@@ -385,14 +385,15 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_empty conversation.reload.study_types
   end
 
-  test "show does not render the 'Gerados pela IA' divider when the proposal has no generated documents yet" do
+  test "show does not render the 'Versão atual' block when the proposal has no generated documents yet" do
     get conversation_path(conversations(:priced_conversation))
 
     assert_response :success
-    assert_no_match "Gerados pela IA", response.body
+    assert_no_match "Versão atual", response.body
   end
 
-  test "show lists every generated document, all versions, newest first, under the 'Gerados pela IA' divider" do
+  # Aba Arquivos (repaginação de 2026-09-30): a revisão mais recente em destaque, as anteriores recolhidas.
+  test "show lists every generated document, newest revision highlighted and older ones collapsed" do
     proposal = proposals(:priced_proposal)
     proposal.generated_documents.attach(
       io: StringIO.new("v1"), filename: "v1.docx", content_type: "application/octet-stream",
@@ -406,9 +407,9 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     get conversation_path(proposal.conversation)
 
     assert_response :success
-    assert_match "Gerados pela IA", response.body
-    assert_match "v2.docx", response.body
-    assert_match "v1.docx", response.body
+    assert_select "#files_panel", text: /Versão atual · Rev\.01/
+    assert_select "#files_panel details", text: /Versões anteriores \(1\)/
+    assert_select "#files_panel details", text: /v1\.docx/
     assert_operator response.body.index("v2.docx"), :<, response.body.index("v1.docx")
   end
 end

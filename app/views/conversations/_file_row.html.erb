@@ -1,0 +1,20 @@
+<li class="flex items-center gap-2.5 rounded-field px-3 py-2 min-w-0 <%= highlight ? "bg-base-100" : "bg-base-200/60" %>">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0 <%= highlight ? "text-primary" : "text-base-content/40" %>">
+    <path fill-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" clip-rule="evenodd" />
+  </svg>
+  <span class="flex-1 min-w-0">
+    <span class="block truncate text-sm text-base-content" title="<%= file.filename %>"><%= file.filename %></span>
+    <span class="flex flex-wrap items-center gap-x-1.5 text-[11px] text-base-content/50">
+      <% if kind.present? %>
+        <span class="font-semibold <%= highlight ? "text-primary" : "text-base-content/70" %>"><%= kind %></span>·
+      <% end %>
+      <span><%= number_to_human_size(file.byte_size) %> · <%= file.created_at.strftime("%d/%m %H:%M") %></span>
+    </span>
+  </span>
+  <%= link_to rails_blob_path(file, disposition: "attachment"),
+        class: "btn btn-ghost btn-xs btn-square text-primary shrink-0", title: "Baixar #{file.filename}" do %>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+      <path fill-rule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v6.638l1.96-2.158a.75.75 0 1 1 1.08 1.04l-3.25 3.5a.75.75 0 0 1-1.08 0l-3.25-3.5a.75.75 0 1 1 1.08-1.04l1.96 2.158V3.75A.75.75 0 0 1 10 3ZM3.75 13.5a.75.75 0 0 0-1.5 0v3.75a.75.75 0 0 0 .75.75h13.5a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-1.5 0v3H3.75v-3Z" clip-rule="evenodd" />
+    </svg>
+  <% end %>
+</li>

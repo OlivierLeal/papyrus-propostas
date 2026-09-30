@@ -441,13 +441,15 @@ class Conversation < ApplicationRecord
     update!(framing_confirmed_at: Time.current, framing_confirmed_by: user)
   end
 
+  FRAMING_SHORT_LABELS = { "enquadramento_legal" => "Enquadramento", "tipo_licenca" => "Licença", "tipo_estudo" => "Estudo" }.freeze
+
   # O que o painel mostra pra confirmar: o que foi pedido (ET/TR/consultor) e o que a lei diz (CAL).
   def framing_overview
     findings = project_findings.active.where(field: %w[tipo_licenca enquadramento_legal tipo_estudo]).order(:id)
     requested, legal = findings.partition { |finding| finding.source_kind != "cal" }
     {
       licenses: requested.select { |f| f.field == "tipo_licenca" }.map(&:value).uniq,
-      legal: legal.map { |f| [ f.field_label, f.value ] }
+      legal: legal.map { |f| [ FRAMING_SHORT_LABELS.fetch(f.field, f.field_label), f.field == "tipo_estudo" ? (StudyType.match_ai_value(f.value)&.name || f.value) : f.value ] }
     }
   end
 

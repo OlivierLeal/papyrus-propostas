@@ -1,5 +1,5 @@
 <%= form_with url: conversation_messages_path(conversation), multipart: true, id: "message_composer",
-      class: "flex flex-col gap-2 p-6 pt-4 shrink-0 border-t border-base-300",
+      class: "flex flex-col gap-2 px-4 py-3 sm:px-6 shrink-0 border-t border-base-300",
       data: { controller: "file-list chat-composer",
               action: "turbo:submit-start->chat-composer#lock turbo:submit-end->chat-composer#unlock" } do |form| %>
   <div class="flex flex-wrap gap-1.5 px-1 hidden" data-file-list-target="list"></div>
@@ -12,9 +12,9 @@
       <%= file_field_tag "documents[]", multiple: true, class: "hidden",
             data: { file_list_target: "input", file_drop_target: "input", action: "change->file-list#update" } %>
     </label>
-    <%= text_area_tag "content", nil, placeholder: "Peça um ajuste, envie um documento... (Enter envia, Shift+Enter pula linha)",
+    <%= text_area_tag "content", nil, placeholder: "Escreva uma mensagem ou arraste um arquivo…", title: "Enter envia · Shift+Enter pula linha",
           autocomplete: "off", rows: 1,
-          class: "textarea textarea-bordered flex-1 resize-none overflow-y-auto max-h-40 py-2 leading-normal",
+          class: "textarea textarea-bordered flex-1 resize-none overflow-y-auto min-h-0 max-h-40 py-2 leading-normal",
           data: { chat_composer_target: "input", action: "input->chat-composer#resize keydown->chat-composer#submitOnEnter" } %>
     <%= form.submit "Enviar", class: "btn btn-primary", data: { chat_composer_target: "submit" } %>
   </div>

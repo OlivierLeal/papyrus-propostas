@@ -13,6 +13,8 @@ class MapViewerTest < ApplicationSystemTestCase
 
     assert_no_selector "dialog[open]"
 
+    # O mapa fica na aba "Área" do painel lateral (repaginação de 2026-09-30).
+    find("[role=tab]", text: "Área").click
     find("button[title='Ampliar mapa da área de estudo']").click
     assert_selector "dialog[open]", wait: 5
 

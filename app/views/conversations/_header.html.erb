@@ -1,0 +1,62 @@
+<%# Cabeçalho da proposta: nome, etapas e a ação principal (ConversationWorkflowHelper). Compacto de
+    propósito (2026-09-30: "o chat ficou pequeno") — as etapas são uma faixa de uma linha; o detalhe de
+    cada uma aparece no título (hover). Substituído por turbo_stream ao decidir um card (_live_regions). %>
+<% action = workflow_primary_action(conversation) %>
+<% empreendimento = conversation.project_findings.active.where(field: "empreendimento").pluck(:value).min_by(&:length) %>
+<header id="proposal_header" class="bg-base-100 rounded-box border border-base-300 shadow-sm px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-3 shrink-0">
+  <div class="flex items-center gap-3 min-w-0 flex-1 basis-64">
+    <%= link_to conversations_path, class: "btn btn-ghost btn-sm btn-square border border-base-300 shrink-0", title: "Voltar para Propostas" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+      </svg>
+    <% end %>
+    <div class="min-w-0">
+      <h1 class="font-display text-lg sm:text-xl font-bold text-base-content leading-tight truncate" title="<%= conversation.client_name %>">
+        <%= conversation.client_name %>
+        <% if conversation.proposal.present? %>
+          <span class="font-sans font-medium text-sm text-base-content/50">· <%= conversation.proposal.docx_numero_proposta %></span>
+        <% end %>
+      </h1>
+      <p class="text-xs text-base-content/60 truncate">
+        <%= [ empreendimento&.truncate(90), conversation.study_types_label ].compact_blank.join(" · ") %>
+      </p>
+    </div>
+  </div>
+
+  <ol class="flex items-center gap-1 order-last w-full lg:order-none lg:w-auto overflow-x-auto" aria-label="Etapas da proposta">
+    <% workflow_steps(conversation).each_with_index do |step, index| %>
+      <% if index.positive? %>
+        <li aria-hidden="true" class="w-3 sm:w-4 h-px shrink-0 <%= step.state == :todo ? "bg-base-300" : "bg-success/60" %>"></li>
+      <% end %>
+      <% pill = { done: "text-base-content/70", now: "bg-secondary/20 ring-1 ring-secondary text-base-content font-semibold", todo: "text-base-content/40" }.fetch(step.state) %>
+      <% dot = { done: "bg-success border-success text-success-content", now: "border-warning text-warning bg-base-100", todo: "border-base-300 text-base-content/40" }.fetch(step.state) %>
+      <li class="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs whitespace-nowrap shrink-0 <%= pill %>"
+          title="<%= step.title %>: <%= step.detail %>" aria-current="<%= step.state == :now ? "step" : "false" %>">
+        <span class="size-5 rounded-full border-2 grid place-items-center text-[10px] font-bold shrink-0 <%= dot %>">
+          <% if step.state == :done %>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" /></svg>
+          <% else %>
+            <%= index + 1 %>
+          <% end %>
+        </span>
+        <span class="<%= "hidden 2xl:inline" unless step.state == :now %>"><%= step.title %></span>
+        <span class="sr-only"><%= step.title unless step.state == :now %> — <%= step.detail %></span>
+      </li>
+    <% end %>
+  </ol>
+
+  <div class="flex flex-col items-stretch sm:items-end gap-1 shrink-0 w-full sm:w-auto">
+    <% cta_class = "btn btn-sm border-0 font-semibold shadow-md shadow-warning/30 bg-gradient-to-br from-secondary to-warning text-primary hover:brightness-105" %>
+    <% if !action.enabled %>
+      <button type="button" class="btn btn-sm font-semibold" disabled><%= action.label %></button>
+    <% elsif action.method == :get %>
+      <%= link_to action.label, action.path, class: cta_class %>
+    <% else %>
+      <%= button_to action.label, action.path, method: action.method, class: "#{cta_class} w-full" %>
+    <% end %>
+    <% tone = { warn: "text-warning", ok: "text-success", muted: "text-base-content/60" }.fetch(action.note_tone) %>
+    <span class="text-[11px] flex items-center gap-1.5 <%= tone %>">
+      <span class="size-1.5 rounded-full bg-current shrink-0"></span><%= action.note %>
+    </span>
+  </div>
+</header>

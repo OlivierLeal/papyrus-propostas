@@ -1,6 +1,4 @@
 <%= turbo_stream.replace dom_id(@issue) do %>
   <%= render "project_issues/issue", issue: @issue %>
 <% end %>
-<%= turbo_stream.replace "generation_blockers" do %>
-  <%= render "conversations/generation_blockers", conversation: @conversation %>
-<% end %>
+<%= render "conversations/live_regions", conversation: @conversation %>

@@ -1,0 +1,73 @@
+<%# Painel lateral da proposta, em abas (repaginação de 2026-09-30): antes eram seis blocos empilhados
+    numa coluna estreita. A aba aberta por padrão é a que pede atenção; a escolha do consultor é
+    lembrada (tabs_controller.js) e sobrevive ao refresh por morph. %>
+<% blockers_count = conversation.generation_blockers.size %>
+<% files_count = conversation.messages.where(internal: false).joins(:attachments_attachments).count + (conversation.proposal&.generated_documents&.count || 0) %>
+<% default_tab = conversation.framing_confirmation_required? || blockers_count.zero? ? "overview" : "blockers" %>
+<% tabs = [
+     [ "overview", "Visão geral", nil ],
+     [ "blockers", "Pendências", blockers_count ],
+     [ "files", "Arquivos", files_count ],
+     [ "area", "Área", nil ]
+   ] %>
+<% icons = {
+     "overview" => "M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z",
+     "blockers" => "M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z",
+     "files" => "M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z",
+     "area" => "M8.157 2.176a1.5 1.5 0 0 0-1.147 0l-4.084 1.69A1.5 1.5 0 0 0 2 5.25v10.877a1.5 1.5 0 0 0 2.074 1.386l3.51-1.452 4.26 1.762a1.5 1.5 0 0 0 1.146 0l4.083-1.69A1.5 1.5 0 0 0 18 14.75V3.872a1.5 1.5 0 0 0-2.073-1.386l-3.51 1.452-4.26-1.762ZM7.58 5a.75.75 0 0 1 .75.75v6.5a.75.75 0 0 1-1.5 0v-6.5A.75.75 0 0 1 7.58 5Zm5.59 2.75a.75.75 0 0 0-1.5 0v6.5a.75.75 0 0 0 1.5 0v-6.5Z"
+   } %>
+<aside class="bg-base-100 rounded-box border border-base-300 shadow-sm flex flex-col min-h-0 lg:h-full overflow-hidden"
+       aria-label="Contexto da proposta"
+       data-controller="tabs" data-tabs-default-value="<%= default_tab %>" data-tabs-key-value="conversation-<%= conversation.id %>">
+  <%# Recolhido (só em telas largas): barra de ícones; clicar num ícone reabre o painel naquela aba. %>
+  <nav class="hidden lg:group-data-[collapsed=true]/panel:flex flex-col items-center gap-1 py-2" aria-label="Painel recolhido">
+    <button type="button" class="btn btn-ghost btn-sm btn-square" title="Abrir painel" data-action="side-panel#expand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M4.72 9.47a.75.75 0 0 0 0 1.06l4.25 4.25a.75.75 0 1 0 1.06-1.06L6.31 10l3.72-3.72a.75.75 0 1 0-1.06-1.06L4.72 9.47Zm9.25-4.25L9.72 9.47a.75.75 0 0 0 0 1.06l4.25 4.25a.75.75 0 1 0 1.06-1.06L11.31 10l3.72-3.72a.75.75 0 0 0-1.06-1.06Z" clip-rule="evenodd" /></svg>
+    </button>
+    <span class="w-6 h-px bg-base-300 my-1"></span>
+    <% tabs.each do |key, label, _count| %>
+      <button type="button" class="btn btn-ghost btn-sm btn-square relative text-base-content/60 hover:text-base-content" title="<%= label %>"
+              data-tab="<%= key %>" data-action="side-panel#expand tabs#select">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="<%= icons.fetch(key) %>" clip-rule="evenodd" /></svg>
+        <% if key == "blockers" %>
+          <span id="blockers_count_rail" class="badge badge-warning badge-xs font-bold absolute -top-1 -right-1 px-1 <%= "hidden" if blockers_count.zero? %>"><%= blockers_count %></span>
+        <% end %>
+      </button>
+    <% end %>
+  </nav>
+
+  <div role="tablist" class="flex items-center gap-0.5 p-1.5 border-b border-base-300 shrink-0 overflow-x-auto [scrollbar-width:none] lg:group-data-[collapsed=true]/panel:hidden">
+    <% tabs.each do |key, label, count| %>
+      <button type="button" role="tab" id="tab-<%= key %>" aria-controls="pane-<%= key %>" aria-selected="<%= key == default_tab %>"
+              class="flex-1 whitespace-nowrap rounded-field px-1.5 py-2 text-xs font-medium text-base-content/60 flex items-center justify-center gap-1.5
+                     aria-selected:bg-base-200 aria-selected:text-base-content aria-selected:font-semibold hover:text-base-content"
+              data-tabs-target="tab" data-tab="<%= key %>" data-action="tabs#select">
+        <%= label %>
+        <% if key == "blockers" %>
+          <span id="blockers_count" class="badge badge-warning badge-xs font-bold <%= "hidden" if count.zero? %>"><%= count %></span>
+        <% elsif count.to_i.positive? %>
+          <span class="badge badge-ghost badge-xs"><%= count %></span>
+        <% end %>
+      </button>
+    <% end %>
+    <button type="button" class="hidden lg:inline-flex btn btn-ghost btn-xs btn-square shrink-0 text-base-content/60" title="Recolher painel e ampliar o chat"
+            data-action="side-panel#collapse">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M15.28 9.47a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 1 1-1.06-1.06L13.69 10 9.97 6.28a.75.75 0 0 1 1.06-1.06l4.25 4.25ZM6.03 5.22l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L8.69 10 4.97 6.28a.75.75 0 0 1 1.06-1.06Z" clip-rule="evenodd" /></svg>
+    </button>
+  </div>
+
+  <div class="flex-1 min-h-0 overflow-y-auto p-4 max-h-[60vh] lg:max-h-none lg:group-data-[collapsed=true]/panel:hidden">
+    <%= tag.div role: "tabpanel", id: "pane-overview", data: { tabs_target: "panel", tab: "overview" }, hidden: default_tab != "overview" do %>
+      <%= render "conversations/framing_panel", conversation: conversation %>
+    <% end %>
+    <%= tag.div role: "tabpanel", id: "pane-blockers", data: { tabs_target: "panel", tab: "blockers" }, hidden: default_tab != "blockers" do %>
+      <%= render "conversations/generation_blockers", conversation: conversation %>
+    <% end %>
+    <div role="tabpanel" id="pane-files" data-tabs-target="panel" data-tab="files" hidden>
+      <%= render "conversations/files_panel", conversation: conversation %>
+    </div>
+    <div role="tabpanel" id="pane-area" data-tabs-target="panel" data-tab="area" hidden>
+      <%= render "conversations/area_panel", conversation: conversation %>
+    </div>
+  </div>
+</aside>

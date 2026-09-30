@@ -87,6 +87,32 @@ Verificado com teste de sistema de verdade (`test/system/file_list_accumulation_
 Selenium/Chrome headless): escolher um arquivo, depois escolher outro no mesmo campo, os dois
 chips aparecem juntos; remover um mantém o outro.
 
+**Tela da proposta repaginada (2026-09-30, protótipo aprovado pelo consultor: "muita informação na
+tela do show"; "o local do botão de precificação não tá bom").** `conversations/show.html.erb`:
+- **Cabeçalho** (`_header`, id `proposal_header`): nome, número, e a AÇÃO PRINCIPAL no canto (gradiente
+  dourado da marca), que muda com a etapa — "Confirmar enquadramento" → "Avançar para Precificação" →
+  "Ver precificação" — com uma linha dizendo por que está travada; embaixo, a barra de 4 etapas
+  (Documentos lidos, Enquadramento, Precificação, Proposta). Lógica em `ConversationWorkflowHelper`
+  (`workflow_steps`/`workflow_primary_action`), não na view.
+- **Chat largo à esquerda; contexto em abas à direita** (`_side_panel` + `tabs_controller.js`):
+  Visão geral (`_framing_panel`: enquadramento, estudos como etiquetas, "Editar estudos" abre janela
+  com busca — `list_filter_controller.js`), Pendências (`_generation_blockers`, contador `blockers_count`),
+  Arquivos (`_files_panel`/`_file_row`: revisão atual em destaque, anteriores recolhidas, enviados à
+  parte) e Área (`_area_panel`). A aba padrão é a que pede atenção; a escolhida fica em
+  `sessionStorage` e é reaplicada no `turbo:morph` (o refresh por morph redesenha o `hidden` do servidor).
+- Decidir/responder um card atualiza cabeçalho, pendências, contador e enquadramento de uma vez
+  (`conversations/_live_regions`, renderizado pelos turbo_streams de `project_conflicts`/`project_issues`).
+- **Chat maior (mesmo dia, "o chat ficou pequeno": de ~365 px pra ~600 px de mensagens em 1400×1000).**
+  Cabeçalho numa linha só (etapas viram bolinhas; só a atual mostra o nome abaixo de `2xl`, o detalhe
+  vai no `title`); a tela ocupa `lg:h-[92vh]` (o que sobra embaixo da barra do topo, `shared/_layout`
+  com `pt-[8vh]`) e o chat estica com `flex-1`, sem altura calculada; saiu a barra "Conversa"; o campo
+  nasce com 1 linha (`min-h-0` — o `textarea` do daisyUI tem altura mínima) e só mostra rolagem acima do
+  limite. Painel recolhível (`side_panel_controller.js`): vira uma barra de ícones de 3,5rem (com o
+  contador de pendências, `blockers_count_rail`); a escolha fica no cookie `side_panel_collapsed`, então
+  o servidor já desenha recolhido e o morph não pisca. Clicar num ícone reabre naquela aba.
+- Classe Tailwind nova só aparece depois de `bin/rails tailwindcss:build` (o `app/assets/builds` não
+  vai pro git; o deploy compila). Teste de sistema com CSS velho dá layout empilhado/falso negativo.
+
 ---
 
 ## 3. Arquitetura técnica
