@@ -60,13 +60,15 @@ class ProjectConflictsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "active", @kmz_finding.reload.status
   end
 
-  test "não dá para mexer na divergência de uma conversa de outro consultor" do
+  # A proposta não é de um consultor só (CLAUDE.md seção 4): quem não criou a conversa também decide.
+  # Antes dava 404 silencioso e o card "não ia" (2026-09-30).
+  test "outro consultor também decide a divergência" do
     sign_in_as users(:two)
 
     post dismiss_conversation_project_conflict_path(@conversation, @conflict)
 
-    assert_response :not_found
-    assert @conflict.reload.open?
+    assert_redirected_to conversation_path(@conversation)
+    assert_not @conflict.reload.open?
   end
 
   # O card é a única forma de o consultor ver a divergência: ele nasce de uma mensagem do

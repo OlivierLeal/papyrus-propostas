@@ -23,7 +23,9 @@ class KnowledgeNotesController < ApplicationController
   private
 
   def set_note
-    @conversation = Current.session.user.conversations.find(params[:conversation_id])
+    # Qualquer consultor decide (a proposta não é de um só — CLAUDE.md seção 4). Escopar pelo dono
+    # dava 404 silencioso pra quem não criou a conversa (2026-09-30, card de divergência que "não ia").
+    @conversation = Conversation.find(params[:conversation_id])
     @note = @conversation.knowledge_notes.find(params[:id])
   end
 

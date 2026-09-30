@@ -40,7 +40,8 @@ class HistoricalProposalReviewsControllerTest < ActionDispatch::IntegrationTest
     Rag::Embedder.define_method(:embed_documents, original)
   end
 
-  test "não deixa mexer em registro de conversa de outro usuário" do
+  # A proposta não é de um consultor só (CLAUDE.md seção 4): quem não criou a conversa também decide.
+  test "consultor que não criou a conversa também decide o registro" do
     outra = Conversation.create!(user: users(:two), client_name: "Outro Cliente", status: "reviewing")
     alheio = outra.historical_proposals.create!(
       source_sha256: SecureRandom.hex(32), origin: "revisao_manual", job_name: "PTC26100",
@@ -49,9 +50,8 @@ class HistoricalProposalReviewsControllerTest < ActionDispatch::IntegrationTest
       status: "ok", review_status: "pending", pending_text: "sigilo"
     )
 
-    post approve_conversation_historical_proposal_path(outra, alheio)
+    post reject_conversation_historical_proposal_path(outra, alheio)
 
-    assert_response :not_found
-    assert alheio.reload.pending?
+    assert_equal "rejected", alheio.reload.review_status
   end
 end

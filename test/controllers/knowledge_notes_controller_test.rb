@@ -46,13 +46,13 @@ class KnowledgeNotesControllerTest < ActionDispatch::IntegrationTest
     Rag::Embedder.define_method(:embed_documents, original)
   end
 
-  test "não deixa mexer em nota de conversa de outro usuário" do
+  # A proposta não é de um consultor só (CLAUDE.md seção 4): quem não criou a conversa também decide.
+  test "consultor que não criou a conversa também decide a nota" do
     outra = Conversation.create!(user: users(:two), client_name: "Outro Cliente", status: "reviewing")
-    nota_alheia = outra.knowledge_notes.create!(category: "preferencia_cliente", content: "sigilo")
+    nota = outra.knowledge_notes.create!(category: "preferencia_cliente", content: "sigilo")
 
-    post approve_conversation_knowledge_note_path(outra, nota_alheia)
+    post reject_conversation_knowledge_note_path(outra, nota)
 
-    assert_response :not_found
-    assert nota_alheia.reload.pending?
+    assert_equal "rejected", nota.reload.status
   end
 end

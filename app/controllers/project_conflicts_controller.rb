@@ -39,7 +39,9 @@ class ProjectConflictsController < ApplicationController
   private
 
   def set_conflict
-    @conversation = Current.session.user.conversations.find(params[:conversation_id])
+    # Qualquer consultor decide (a proposta não é de um só — CLAUDE.md seção 4). Escopar pelo dono
+    # dava 404 silencioso pra quem não criou a conversa (2026-09-30, card de divergência que "não ia").
+    @conversation = Conversation.find(params[:conversation_id])
     @conflict = @conversation.project_conflicts.find(params[:id])
   end
 
