@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -413,6 +413,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_180000) do
     t.string "role", null: false
     t.decimal "social_charges_percent", precision: 6, scale: 4
     t.string "specialties"
+    t.boolean "technical_team", default: true, null: false
     t.datetime "updated_at", null: false
     t.index ["active"], name: "index_professionals_on_active"
   end

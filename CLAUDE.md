@@ -789,6 +789,21 @@ efeito dominó de sempre ao inserir capítulo novo, ver "ITENS NÃO PREVISTOS" a
   partir…/condicionado…" que a IA acrescentava (o modelo já continua a frase com isso).
 - Frase fixa de proposta complementar: "não contemplados neste documento" (era "nesta proposta").
 
+**Rodada da Charlene de 2026-10-01 (prints no grupo "IA Propostas Papyrus"):**
+- **Sem nome de arquivo/e-mail do cliente no texto** ("através do documento “Solicitação.pdf (e-mail da
+  cliente…)”"): regra no `description` da ferramenta + rede de segurança
+  `GenerateProposalDocumentTool#clean_client_text` (`FILE_REFERENCE` tira a citação da frase).
+- **Sistema do órgão genérico**: "SEI-BAHIA"/"SEIA"/"SEI"/"e-Protocolo" viram "sistema do órgão
+  ambiental" (`ORGAN_SYSTEMS`, sem `/i` — "sei" minúsculo é verbo). Vale pra todo parâmetro de texto,
+  menos `nome_arquivo`. O prompt de equipe também proíbe órgão/sistema no entregável.
+- **Quadro de Produtos**: linha de grupo (termina em ":" e sem formato) sai em negrito
+  (`fill_table!(bold_groups:)`).
+- **Quadro de Equipe**: FUNÇÃO pelo MACROGRUPO de atribuição (`funcoes_equipe`, "Nome | Macrogrupo",
+  ex. "Assessoria Ambiental Estratégica"; sem ele, o entregável de maior esforço como antes; fixos
+  com o cargo). Apoio fica fora do quadro: `professionals.technical_team` (cadastro "Aparece no quadro
+  de equipe técnica"; a migração desmarca Carolene e Melissa) — continua na precificação. Molina
+  ganhou "Biólogo" na habilitação.
+
 **Validade da proposta sempre 90 dias, inclusive na técnica-sozinha (2026-08):** a seção
 "VALIDADE DA PROPOSTA" (texto fixo "Esta proposta tem validade de 90 dias.", sem placeholder —
 nunca varia por proposta) foi movida pra ANTES de "PREÇO E CONDIÇÕES DE PAGAMENTO" — antes ficava

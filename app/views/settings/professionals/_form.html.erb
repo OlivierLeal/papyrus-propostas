@@ -101,6 +101,14 @@
               <span class="block text-xs text-base-content/60 mt-0.5">Entra na equipe e no quadro da proposta, mas sem hora-homem nem diária — o custo já está no BDI. Os valores acima são ignorados.</span>
             </span>
           </label>
+
+          <label class="flex items-start gap-3 p-4 rounded-box border border-base-300 cursor-pointer transition-colors hover:border-primary/40 has-[:checked]:border-primary/40 has-[:checked]:bg-primary/5">
+            <%= form.check_box :technical_team, class: "toggle toggle-primary toggle-sm mt-0.5" %>
+            <span>
+              <span class="block text-sm font-medium text-base-content">Aparece no quadro de equipe técnica</span>
+              <span class="block text-xs text-base-content/60 mt-0.5">Desmarque pra apoio (administrativo, revisão, formatação): continua na precificação, mas não sai no quadro de equipe da proposta.</span>
+            </span>
+          </label>
         </div>
       </section>
     </div>

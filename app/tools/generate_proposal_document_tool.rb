@@ -67,6 +67,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     caso — a identificação do órgão específico é usada no estudo e nos achados, não vai no corpo
     do documento entregue ao cliente.
 
+    Não cite nome de arquivo, e-mail ou data de envio dos documentos do cliente ("Solicitação.pdf",
+    "e-mail da cliente de 30/09") em nenhum parâmetro. Quando a base for uma Especificação Técnica
+    ou um Termo de Referência formal, cite pelo título/número dele; senão, escreva só "nas
+    informações fornecidas pela CONTRATANTE".
+
     A proposta NUNCA pode dar a entender que algum serviço/diagnóstico/entregável é
     terceirizado, subcontratado ou executado por outra empresa — mesmo que o "ESTADO ATUAL DA
     PROPOSTA" ou os achados desta conversa mencionem "Serviços Terceirizados" na precificação
@@ -145,6 +150,12 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     "pra isso, use atualizar_cronograma. Sem informação clara no ET/TR, pode deixar de fora — o sistema usa " \
     "\"12 (doze) meses contratuais\" como padrão automaticamente (pedido da Charlene, 2026-09), nunca invente " \
     "um número pra preencher a lacuna."
+  param :funcoes_equipe, type: "array", required: false,
+    desc: "Função de cada profissional da EQUIPE EXECUTORA no Quadro de Equipe Técnica, pelo MACROGRUPO de " \
+          "atribuição, uma por linha no formato \"Nome do profissional | Macrogrupo\". Curto (2 a 4 palavras): " \
+          "\"Assessoria Ambiental Estratégica\", \"Meio Biótico – Fauna\", \"Meio Físico\", \"Geoprocessamento\", " \
+          "\"Socioeconomia\", \"Arqueologia\". Nunca o entregável detalhado, nunca nome de órgão ou sistema. " \
+          "Diretoria e Coordenação saem com o cargo (o sistema cuida); quem é só apoio administrativo/revisão não aparece no quadro."
   param :produtos, type: "array",
     desc: "Lista dos produtos/entregáveis — tem que bater com o que topicos_escopo descreve: cada etapa que gera " \
           "um documento próprio (o estudo/diagnóstico principal, mas também fichas, relatórios e certidões " \
@@ -318,6 +329,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # sentido na CONVERSA (ApplicationHelper#render_markdown transforma em link), mas no .docx
     # do cliente aparecem crus, sem sentido nenhum pra quem lê (achado ao vivo em produção).
     args = args.transform_values { |value| strip_citation_codes(value) }
+    args = args.to_h { |key, value| [ key, key.to_s == "nome_arquivo" ? value : clean_client_text(value) ] }
 
     # reload: a geração pendente (.generate_pending!, dentro de um job) chega aqui com a proposta carregada
     # ANTES da chamada de IA deles — status, formato e versão podem ter mudado nesse meio-tempo.
@@ -665,6 +677,29 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # etc. chegam como array) e limpa o espaço duplo que sobra no lugar. Mesmo padrão de citação
     # do chat (Message::CITATION_PATTERN) — reaproveitado aqui só pra DETECTAR e apagar, nunca
     # pra virar link (isso não existe no .docx).
+    # "Nome | Macrogrupo" → { "nome normalizado" => "Macrogrupo" } (Proposal#team_rows_for_docx).
+    def team_functions(args)
+      Array(args[:funcoes_equipe]).filter_map do |line|
+        name, function = line.to_s.split("|", 2).map(&:strip)
+        [ Proposal.normalize_person_name(name), function.truncate(60) ] if name.present? && function.present?
+      end.to_h
+    end
+
+    # Rede de segurança do texto que vai pro cliente (Charlene, 2026-10-01): o prompt já proíbe, mas
+    # "protocolados exclusivamente via SEI-BAHIA" e "através do documento “Solicitação.pdf (e-mail da
+    # cliente…)”" vazaram. Sistema do órgão vira genérico; citação de arquivo/e-mail sai da frase.
+    # Sem /i de propósito: "sei" minúsculo é verbo.
+    ORGAN_SYSTEMS = /\b(?:SEI[\s-]?(?:BAHIA|Bahia)|SEIA|SEI|[eE]-?(?:Protocolo|PROTOCOLO))\b/
+    FILE_REFERENCE = /\s*,?\s*(?:através|por meio|a partir|conforme)\s+d[oa]s?\s+(?:documentos?|arquivos?|e-?mails?)\s+[“"][^”"]*[”"]/i
+
+    def clean_client_text(value)
+      case value
+      when String then value.gsub(FILE_REFERENCE, "").gsub(ORGAN_SYSTEMS, "sistema do órgão ambiental")
+      when Array then value.map { |item| clean_client_text(item) }
+      else value
+      end
+    end
+
     def strip_citation_codes(value)
       case value
       when String
@@ -756,11 +791,11 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
       {
         0 => { rows: @proposal.docx_revision_rows(current_description: description) },
-        1 => { rows: produtos },
+        1 => { rows: produtos, bold_groups: true },
         # merge_first_column: junta "Diretoria"/"Gestão"/"Execução" numa célula só quando mais de
         # um profissional cai no mesmo setor em linhas consecutivas (2026-09, pedido do consultor
         # — ver ProposalDocxFiller#merge_first_column!).
-        2 => { rows: @proposal.team_rows_for_docx, merge_first_column: true },
+        2 => { rows: @proposal.team_rows_for_docx(functions: team_functions(args)), merge_first_column: true },
         3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: false, bold_unnumbered: true },
         4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }

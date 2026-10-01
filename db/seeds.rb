@@ -186,15 +186,15 @@ end
   { name: "Yuri Alves Bezerra", role: "Engenheiro de Segurança do Trabalho", registration: nil,
     specialties: "Pós-Graduado em Engenharia de Segurança do Trabalho. Engenheiro de Produção." },
   { name: "Antônio Molina", role: "Assessor Ambiental Sênior", registration: nil,
-    specialties: "Assessor Ambiental Sênior." },
+    specialties: "Assessor Ambiental Sênior. Biólogo." },
   { name: "Melissa Oliveira", role: "Revisora e Formatadora", registration: nil,
-    specialties: "Graduanda em Letras em Língua Estrangeira." },
+    specialties: "Graduanda em Letras em Língua Estrangeira.", technical_team: false },
   { name: "Rodrigo Moate", role: "Especialista em Geotecnologias", registration: "CREA 89359",
     specialties: "Especialista em Geotecnologias. Geógrafo." },
   { name: "Elizabeth Seydel", role: "Geógrafa", registration: nil,
     specialties: "Gestão de Projetos. Geotecnologias. Geógrafa." },
   { name: "Carolene Marchant", role: "Apoio Administrativo", registration: nil,
-    specialties: "MBA em Consultoria e Auditoria. Administração." },
+    specialties: "MBA em Consultoria e Auditoria. Administração.", technical_team: false },
   { name: "Wlisses Batista", role: "Geólogo", registration: "CREA 271603184-3",
     specialties: "Geólogo." },
   { name: "Máida Cynthia", role: "Engenheira Florestal", registration: nil,
@@ -231,6 +231,7 @@ end
     professional.rate_daily = 0
     professional.active = true
     professional.cost_in_bdi = attrs[:cost_in_bdi] || false
+    professional.technical_team = attrs.fetch(:technical_team, true)
   end
   professional.save!
 end

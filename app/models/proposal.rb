@@ -91,8 +91,13 @@ class Proposal < ApplicationRecord
   # NESTA proposta (deliverable_name), não o cargo genérico.
   DOCX_TEAM_SECTORS = { diretoria: 0, gestao: 1, execucao: 2 }.freeze
 
-  def team_rows_for_docx
+  def self.normalize_person_name(name) = I18n.transliterate(name.to_s.downcase).squish
+
+  # functions: { nome normalizado => macrogrupo } que a IA passa na geração (funcoes_equipe).
+  # Apoio (professionals.technical_team = false) não entra no quadro — Charlene, 2026-10-01.
+  def team_rows_for_docx(functions: {})
     lines = project_pricing&.proposal_professionals&.includes(:professional)&.to_a || []
+    lines = lines.select { |line| line.professional.technical_team || line.professional.always_included }
 
     # UMA linha por profissional (2026-09-29): com a precificação por item, a mesma pessoa tem uma
     # linha de equipe em cada item (campo, elaboração, protocolo…) e saía repetida no quadro.
@@ -100,7 +105,8 @@ class Proposal < ApplicationRecord
       .sort_by { |professional, _| [ DOCX_TEAM_SECTORS.fetch(docx_team_sector(professional)), professional.name.to_s ] }
       .map do |professional, professional_lines|
         habilitacao = [ professional.specialties.presence, professional.registration.presence ].compact.join(" — ")
-        [ docx_team_sector_label(professional), docx_team_function(professional, professional_lines), professional.name.to_s, habilitacao ]
+        function = (functions[self.class.normalize_person_name(professional.name)] unless professional.always_included)
+        [ docx_team_sector_label(professional), function || docx_team_function(professional, professional_lines), professional.name.to_s, habilitacao ]
       end
   end
 
@@ -851,7 +857,8 @@ class Proposal < ApplicationRecord
         Regras:
         - Use só professional_id das listas acima — nunca invente.
         - "deliverable_name" é o entregável/frente de trabalho da pessoa NESTA proposta (ex.:
-          "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Coordenação Geral").
+          "Geoprocessamento e Cartografia", "Diagnóstico do Meio Físico", "Coordenação Geral"),
+          sem nome de órgão nem de sistema (nada de "INEMA", "SEI-BAHIA": "órgão ambiental").
         - UMA linha por pessoa em cada item: se ela entrega várias coisas no mesmo item, junte
           num entregável só ("Diagnóstico de Fauna e Avifauna") somando o esforço. A mesma pessoa
           só aparece em outro item quando faz um trabalho de fato diferente lá — nunca divida a

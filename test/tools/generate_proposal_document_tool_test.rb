@@ -875,6 +875,39 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal [ "Estudo de Médio Impacto (EMI)", "Word e PDF" ], linhas.second
   end
 
+  # Charlene, 2026-10-01 (prints no grupo): linha de grupo do Quadro de Produtos em negrito; texto sem
+  # nome de arquivo do cliente nem sistema do órgão; equipe por macrogrupo, sem apoio no quadro.
+  test "rodada da Charlene: grupo de produto em negrito, texto genérico, equipe por macrogrupo" do
+    @proposal.update!(status: "priced", document_split: "combined")
+    professionals(:biologa).update!(technical_team: false)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(
+      produtos: [ "Renovação da Licença de Operação (LO):", "Relatório Técnico | Word e PDF" ],
+      escopo_e_metodologia: "A definição do escopo utilizou as informações fornecidas pelo cliente através do documento " \
+        "“Solicitação.pdf (e-mail da cliente de 30/09/2026)”. Os documentos serão protocolados exclusivamente via SEI-BAHIA.",
+      funcoes_equipe: [ "Pedro Almeida | Assessoria Ambiental Estratégica" ]
+    ))
+
+    document = @proposal.generated_documents.first
+    ns = { "w" => "http://schemas.openxmlformats.org/wordprocessingml/2006/main" }
+    xml = Nokogiri::XML(document_xml(document))
+    group_row = xml.xpath("//w:tbl", ns)[1].xpath(".//w:tr", ns)[1]
+    assert group_row.xpath(".//w:t", ns).all? { |t| t.parent.at_xpath("w:rPr/w:b", ns) }, "linha de grupo em negrito"
+    item_row = xml.xpath("//w:tbl", ns)[1].xpath(".//w:tr", ns)[2]
+    assert_not item_row.xpath(".//w:t", ns).any? { |t| t.parent.at_xpath("w:rPr/w:b", ns) }
+
+    texts = xml.at_xpath("//w:body", ns).text
+    assert_includes texts, "fornecidas pelo cliente."
+    assert_not_includes texts, "Solicitação.pdf"
+    assert_includes texts, "via sistema do órgão ambiental"
+    assert_not_includes texts, "SEI-BAHIA"
+
+    team = xml.xpath("//w:tbl", ns)[2].xpath(".//w:tr", ns).map { |tr| tr.xpath(".//w:t", ns).map(&:text).join(" ") }
+    assert team.any? { |row| row.include?("Assessoria Ambiental Estratégica") && row.include?("Pedro Almeida") }
+    assert team.none? { |row| row.include?(professionals(:biologa).name) }, "apoio fora do quadro"
+  end
+
   # Achado ao vivo em produção: a IA "vazou" códigos de citação do chat ([F12], só fazem
   # sentido lá — ver Message::CITATION_PATTERN) pro texto de uma proposta real, e eles saíram
   # crus no .docx que o cliente lê ("mediante elaboração de [F681] Estudo Ambiental...").

@@ -134,7 +134,7 @@ class ProposalDocxFiller
             else
               fill_table!(table_node, config.fetch(:rows), auto_number: config.fetch(:auto_number, false),
                 merge_first_column: config.fetch(:merge_first_column, false),
-                bold_unnumbered: config.fetch(:bold_unnumbered, false))
+                bold_unnumbered: config.fetch(:bold_unnumbered, false), bold_groups: config.fetch(:bold_groups, false))
             end
           end
           insert_schedule_tables!(doc, schedules, zip)
@@ -694,7 +694,7 @@ class ProposalDocxFiller
     # (mesmo princípio de "consecutivo, não valor único" já usado pra agrupar cronograma por
     # fase). `auto_number`/`trim`/`header_rows` continuam funcionando normalmente antes disso —
     # o merge é sempre o último passo, sobre as linhas já definitivas.
-    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1, merge_first_column: false, bold_unnumbered: false)
+    def fill_table!(tbl, rows_data, auto_number:, trim: true, header_rows: 1, merge_first_column: false, bold_unnumbered: false, bold_groups: false)
       return unless tbl
 
       all_rows = tbl.xpath(".//w:tr", NS)
@@ -717,7 +717,10 @@ class ProposalDocxFiller
         end
         # Linha de total (Quadro de Preço discriminado, ver Proposal#docx_price_rows) em negrito — e, com
         # bold_unnumbered, toda linha sem número (subtítulo de item, subtotal, "TOTAL – empreendimento").
-        bold = row_values.include?("TOTAL") || (bold_unnumbered && row_values.first.to_s.empty?)
+        # bold_groups: linha de agrupamento ("Renovação da Licença de Operação (LO):", sem formato) —
+        # Charlene, 2026-10-01: sem negrito o Quadro de Produtos ficava confuso.
+        bold = row_values.include?("TOTAL") || (bold_unnumbered && row_values.first.to_s.empty?) ||
+          (bold_groups && row_values.first.to_s.strip.end_with?(":") && row_values.drop(1).all? { |value| value.to_s.strip.empty? })
         row_node.xpath(".//w:t", NS).each { |text_node| bold_run!(text_node) } if bold
 
         row_node
