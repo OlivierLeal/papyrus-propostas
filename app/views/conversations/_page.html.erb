@@ -1,0 +1,32 @@
+<%# Uma página da lista de propostas. O título do ano só aparece quando o ano muda (previous_group é o
+    grupo do último card da página anterior); no fim, o frame lazy da próxima página — o Turbo o
+    busca sozinho quando ele entra na tela, e a resposta (conversations/page) traz esta mesma
+    estrutura com o frame seguinte. %>
+<% current_group = previous_group %>
+<% conversations.chunk_while { |a, b| year_group_label(a.created_at) == year_group_label(b.created_at) }.each do |chunk| %>
+  <% group = year_group_label(chunk.first.created_at) %>
+  <% if group == current_group %>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+      <%= render partial: "card", collection: chunk, as: :conversation %>
+    </div>
+  <% else %>
+    <div class="flex items-center gap-3 mb-3 <%= "mt-8" if current_group %>">
+      <h2 class="text-sm font-semibold text-base-content/60 uppercase tracking-wide"><%= group %></h2>
+      <span class="badge badge-ghost badge-sm"><%= group_counts[group] %></span>
+      <div class="h-px bg-base-300 flex-1"></div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <%= render partial: "card", collection: chunk, as: :conversation %>
+    </div>
+  <% end %>
+  <% current_group = group %>
+<% end %>
+
+<% if pagy.next %>
+  <%= turbo_frame_tag "conversations_page_#{pagy.next}", src: conversations_path(q: query.presence, page: pagy.next),
+        loading: :lazy, target: "_top", class: "block" do %>
+    <div class="flex justify-center py-8" aria-label="Carregando mais propostas">
+      <span class="loading loading-spinner loading-md text-primary"></span>
+    </div>
+  <% end %>
+<% end %>

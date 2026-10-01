@@ -13,21 +13,11 @@
     <% end %>
   </div>
 
-  <% if @general_chats.empty? %>
+  <% if @pagy.count.zero? %>
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-8 text-center text-base-content/60">
       Nenhuma consulta ainda. <%= button_to "Comece uma", general_chats_path, class: "link link-primary inline p-0 bg-transparent border-none align-baseline" %>.
     </div>
   <% else %>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <% @general_chats.each do |general_chat| %>
-        <%= link_to general_chat_path(general_chat),
-              class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
-          <div class="card-body gap-2">
-            <h3 class="font-semibold text-base-content leading-tight line-clamp-2"><%= general_chat.display_title %></h3>
-            <div class="text-xs text-base-content/40"><%= general_chat.created_at.strftime("%d/%m/%Y") %></div>
-          </div>
-        <% end %>
-      <% end %>
-    </div>
+    <%= render "page", general_chats: @general_chats, pagy: @pagy %>
   <% end %>
 </div>

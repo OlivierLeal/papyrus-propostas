@@ -1,0 +1,4 @@
+<%# Resposta do frame lazy do scroll infinito (ver ConversationsController#index e _page). %>
+<%= turbo_frame_tag "conversations_page_#{@pagy.page}" do %>
+  <%= render "page", conversations: @conversations, pagy: @pagy, previous_group: @previous_group, group_counts: @group_counts, query: @query %>
+<% end %>

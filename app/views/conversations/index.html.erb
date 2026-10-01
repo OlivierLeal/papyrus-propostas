@@ -2,7 +2,7 @@
   <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Propostas</h1>
-      <p class="text-sm text-base-content/60"><%= pluralize(@conversations.size, "proposta", plural: "propostas") %></p>
+      <p class="text-sm text-base-content/60"><%= pluralize(@pagy.count, "proposta", plural: "propostas") %></p>
     </div>
 
     <%= link_to new_conversation_path, class: "btn btn-primary btn-sm gap-1.5" do %>
@@ -23,7 +23,7 @@
     </label>
   <% end %>
 
-  <% if @conversations.empty? %>
+  <% if @pagy.count.zero? %>
     <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-8 text-center text-base-content/60">
       <% if @query.present? %>
         Nenhuma proposta encontrada para "<%= @query %>". <%= link_to "Limpar busca", conversations_path, class: "link link-primary" %>.
@@ -32,42 +32,6 @@
       <% end %>
     </div>
   <% else %>
-    <% @conversation_groups.each do |group| %>
-      <div class="flex items-center gap-3 mb-3 <%= "mt-8" unless group == @conversation_groups.first %>">
-        <h2 class="text-sm font-semibold text-base-content/60 uppercase tracking-wide"><%= group[:label] %></h2>
-        <span class="badge badge-ghost badge-sm"><%= group[:conversations].size %></span>
-        <div class="h-px bg-base-300 flex-1"></div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <% group[:conversations].each do |conversation| %>
-          <%= link_to conversation_path(conversation),
-                class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
-            <div class="card-body gap-3">
-              <div class="flex items-start justify-between gap-2">
-                <h3 class="font-semibold text-base-content leading-tight">
-                  <%= conversation.client_name %>
-                  <% if conversation.proposal.present? %>
-                    <span class="text-base-content/50 font-normal text-sm"><%= conversation.proposal.docx_numero_proposta %></span>
-                  <% end %>
-                </h3>
-                <%= conversation_status_badge(conversation, extra_class: "shrink-0") %>
-              </div>
-
-              <span class="badge badge-ghost w-fit"><%= conversation.study_types_label %></span>
-
-              <div class="flex items-center justify-between gap-2 text-xs text-base-content/40">
-                <span><%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %></span>
-                <% if (cost = conversation.ai_cost_usd) %>
-                  <span title="Custo estimado de IA nesta conversa">
-                    ≈ <%= number_to_currency(cost, unit: "US$", separator: ",", delimiter: ".") %>
-                  </span>
-                <% end %>
-              </div>
-            </div>
-          <% end %>
-        <% end %>
-      </div>
-    <% end %>
+    <%= render "page", conversations: @conversations, pagy: @pagy, previous_group: nil, group_counts: @group_counts, query: @query %>
   <% end %>
 </div>

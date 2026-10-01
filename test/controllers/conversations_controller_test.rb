@@ -78,6 +78,47 @@ class ConversationsControllerTest < ActionDispatch::IntegrationTest
     assert_operator response.body.index("Anteriores"), :<, response.body.index(antigo.client_name)
   end
 
+  # Scroll infinito (2026-10): a 1ª página traz PER_PAGE cards e um turbo-frame lazy apontando pra
+  # próxima; a próxima chega como resposta de frame, sem layout.
+  def create_conversations!(count, created_at:, prefix:)
+    count.times.map do |i|
+      Conversation.create!(user: @user, client_name: "#{prefix} #{format('%03d', i)}", status: "setup").tap do |c|
+        c.update_column(:created_at, created_at - i.minutes)
+      end
+    end
+  end
+
+  test "index pagina: a 1ª página mostra PER_PAGE propostas e o frame lazy da próxima, com a busca junto" do
+    Conversation.destroy_all
+    create_conversations!(ConversationsController::PER_PAGE + 5, created_at: Time.current, prefix: "Cliente Paginado")
+
+    get conversations_path, params: { q: "paginado" }
+
+    assert_response :success
+    assert_select "a.card", ConversationsController::PER_PAGE
+    assert_select "turbo-frame#conversations_page_2[loading=lazy][target=_top]"
+    assert_select "turbo-frame#conversations_page_2[src*='page=2'][src*='q=paginado']"
+    # Total e badge do grupo contam a lista inteira, não só a página.
+    assert_match "#{ConversationsController::PER_PAGE + 5} propostas", response.body
+    assert_select "span.badge", text: (ConversationsController::PER_PAGE + 5).to_s
+  end
+
+  test "index: a página seguinte vem como frame, sem repetir o título do ano que continua, e sem frame depois da última" do
+    Conversation.destroy_all
+    create_conversations!(ConversationsController::PER_PAGE + 2, created_at: Time.current, prefix: "Deste Ano")
+    create_conversations!(1, created_at: 3.years.ago, prefix: "Bem Antigo")
+
+    get conversations_path, params: { page: 2 }, headers: { "Turbo-Frame" => "conversations_page_2" }
+
+    assert_response :success
+    assert_select "turbo-frame#conversations_page_2"
+    assert_select "a.card", 3
+    assert_select "h2", text: Date.current.year.to_s, count: 0
+    assert_select "h2", text: "Anteriores", count: 1
+    assert_select "turbo-frame#conversations_page_3", count: 0
+    assert_no_match "<html", response.body
+  end
+
   test "index does not show a year section that has no conversations" do
     ano_passado = Conversation.create!(user: @user, client_name: "Único Cliente do Ano Passado", status: "setup")
     ano_passado.update_column(:created_at, 1.year.ago)

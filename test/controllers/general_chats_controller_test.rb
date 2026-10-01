@@ -16,6 +16,25 @@ class GeneralChatsControllerTest < ActionDispatch::IntegrationTest
     assert_no_match general_chat_path(other_user_chat), response.body
   end
 
+  # Scroll infinito (2026-10, mesmo padrão da Tela de Propostas).
+  test "index pagina: 1ª página com PER_PAGE consultas e o frame lazy da próxima; a próxima vem como frame" do
+    @user.general_chats.destroy_all
+    total = ConversationsController::PER_PAGE + 3
+    total.times { |i| @user.general_chats.create!(title: "Dúvida #{format('%03d', i)}", created_at: Time.current - i.minutes) }
+
+    get general_chats_path
+
+    assert_select "a.card", ConversationsController::PER_PAGE
+    assert_select "turbo-frame#general_chats_page_2[loading=lazy][target=_top][src*='page=2']"
+
+    get general_chats_path, params: { page: 2 }, headers: { "Turbo-Frame" => "general_chats_page_2" }
+
+    assert_select "turbo-frame#general_chats_page_2 a.card", 3
+    assert_select "turbo-frame#general_chats_page_3", count: 0
+    assert_match "Dúvida #{format('%03d', total - 1)}", response.body
+    assert_no_match "<html", response.body
+  end
+
   test "index redirects a guest to the login screen" do
     sign_out
     get general_chats_path

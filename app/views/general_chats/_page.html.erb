@@ -1,0 +1,14 @@
+<%# Uma página da lista do Tira-Dúvidas; no fim, o frame lazy da próxima (mesmo padrão de
+    conversations/_page — o Turbo busca quando ele entra na tela). %>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 <%= "mt-4" if pagy.page > 1 %>">
+  <%= render partial: "card", collection: general_chats, as: :general_chat %>
+</div>
+
+<% if pagy.next %>
+  <%= turbo_frame_tag "general_chats_page_#{pagy.next}", src: general_chats_path(page: pagy.next),
+        loading: :lazy, target: "_top", class: "block" do %>
+    <div class="flex justify-center py-8" aria-label="Carregando mais consultas">
+      <span class="loading loading-spinner loading-md text-primary"></span>
+    </div>
+  <% end %>
+<% end %>

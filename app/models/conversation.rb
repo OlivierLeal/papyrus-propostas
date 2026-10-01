@@ -328,8 +328,8 @@ class Conversation < ApplicationRecord
   # o código já embute o ano (ver Proposal#docx_numero_proposta) e a maioria digita só um dos três
   # de cada vez. Filtra em Ruby, não em SQL: código não é coluna nenhuma, é calculado a partir de
   # created_at + id, então não dá pra fazer WHERE nele — aceitável na escala deste app (poucos
-  # usuários, sem paginação ainda). `includes(:proposal)` no chamador evita N+1 ao calcular o
-  # código de cada conversa.
+  # usuários). O filtro só decide os ids; a paginação (ConversationsController#index) vem depois,
+  # sobre a relação. `includes(:proposal)` evita N+1 ao calcular o código de cada conversa.
   # `messages: :model` entra pro card de custo de IA na Tela de Propostas (#ai_cost_usd) não
   # disparar N+1 — cada Message#cost lê a `model_association` (pricing) pra calcular o valor.
   def self.search(query)
@@ -340,18 +340,25 @@ class Conversation < ApplicationRecord
     # calcular o código sem N+1), a 2ª carrega o que a tela realmente precisa — SÓ para os ids que
     # sobraram. Um includes só, aplicado antes do filtro, dispara "eager load não usado" no Bullet
     # sempre que a busca não bate com nada (nenhuma associação chega a ser lida da lista vazia).
-    ids = includes(:proposal).select { |conversation| conversation.matches_search?(normalized) }.map(&:id)
+    # Nome e ano não precisam da proposta; só quem não casou por eles carrega a proposta pra
+    # testar o código (senão o includes fica sem uso quando todos casam pelo nome).
+    by_text = select(:id, :client_name, :created_at).select { |conversation| conversation.matches_search_text?(normalized) }.map(&:id)
+    by_code = where.not(id: by_text).includes(:proposal).select { |conversation| conversation.matches_search?(normalized) }.map(&:id)
+    ids = by_text + by_code
     return none if ids.empty?
 
     where(id: ids).order(created_at: :desc).includes(:user, :study_types, :proposal, messages: :model)
   end
 
   def matches_search?(normalized_query)
-    return true if client_name.to_s.downcase.include?(normalized_query)
-    return true if created_at.strftime("%Y").include?(normalized_query) || created_at.strftime("%y") == normalized_query
-    return true if proposal.present? && proposal.docx_numero_proposta.downcase.include?(normalized_query)
+    return true if matches_search_text?(normalized_query)
 
-    false
+    proposal.present? && proposal.docx_numero_proposta.downcase.include?(normalized_query)
+  end
+
+  def matches_search_text?(normalized_query)
+    client_name.to_s.downcase.include?(normalized_query) ||
+      created_at.strftime("%Y").include?(normalized_query) || created_at.strftime("%y") == normalized_query
   end
 
   # Cria a proposta (e a equipe sugerida pela IA) sob demanda — chamado tanto pelo botão "Avançar

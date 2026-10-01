@@ -1,0 +1,4 @@
+<%# Resposta do frame lazy do scroll infinito (ver GeneralChatsController#index e _page). %>
+<%= turbo_frame_tag "general_chats_page_#{@pagy.page}" do %>
+  <%= render "page", general_chats: @general_chats, pagy: @pagy %>
+<% end %>

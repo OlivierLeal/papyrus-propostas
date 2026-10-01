@@ -108,3 +108,5 @@ group :test do
   # Relatório de cobertura de testes [https://github.com/simplecov-ruby/simplecov]
   gem "simplecov", require: false
 end
+
+gem "pagy", "~> 43.6"

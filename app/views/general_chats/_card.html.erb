@@ -1,0 +1,7 @@
+<%= link_to general_chat_path(general_chat),
+      class: "card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow" do %>
+  <div class="card-body gap-2">
+    <h3 class="font-semibold text-base-content leading-tight line-clamp-2"><%= general_chat.display_title %></h3>
+    <div class="text-xs text-base-content/40"><%= general_chat.created_at.strftime("%d/%m/%Y") %></div>
+  </div>
+<% end %>

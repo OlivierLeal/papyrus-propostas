@@ -1,10 +1,24 @@
 class ConversationsController < ApplicationController
+  include Pagy::Method
+
   before_action :set_conversation, only: %i[ show update confirm_framing ]
 
+  # Múltiplo de 1, 2 e 3 (colunas da grade no celular/tablet/desktop): a página nunca termina com
+  # uma linha pela metade no meio de um ano.
+  PER_PAGE = 24
+
+  # Scroll infinito: a 1ª página vem com a tela; as seguintes chegam pelo turbo-frame lazy que fica
+  # no fim da lista (conversations/_page), quando ele entra na tela.
   def index
     @query = params[:q]
-    @conversations = Conversation.search(@query)
-    @conversation_groups = group_by_year(@conversations)
+    conversations = Conversation.search(@query)
+    @pagy, @conversations = pagy(conversations, limit: PER_PAGE)
+    @group_counts = group_counts(conversations)
+    # O título do ano só aparece quando o ano muda — numa página que continua o ano da anterior,
+    # a grade segue sem título repetido.
+    @previous_group = helpers.year_group_label(conversations.offset(@pagy.offset - 1).pick(:created_at)) if @pagy.offset.positive?
+
+    render :page, layout: false if turbo_frame_request?
   end
 
   def new
@@ -65,20 +79,15 @@ class ConversationsController < ApplicationController
   end
 
   private
-    # A numeração da proposta (Proposal#docx_numero_proposta) carrega o ano de 2 dígitos — pedido
-    # do consultor pra deixar isso visível na tela também, já que o mesmo id (ex.: "098") volta a
-    # aparecer em anos diferentes ("PTC26098" × "PTC25098" são propostas DIFERENTES) conforme o
-    # uso do sistema acumula mais de um ano de histórico. Ano corrente e o anterior ganham seção
-    # própria; o resto (mais de 1 ano) cai junto em "Anteriores" — só 3 grupos, não um por ano.
-    # `conversations` já vem ordenada created_at DESC (Conversation.search), então dentro de cada
-    # grupo a ordem se mantém sem precisar reordenar.
-    def group_by_year(conversations)
-      ano_atual = Date.current.year
-      [
-        { label: ano_atual.to_s, conversations: conversations.select { |c| c.created_at.year == ano_atual } },
-        { label: (ano_atual - 1).to_s, conversations: conversations.select { |c| c.created_at.year == ano_atual - 1 } },
-        { label: "Anteriores", conversations: conversations.select { |c| c.created_at.year < ano_atual - 1 } }
-      ].select { |grupo| grupo[:conversations].any? }
+    # Quantas propostas em cada grupo (ano atual, anterior, "Anteriores") na lista INTEIRA, não só
+    # na página carregada — o badge do título do grupo não pode mudar conforme o scroll. O ano é
+    # extraído no fuso da aplicação, o mesmo de `created_at.year` no Ruby (virada do ano).
+    def group_counts(conversations)
+      zone = Conversation.connection.quote(Time.zone.tzinfo.identifier)
+      year = Arel.sql("EXTRACT(YEAR FROM conversations.created_at AT TIME ZONE 'UTC' AT TIME ZONE #{zone})::int")
+      conversations.except(:includes, :order).group(year).count.each_with_object(Hash.new(0)) do |(value, count), counts|
+        counts[helpers.year_group_label_for(value)] += count
+      end
     end
 
     # Dispara automaticamente ao criar a proposta — não existe mais uma etapa manual de

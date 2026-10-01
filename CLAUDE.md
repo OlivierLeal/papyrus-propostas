@@ -2518,6 +2518,18 @@ o código da aplicação executa a busca. Cobre exatamente o buraco que o CAL de
   `script/ai_cost/compare_context.rb` (histórico completo × enxuto, juiz + controle completo×completo;
   rodar de novo ao mexer no corte ou trocar de modelo): −75% de entrada, qualidade dentro da variação
   do próprio modelo. Ao vivo na conversa 65: 239 mil tokens por turno → 4,7 mil + 23,6 mil de cache.
+- **Tela de Propostas com scroll infinito (2026-10).** `ConversationsController#index` pagina com
+  a gem `pagy` (43.x: `include Pagy::Method`, `pagy(relação, limit:)`), `PER_PAGE = 24` (múltiplo
+  das 1/2/3 colunas da grade). O fim de `conversations/_page` tem um `turbo-frame` `loading="lazy"`
+  (`target="_top"`, senão o clique no card abre a proposta dentro do frame) com o spinner do daisyUI
+  — o daisyUI é só CSS, quem carrega é o Turbo; a resposta (`conversations/page`, sem layout) traz a
+  página seguinte e o próximo frame. O título do ano só aparece quando o ano muda
+  (`@previous_group`, ano do último card da página anterior); total e badges vêm de contagem no
+  banco (`group_counts`, ano no fuso da aplicação), não da página carregada. A tela rola dentro do
+  container do `shared/_layout` (`overflow-auto`), não na janela — teste de sistema tem que rolar
+  esse elemento (`test/system/conversations_infinite_scroll_test.rb`).
+  O Tira-Dúvidas (`GeneralChatsController#index`, `general_chats/_page`) usa o mesmo padrão, sem
+  agrupamento por ano.
 - Views HTML+ERB são validadas pela gem `herb` (`bin/herb lint`, configurada em `.herb.yml`, rodando também no `bin/ci` e no workflow do GitHub Actions). O linter em si é o pacote npm `@herb-tools/linter`, fixado no `package.json` na mesma versão da gem — ao atualizar uma, atualizar a outra e o campo `version:` do `.herb.yml`.
 - Anexos de conversa (ET, TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
 - RAG do acervo (seção 11.1): rodar `script/rag/report.rb` e revisar o HTML ANTES de
