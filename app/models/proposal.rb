@@ -722,12 +722,10 @@ class Proposal < ApplicationRecord
       { diretoria: "Diretoria", gestao: "Gestão", execucao: "Execução" }.fetch(docx_team_sector(professional))
     end
 
-    # Registra a busca no acervo quando há algo indexado (mesmo padrão de
-    # fetch_ai_schedule_suggestion) — a IA pode ver como a Papyrus montou a equipe em projetos
-    # parecidos antes de sugerir.
+    # `tools: true`: a IA pode ver no acervo como a Papyrus montou a equipe em projetos parecidos
+    # antes de sugerir (ferramentas de Conversation#internal_tools).
     def fetch_ai_team_suggestion
-      conversation.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
-      conversation.ask_internally(team_suggestion_prompt, hide_response: true)
+      conversation.ask_internally(team_suggestion_prompt, hide_response: true, temperature: 0, tools: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
       AiJsonResponse.parse(response.content) || {}
     end
@@ -933,14 +931,10 @@ class Proposal < ApplicationRecord
       TEXT
     end
 
-    # Mesmo padrão do ProcessLegalNormsJob: registra a ferramenta ANTES de ask_internally (é essa
-    # chamada que efetivamente a usa pela primeira vez — dali em diante Conversation#ask_internally
-    # já registra sozinho, sempre que detectar histórico de uso de tool). Só quando há acervo
-    # indexado, mesmo motivo de RespondToMessageJob: ferramenta que sempre volta vazia vira algo
-    # que a IA acha que tentou.
+    # `tools: true`: a IA pode consultar o acervo (como a Papyrus estruturou cronogramas
+    # parecidos) — as ferramentas vêm de Conversation#internal_tools.
     def fetch_ai_schedule_suggestion
-      conversation.with_tool(SearchHistoricalArchiveTool.new) if HistoricalProposalChunk.embedded.exists?
-      conversation.ask_internally(schedule_suggestion_prompt, hide_response: true)
+      conversation.ask_internally(schedule_suggestion_prompt, hide_response: true, temperature: 0, tools: true)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
       AiJsonResponse.parse(response.content) || {}
     end
@@ -999,7 +993,7 @@ class Proposal < ApplicationRecord
     end
 
     def fetch_ai_key_points_suggestion(items)
-      conversation.ask_internally(key_points_suggestion_prompt(items), hide_response: true)
+      conversation.ask_internally(key_points_suggestion_prompt(items), hide_response: true, temperature: 0)
       response = conversation.messages.where(role: "assistant").order(:created_at).last
       AiJsonResponse.parse(response.content) || {}
     end

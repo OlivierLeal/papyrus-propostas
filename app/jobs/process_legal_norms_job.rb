@@ -13,12 +13,8 @@ class ProcessLegalNormsJob < ApplicationJob
 
     conversation.mark_step!("cal", "running")
 
-    # Esta é a chamada que efetivamente USA a ferramenta pela primeira vez nesta conversa —
-    # precisa registrar explicitamente. Daí em diante, Conversation#ask_internally já registra
-    # sozinho em qualquer chamada seguinte, sempre que detectar histórico de uso de tool.
-    conversation.with_tool(SearchLegalNormsTool.new)
-    conversation.with_tool(SearchLegalNormsArchiveTool.new) if LegalNormChunk.embedded.exists?
-    conversation.ask_internally(prompt(conversation, municipios), hide_response: true)
+    # `tools: true`: esta tarefa É a pesquisa no CAL (ferramentas de Conversation#internal_tools).
+    conversation.ask_internally(prompt(conversation, municipios), hide_response: true, tools: true)
     record_findings!(conversation)
     # A norma vence o pedido do cliente: troca já o estudo que o ET indicou (Conversation#framing_values).
     conversation.assign_study_types_from_findings!

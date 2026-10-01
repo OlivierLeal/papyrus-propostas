@@ -35,6 +35,7 @@ class ConversationAiLockTest < ActiveSupport::TestCase
 
     @conversation.reload
     instructions = @conversation.messages.where(role: "user").order(:created_at).pluck(:content)
+      .map { |content| content.delete_suffix("\n\n#{Conversation::INTERNAL_NO_TOOLS_NOTE}") }
     replies = @conversation.messages.where(role: "assistant").order(:created_at)
 
     assert_equal [ "Pergunta A", "Pergunta B" ], instructions.sort
@@ -43,7 +44,7 @@ class ConversationAiLockTest < ActiveSupport::TestCase
 
     # Cada resposta tem que corresponder à SUA PRÓPRIA pergunta — sem a trava, uma call pode
     # acordar depois que a outra já criou a instrução dela, e responder à pergunta errada.
-    answered_questions = replies.map { |r| r.content.sub("resposta para: ", "") }
+    answered_questions = replies.map { |r| r.content.sub("resposta para: ", "").delete_suffix("\n\n#{Conversation::INTERNAL_NO_TOOLS_NOTE}") }
     assert_equal [ "Pergunta A", "Pergunta B" ], answered_questions.sort
   ensure
     Conversation.define_method(:complete, original_method)

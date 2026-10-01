@@ -1,6 +1,8 @@
 class Conversation < ApplicationRecord
   acts_as_chat
   include LlmMessageOrdering
+  # Depois de LlmMessageOrdering: corta o histórico já na ordem certa (ver o concern).
+  include LlmHistoryTrimming
   include AiResponding
 
   has_many :knowledge_notes, dependent: :destroy
@@ -580,6 +582,17 @@ class Conversation < ApplicationRecord
   end
 
   PROPOSAL_STATE_MARKER = "[ESTADO ATUAL DA PROPOSTA]".freeze
+  INTERNAL_NO_TOOLS_NOTE = "Não use ferramentas nesta tarefa: responda direto, só com o que foi pedido.".freeze
+
+  # Ferramentas de toda tarefa interna (ver #ask_internally). Só leitura — nunca as que gravam
+  # (gerar documento, custo, card): um job que só devolve JSON não pode disparar efeito colateral.
+  def internal_tools
+    @internal_tools ||= [
+      (SearchHistoricalArchiveTool.new if HistoricalProposalChunk.embedded.exists?),
+      (SearchLegalNormsTool.new if Cal::Client.configured?),
+      (SearchLegalNormsArchiveTool.new if LegalNormChunk.embedded.exists?)
+    ].compact
+  end
 
   # A IA só enxerga o que está no histórico do chat — os números da Tela de Precificação (que o
   # consultor edita direto, fora do chat) nunca chegam até ela por conta própria. Sem isso, ao
@@ -678,16 +691,26 @@ class Conversation < ApplicationRecord
   # complementares) e o tipo de estudo nunca foi identificado. pg_advisory_xact_lock serializa só
   # as chamadas da MESMA conversa (id como chave) — outras conversas continuam livres pra rodar em
   # paralelo — e libera sozinho quando a transação termina, sem precisar de unlock manual.
-  def ask_internally(prompt, with: nil, hide_response: false)
+  # `temperature:` — 0 nas sugestões que devolvem JSON de esforço/cronograma: a mesma conversa
+  # rodada duas vezes dava 1.680 ou 3.400 HH (medido em script/ai_cost/compare_context.rb).
+  #
+  # `tools:` — toda tarefa interna recebe o MESMO conjunto de ferramentas (só leitura, sempre na
+  # mesma ordem, #internal_tools), porque o cache do Bedrock só reaproveita prefixo idêntico e as
+  # ferramentas vêm antes do prompt de sistema e do histórico: com um conjunto por job, nenhum job
+  # lia o cache do outro (e o de uma chamada só pagava a gravação sem nunca ler). Também resolve o
+  # "toolConfig field must be defined" do Bedrock quando o histórico já tem toolUse. Com `tools:
+  # false` (extrações que só devolvem JSON) as ferramentas continuam declaradas, mas o pedido diz
+  # pra não usá-las — o Converse não tem "toolChoice: none".
+  def ask_internally(prompt, with: nil, hide_response: false, temperature: nil, tools: false)
     with_ai_lock do
-      # Registra a ferramenta do CAL só quando o histórico desta conversa JÁ tem uso de alguma
-      # tool (ver ProcessLegalNormsJob) — achado na prática: a partir daí o histórico passa a ter
-      # blocos toolUse/toolResult, e o Bedrock recusa reenviar esse histórico numa chamada futura
-      # que não declare toolConfig (erro "The toolConfig field must be defined when using toolUse
-      # and toolResult content blocks", mesmo sem nenhuma tool call nova). Não registra
-      # incondicionalmente: abriria a ferramenta pra chamadas que esperam JSON puro de volta (ex.:
-      # ProcessEtJob) mesmo em conversas que nunca usaram tool nenhuma.
-      with_tool(SearchLegalNormsTool.new) if Cal::Client.configured? && messages.exists?(role: "tool")
+      # Com proposta, o snapshot é a fonte do estado atual (equipe, documentos, planilhas): o
+      # histórico antigo é enxuto (LlmHistoryTrimming) e os jobs de equipe/cronograma rodam fora
+      # do turno de chat, que é quem normalmente o atualiza. Sem proposta (pipeline do setup), os
+      # prompts já trazem o que precisam.
+      refresh_proposal_state_snapshot! if proposal.present?
+      with_temperature(temperature) unless temperature.nil?
+      with_tools(*internal_tools, replace: true)
+      prompt = "#{prompt}\n\n#{INTERNAL_NO_TOOLS_NOTE}" unless tools || internal_tools.empty?
 
       instruction = create_user_message(prompt, with: with)
       instruction.update!(internal: true)
@@ -984,8 +1007,41 @@ class Conversation < ApplicationRecord
         - Logística: #{pricing.distance_km} km até o projeto, R$ #{pricing.logistics_total} nos campos#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
         - Custos externos: #{external_costs.presence || "nenhum lançado"}
         - Preço total calculado: R$ #{pricing.total_value}
+        - Documentos gerados: #{generated_documents_state_text}
+        - Planilhas do cliente: #{spreadsheet_fills_state_text}
         #{team_all_zero || !logistics_filled ? proposal_state_zero_warning : ""}
       TEXT
+    end
+
+    # Versão atual do documento e planilhas preenchidas, como ESTADO (não como lembrança de uma
+    # troca interna antiga do histórico) — a IA errava a revisão atual quando a mensagem que
+    # anunciava o arquivo ficava longe no histórico.
+    def generated_documents_state_text
+      blobs = proposal.generated_documents.blobs.select { |b| b.filename.extension_without_delimiter == "docx" }
+      return "nenhum ainda" if blobs.empty?
+
+      latest_version = blobs.map { |b| b.metadata["version"].to_i }.max
+      latest = blobs.select { |b| b.metadata["version"].to_i == latest_version }.map { |b| b.filename.to_s }
+      "#{blobs.size} arquivo(s) .docx ao todo; versão mais recente: #{latest.join(', ')}"
+    end
+
+    def spreadsheet_fills_state_text
+      fills = spreadsheet_fills.latest_per_blob.includes(:source_blob).order(:id).to_a
+      return "nenhuma preenchida" if fills.empty?
+
+      fills.map do |fill|
+        detail = case fill.status
+        when "done"
+          totals = fill.totals
+          check = totals ? "total da planilha R$ #{totals['planilha']} × proposta R$ #{totals['proposta']}" : "sem conferência de total"
+          pending = fill.issues.first(6).map { |i| i.to_s.truncate(140) }
+          "preenchida (#{check})#{"; a conferir: #{pending.join(' | ')}" if pending.any?}"
+        when "not_applicable" then "não é formulário a preencher (#{fill.reason.to_s.truncate(140)})"
+        when "failed" then "falhou no preenchimento"
+        else "preenchendo"
+        end
+        "\n    - #{fill.source_filename}: #{detail}"
+      end.join
     end
 
     # Nota anexada ao [ESTADO ATUAL DA PROPOSTA] só quando equipe/logística ainda estão zeradas —

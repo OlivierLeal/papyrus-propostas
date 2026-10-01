@@ -40,13 +40,13 @@ class ProcessLegalNormsJobTest < ActiveSupport::TestCase
   test "registers SearchLegalNormsTool before asking, so the AI can actually search" do
     achado!
     registered_tools = []
-    original_method = Conversation.instance_method(:with_tool)
-    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+    original_method = Conversation.instance_method(:with_tools)
+    Conversation.define_method(:with_tools) { |*tools, **| registered_tools.concat(tools.map(&:class)); self }
 
     begin
-      stub_ai_complete(cal_reply) { ProcessLegalNormsJob.perform_now(@conversation.id) }
+      with_cal_configured { stub_ai_complete(cal_reply) { ProcessLegalNormsJob.perform_now(@conversation.id) } }
     ensure
-      Conversation.define_method(:with_tool, original_method)
+      Conversation.define_method(:with_tools, original_method)
     end
 
     assert_includes registered_tools, SearchLegalNormsTool
@@ -57,13 +57,13 @@ class ProcessLegalNormsJobTest < ActiveSupport::TestCase
   test "registers SearchLegalNormsArchiveTool only when there is legislation already indexed locally" do
     achado!
     registered_tools = []
-    original_method = Conversation.instance_method(:with_tool)
-    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+    original_method = Conversation.instance_method(:with_tools)
+    Conversation.define_method(:with_tools) { |*tools, **| registered_tools.concat(tools.map(&:class)); self }
 
     begin
       stub_ai_complete(cal_reply) { ProcessLegalNormsJob.perform_now(@conversation.id) }
     ensure
-      Conversation.define_method(:with_tool, original_method)
+      Conversation.define_method(:with_tools, original_method)
     end
 
     assert_not_includes registered_tools, SearchLegalNormsArchiveTool
@@ -71,12 +71,12 @@ class ProcessLegalNormsJobTest < ActiveSupport::TestCase
     legal_norm = LegalNorm.create!(codigo: "NL9924", referencia: "NL9924 — teste (CAL/Ius Natura)")
     legal_norm.chunks.create!(position: 0, content: "trecho de norma", embedded_at: Time.current)
     registered_tools = []
-    Conversation.define_method(:with_tool) { |tool| registered_tools << tool.class; self }
+    Conversation.define_method(:with_tools) { |*tools, **| registered_tools.concat(tools.map(&:class)); self }
 
     begin
       stub_ai_complete(cal_reply) { ProcessLegalNormsJob.perform_now(@conversation.id) }
     ensure
-      Conversation.define_method(:with_tool, original_method)
+      Conversation.define_method(:with_tools, original_method)
     end
 
     assert_includes registered_tools, SearchLegalNormsArchiveTool

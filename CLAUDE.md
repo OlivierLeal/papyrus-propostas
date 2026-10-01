@@ -2498,6 +2498,26 @@ o código da aplicação executa a busca. Cobre exatamente o buraco que o CAL de
   "$AWS_REGION"` — nem todo modelo listado na AWS já está no registro local do `ruby_llm` (ver
   `RubyLLM.config.model_registry_file`), um id ausente dali quebra com `ModelNotFoundError`
   mesmo que a AWS aceite a chamada.
+- **Histórico enxuto pra IA + cache (2026-10, custo).** ~85% da fatura do Bedrock era token de
+  entrada (chamadas de 160-250 mil tokens): cada `ask_internally` grava pedido + resposta na
+  conversa e tudo era reenviado sempre. `LlmHistoryTrimming` (em `Conversation`, depois de
+  `LlmMessageOrdering`) tira dos turnos ANTERIORES as trocas internas (fica só a resposta visível,
+  ex. o resumo, com um marcador) e encurta resultado de ferramenta > 1.500 caracteres; o turno atual
+  vai inteiro. Marca o 2º `cachePoint` no último texto do histórico anterior (nunca no snapshot).
+  `ask_internally` atualiza o snapshot quando há proposta, e as sugestões de equipe/cronograma/marcos
+  rodam com `temperature: 0` (mesma conversa dava 1.680 ou 3.400 HH). **O que a IA precisa saber
+  depois vai pro snapshot** (`[ESTADO ATUAL DA PROPOSTA]` ganhou documentos gerados e planilhas por
+  isso); como rede de segurança, a resposta interna com TEXTO corrido fica resumida em 500
+  caracteres (JSON puro sai — o dado já está em tabela). **Ferramentas das tarefas internas:** todo
+  `ask_internally` declara o MESMO conjunto, só leitura e na mesma ordem
+  (`Conversation#internal_tools`: acervo, CAL, normas guardadas) — o prefixo do cache é ferramentas →
+  sistema → histórico, e com um conjunto por job nenhum job lia o cache do outro. `tools: true` só
+  em equipe/cronograma/CAL; nos demais o pedido diz pra não usar (o Converse não tem "toolChoice:
+  none"). Nunca pôr ali ferramenta que grava. Medido ao vivo (conversa 65): equipe → pendências →
+  marcos em sequência, a 2ª e a 3ª leram 24,4 mil tokens do cache da 1ª. Medido com
+  `script/ai_cost/compare_context.rb` (histórico completo × enxuto, juiz + controle completo×completo;
+  rodar de novo ao mexer no corte ou trocar de modelo): −75% de entrada, qualidade dentro da variação
+  do próprio modelo. Ao vivo na conversa 65: 239 mil tokens por turno → 4,7 mil + 23,6 mil de cache.
 - Views HTML+ERB são validadas pela gem `herb` (`bin/herb lint`, configurada em `.herb.yml`, rodando também no `bin/ci` e no workflow do GitHub Actions). O linter em si é o pacote npm `@herb-tools/linter`, fixado no `package.json` na mesma versão da gem — ao atualizar uma, atualizar a outra e o campo `version:` do `.herb.yml`.
 - Anexos de conversa (ET, TR, KMZ, complementares) são Active Storage nativo (`has_many_attached :attachments` em `Message`), não uma tabela `attachments` própria.
 - RAG do acervo (seção 11.1): rodar `script/rag/report.rb` e revisar o HTML ANTES de
