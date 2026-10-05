@@ -12,6 +12,7 @@ class PaymentScheduleTest < ApplicationSystemTestCase
   test "adicionar parcela, ver o valor calculado e salvar" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
+    open_pricing_tab "pagamento"
 
     percentages = all("input[name$='[percentage]']")
     percentages[1].fill_in(with: "50") # Protocolo 60 → 50
@@ -34,6 +35,7 @@ class PaymentScheduleTest < ApplicationSystemTestCase
   test "remover parcela" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
+    open_pricing_tab "pagamento"
 
     all("button[title='Remover parcela']")[3].click # Emissão da licença (5%)
     all("input[name$='[percentage]']").select(&:visible?)[2].fill_in(with: "10") # Vistoria 5 → 10

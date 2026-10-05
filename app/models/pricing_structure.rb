@@ -3,19 +3,21 @@
 # name="structure_action" — o que foi digitado é salvo antes (ProposalsController#update) e nada se
 # perde, sem form aninhado (proibido nesta tela, ver CLAUDE.md seção 5).
 #
-# Ações: "add_item", "remove_item:ID", "add_campaign:ITEM", "remove_campaign:ID",
+# Ações: "add_item", "add_team_item" (com new_item_name), "remove_item:ID", "add_campaign:ITEM", "remove_campaign:ID",
 # "add_cost:ITEM", "remove_cost:ITEM:ÍNDICE", "add_enterprise", "remove_enterprise:ID",
 # "search_lodging:CAMPO" (busca na Stay22, Lodging::Search) e "choose_lodging:CAMPO:OPÇÃO".
 # Devolve a âncora da tela pra voltar no lugar certo (ou nil sem ação).
 class PricingStructure
-  def initialize(pricing)
+  def initialize(pricing, new_item_name: nil)
     @pricing = pricing
+    @new_item_name = new_item_name.to_s.strip.presence
   end
 
   def apply(action)
     name, *ids = action.to_s.split(":", 3)
     case name
     when "add_item" then add_item
+    when "add_team_item" then add_team_item
     when "remove_item" then remove_item(ids.first)
     when "add_campaign" then add_campaign(ids.first)
     when "remove_campaign" then remove_campaign(ids.first)
@@ -33,8 +35,16 @@ class PricingStructure
     def items = @pricing.pricing_items
 
     def add_item
-      item = items.create!(name: "Novo item", position: items.maximum(:position).to_i + 1)
-      "item-#{item.id}"
+      "item-#{create_item.id}"
+    end
+
+    # "+ Item" da aba Equipe (2026-10): já com o nome digitado; volta pro grupo dele na Equipe.
+    def add_team_item
+      "equipe-item-#{create_item.id}"
+    end
+
+    def create_item
+      items.create!(name: @new_item_name || "Novo item", position: items.maximum(:position).to_i + 1)
     end
 
     # Nunca apaga o último item; a equipe do item removido vai pro primeiro que sobrar.

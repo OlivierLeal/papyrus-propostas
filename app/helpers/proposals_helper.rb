@@ -72,4 +72,58 @@ module ProposalsHelper
     end
     safe_join(notes)
   end
+
+  PricingCheck = Data.define(:label, :tab, :level)
+
+  # Pendências da Tela de Precificação, numa lista só (2026-10, remodelagem: os avisos ficavam
+  # espalhados pelos blocos e passavam despercebidos). Cada uma aponta pra aba onde se resolve.
+  # Nenhuma trava a aprovação — é o que vale conferir antes.
+  def pricing_checks(proposal, pricing, items)
+    checks = []
+    unpriced_people = pricing.proposal_professionals.map(&:professional).uniq
+      .select { |pro| !pro.cost_in_bdi? && pro.rate_man_hour.zero? && pro.rate_daily.zero? }
+    if unpriced_people.any?
+      checks << PricingCheck.new(label: "#{pluralize(unpriced_people.size, 'profissional', plural: 'profissionais')} sem valor de HH/diária", tab: "equipe", level: :warning)
+    end
+
+    unpriced_costs = items.sum { |item| item.costs.count { |cost| cost["unit_value"].to_d.zero? && cost["quantity"].to_d.positive? } }
+    checks << PricingCheck.new(label: "#{pluralize(unpriced_costs, 'custo', plural: 'custos')} sem valor unitário", tab: "itens", level: :warning) if unpriced_costs.positive?
+
+    pending_lodging = items.flat_map(&:field_campaigns).count(&:lodging_pending?)
+    checks << PricingCheck.new(label: "#{pluralize(pending_lodging, 'campo', plural: 'campos')} sem hospedagem escolhida", tab: "itens", level: :warning) if pending_lodging.positive?
+    checks << PricingCheck.new(label: "Distância sugere viagem aérea", tab: "itens", level: :warning) if pricing.long_distance?
+    checks.concat(field_days_checks(pricing, items))
+
+    if pricing.payment_percentage_total != 100
+      checks << PricingCheck.new(label: "Desembolso soma #{pricing.payment_percentage_total.to_s('F').sub(/\.0\z/, '')}%", tab: "pagamento", level: :warning)
+    end
+    if pricing.price_presentation != "total" && proposal.price_presentation_mode != pricing.price_presentation
+      checks << PricingCheck.new(label: "Quadro de preço não sai como escolhido", tab: "pagamento", level: :warning)
+    end
+    checks << PricingCheck.new(label: "Sem cronograma", tab: "cronograma", level: :info) if pricing.schedule_items.none?
+    checks
+  end
+
+  # Diárias da equipe × dias de campo, por item (2026-10, teste do fluxo completo: as duas coisas são
+  # digitadas em lugares diferentes e nada as amarrava — 48 diárias na equipe com um campo de 2 dias
+  # passava em silêncio). Diária pode cobrir os dias de viagem ou não, então vale qualquer valor entre
+  # pessoas × dias em campo e pessoas × (dias em campo + viagem).
+  def field_days_checks(pricing, items)
+    lines_by_item = pricing.proposal_professionals.group_by { |line| line.pricing_item_id || items.first&.id }
+    items.filter_map do |item|
+      team_days = lines_by_item.fetch(item.id, []).sum(&:field_days)
+      campaigns = item.field_campaigns
+      min_days = campaigns.sum { |campaign| campaign.people * campaign.days }
+      max_days = campaigns.sum { |campaign| campaign.people * (campaign.days + campaign.travel_days) }
+
+      if campaigns.any? && team_days.zero?
+        PricingCheck.new(label: "#{item.name}: tem campo, mas ninguém da equipe com diárias", tab: "itens", level: :warning)
+      elsif campaigns.empty? && team_days.positive?
+        PricingCheck.new(label: "#{item.name}: #{decimal_label(team_days)} diárias e nenhum campo (sem logística)", tab: "itens", level: :info)
+      elsif campaigns.any? && (team_days < min_days || team_days > max_days)
+        range = min_days == max_days ? decimal_label(min_days) : "#{decimal_label(min_days)} a #{decimal_label(max_days)}"
+        PricingCheck.new(label: "#{item.name}: #{decimal_label(team_days)} diárias na equipe, #{range} pessoa-dias nos campos", tab: "itens", level: :warning)
+      end
+    end
+  end
 end

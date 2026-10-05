@@ -12,7 +12,7 @@ class ReopenPricingTest < ApplicationSystemTestCase
   test "reabrir a proposta aprovada com motivo e voltar a editar" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
-    assert_text "Preço aprovado"
+    assert_text "Aprovado em"
     assert_no_button "Salvar e recalcular"
 
     find("summary", text: "Reabrir para ajuste").click

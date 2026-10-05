@@ -201,6 +201,15 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_equal pricing.reload.pricing_items.sum(&:total), pricing.total_value
   end
 
+  # 2026-10: "+ Criar item" da aba Equipe — com o nome digitado, volta pro grupo dele na Equipe.
+  test "add_team_item cria o item com o nome digitado e volta pra Equipe" do
+    pricing = @proposal.project_pricing
+    patch conversation_proposal_path(@conversation), params: { project_pricing: { bdi: "1.30" }, structure_action: "add_team_item", new_item_name: " Relatórios " }
+    item = pricing.pricing_items.reload.last
+    assert_equal "Relatórios", item.name
+    assert_redirected_to conversation_proposal_path(@conversation, anchor: "equipe-item-#{item.id}")
+  end
+
   test "structure buttons add and remove items, campaigns, costs and enterprises without losing the typed values" do
     pricing = @proposal.project_pricing
     base = { bdi: "1.30", tax_multiplier: "1.25" }
@@ -455,8 +464,9 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Topografia", response.body
   end
 
-  # 2026-09-30: linhas da mesma pessoa juntas (a 2ª com "↳") e Diretoria com "custo no BDI".
-  test "equipe agrupa as linhas da mesma pessoa e mostra quem tem custo no BDI" do
+  # 2026-09-30: linhas da mesma pessoa juntas e Diretoria com "custo no BDI". 2026-10: equipe agrupada
+  # por item, com o custo do item no cabeçalho do grupo.
+  test "equipe agrupa por item, mantém juntas as linhas da mesma pessoa e mostra quem tem custo no BDI" do
     pricing = @conversation.proposal.project_pricing
     biologa = professionals(:biologa)
     diretora = professionals(:diretora)
@@ -471,8 +481,15 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     biologa_rows = names.each_index.select { |i| names[i].include?(biologa.name.split.first) }
     assert_equal 2, biologa_rows.size
     assert_equal 1, biologa_rows.last - biologa_rows.first, "as duas linhas da bióloga ficam juntas"
-    assert_includes names[biologa_rows.last], "↳"
     assert_select "tr[data-pricing-preview-target='line']", text: /custo no BDI/
+
+    second = pricing.pricing_items.create!(name: "Relatórios", position: 9)
+    pricing.proposal_professionals.create!(professional: biologa, deliverable_name: "Relatório do item 2", pricing_item: second, man_hours: 10)
+    get conversation_proposal_path(@conversation)
+    assert_select "[data-item-team-total='#{second.id}']", text: ActiveSupport::NumberHelper.number_to_currency(10 * biologa.rate_man_hour, unit: "R$", separator: ",", delimiter: ".")
+    group = css_select("tbody").find { |tbody| tbody.text.squish.start_with?("Relatórios ") }
+    assert group, "o item 2 tem cabeçalho próprio"
+    assert group.at_css("input[value='Relatório do item 2']"), "a linha do item 2 fica no grupo dele"
   end
 
   # 2026-09-30: precificação espelhando a lista de preços do cliente.

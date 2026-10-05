@@ -1,0 +1,25 @@
+<%# Valores unitários da logística (aba "Itens e campo"), recolhidos: são os padrões da Papyrus e
+    quase nunca mudam por proposta. Campos dentro de <details> fechado continuam indo no envio.
+    locals: form (#pricing-form), pricing, editable %>
+<details class="group bg-base-100 rounded-box border border-base-300 shadow-sm">
+  <summary class="flex items-center gap-2 px-6 py-4 cursor-pointer list-none">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/40 -rotate-90 group-open:rotate-0 transition-transform"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+    <span class="font-semibold text-base-content">Valores unitários da logística</span>
+    <span class="text-sm text-base-content/50">· carro, 4x4, hospedagem padrão, alimentação, combustível e extras</span>
+  </summary>
+  <div class="px-6 pb-5">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <% [ [ :rental_per_day, "Carro", "diária" ], [ :rental_4x4_per_day, "4x4", "diária" ],
+           [ :lodging_per_person_per_night, "Hospedagem padrão", "pessoa/noite, campo sem hospedagem escolhida" ], [ :meal_per_person_per_day, "Alimentação", "pessoa/dia" ],
+           [ :fuel_price_per_liter, "Combustível", "litro" ], [ :toll_price, "Pedágio", "unidade" ],
+           [ :wash_price, "Lavagem", "unidade" ], [ :uber_price, "Uber", "corrida" ],
+           [ :mateiro_per_day, "Mateiro", "dia (com alimentação)" ], [ :epi_price, "EPI/ASO", "kit" ] ].each do |attribute, label, unit| %>
+        <fieldset class="fieldset p-0">
+          <legend class="fieldset-legend pt-0"><%= label %></legend>
+          <%= pricing_number_field form, attribute, prefix: "R$", step: "any", min: 0, disabled: !editable %>
+          <p class="label"><%= unit %></p>
+        </fieldset>
+      <% end %>
+    </div>
+  </div>
+</details>

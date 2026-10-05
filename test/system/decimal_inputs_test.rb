@@ -12,14 +12,17 @@ class DecimalInputsTest < ApplicationSystemTestCase
   test "campos decimais da precificação aceitam valor quebrado" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
+    open_pricing_tab "itens"
 
     find("input[name='project_pricing[distance_km]']").set("429.9")
     find("input[name='project_pricing[vehicle_consumption_km_per_liter]']").set("10.35")
+    open_pricing_tab "equipe"
     line = proposal_professionals(:coordenacao_line)
     within("tr", text: line.professional.name) { find("input[name$='[man_hours]']").set("12.25") }
     click_button "Salvar e recalcular"
 
     assert_no_text "Selecione um valor válido"
+    open_pricing_tab "itens"
     assert_selector "input[name='project_pricing[distance_km]'][value='429.9']"
     assert_equal 429.9, @proposal.project_pricing.reload.distance_km.to_f
     assert_equal 10.35, @proposal.project_pricing.vehicle_consumption_km_per_liter.to_f

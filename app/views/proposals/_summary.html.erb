@@ -1,75 +1,41 @@
-<%# Resumo lateral + ações. Fica FORA do form principal: "Salvar e recalcular" se liga a ele pelo
-    atributo `form=`, e "Aprovar preço" (button_to) tem o próprio form. locals: pricing, proposal,
-    conversation, editable %>
+<%# Composição do preço, na lateral. Fica FORA do form principal; BDI e impostos são editados
+    aqui mesmo (2026-10, remodelagem — é onde eles mudam o preço) e se ligam ao #pricing-form pelo
+    atributo `form=`. Total e ações ficam na barra do topo (proposals/_action_bar).
+    locals: pricing, editable %>
+<%# Composição (2026-09-30, pedido do cliente: "deixar o valor puro e aplicar embaixo — alguns clientes
+    querem saber HH, logística, BDI e impostos separados"): as partes aparecem SEM margem, e BDI e
+    impostos entram como linhas próprias. A conta não mudou (ProjectPricing#price_composition fecha
+    centavo a centavo com total_value); só a forma de mostrar. %>
+<% c = pricing.price_composition %>
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
-  <div class="px-6 pt-5 pb-4">
-    <div class="flex items-center justify-between gap-2">
-      <p class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Total da proposta</p>
-      <span class="badge badge-warning badge-soft badge-sm" data-pricing-preview-target="dirty" hidden title="Os valores mudam na hora enquanto você edita; clique em Salvar e recalcular para gravar">Prévia · não salvo</span>
-    </div>
-    <p class="font-display text-3xl font-bold text-primary tabular-nums mt-1" data-pricing-preview-target="summaryTotal"><%= brl(pricing.total_value) %></p>
-  </div>
-
-  <%# Composição (2026-09-30, pedido do cliente: "deixar o valor puro e aplicar embaixo — alguns clientes
-      querem saber HH, logística, BDI e impostos separados"): as partes aparecem SEM margem, e BDI e
-      impostos entram como linhas próprias. A conta não mudou (ProjectPricing#price_composition fecha
-      centavo a centavo com total_value); só a forma de mostrar. %>
-  <% c = pricing.price_composition %>
-  <dl class="border-t border-base-300 px-6 py-4 flex flex-col gap-2 text-sm">
+  <dl class="px-5 py-4 flex flex-col gap-2 text-sm">
     <dt class="text-xs uppercase tracking-wide text-base-content/50 font-semibold">Composição do preço</dt>
     <%= render "proposals/composition_row", label: "Equipe", value: c[:team], target: "summaryTeam" %>
     <%= render "proposals/composition_row", label: "Logística dos campos", value: c[:logistics], target: "summaryLogistics" %>
     <%= render "proposals/composition_row", label: "Custos dos itens", value: c[:item_costs], target: "summaryItemCosts" %>
     <%= render "proposals/composition_row", label: "Custo direto", value: c[:direct], target: "summaryDirect", strong: true %>
-    <%= render "proposals/composition_row", label: "+ BDI", value: c[:bdi], target: "summaryBdi", hint: "(× #{number_with_precision(pricing.bdi, precision: 2, separator: ',')})", hint_target: "summaryBdiRate" %>
-    <%= render "proposals/composition_row", label: "+ Impostos e ADM", value: c[:taxes], target: "summaryTaxes", hint: "(× #{number_with_precision(pricing.tax_multiplier, precision: 2, separator: ',')})", hint_target: "summaryTaxRate" %>
+
+    <% [ [ :bdi, "+ BDI", c[:bdi], "summaryBdi" ], [ :tax_multiplier, "+ Impostos/ADM", c[:taxes], "summaryTaxes" ] ].each do |attribute, label, value, target| %>
+      <div class="flex items-center justify-between gap-2">
+        <dt class="text-base-content/70 whitespace-nowrap"><%= label %></dt>
+        <label class="input input-xs w-[4.5rem] shrink-0 <%= 'input-disabled' unless editable %>" title="Multiplicador (1,30 = +30%)">
+          <%= number_field_tag "project_pricing[#{attribute}]", decimal_input(pricing.public_send(attribute)), id: "pricing_#{attribute}", form: "pricing-form",
+                step: "any", min: 0, disabled: !editable, autocomplete: "off", class: "grow text-right tabular-nums", aria: { label: label.delete_prefix("+ ") } %>
+          <span class="text-base-content/40">×</span>
+        </label>
+        <dd class="ml-auto tabular-nums text-base-content whitespace-nowrap" data-pricing-preview-target="<%= target %>"><%= brl(value) %></dd>
+      </div>
+    <% end %>
+
     <% if c[:external].positive? %>
       <%= render "proposals/composition_row", label: "+ Custos externos", value: c[:external], hint: "(repasse)" %>
     <% end %>
     <% if c[:outsourced].positive? %>
       <%= render "proposals/composition_row", label: "+ Terceirizados", value: c[:outsourced], hint: "(repasse)" %>
     <% end %>
-    <%= render "proposals/composition_row", label: "= Total", value: pricing.total_value, target: "compositionTotal", strong: true %>
+    <div class="border-t-2 border-base-content/70 pt-2 mt-1 flex justify-between gap-3 font-display font-bold text-base text-base-content">
+      <dt>Total</dt>
+      <dd class="tabular-nums" data-pricing-preview-target="compositionTotal"><%= brl(pricing.total_value) %></dd>
+    </div>
   </dl>
-
-  <div class="border-t border-base-300 px-6 py-4">
-    <p class="text-xs uppercase tracking-wide text-base-content/50 font-semibold mb-2">Desembolso</p>
-    <ul class="flex flex-col gap-1.5 text-sm">
-      <% pricing.payment_schedule_amounts.each do |item| %>
-        <li class="flex justify-between gap-3">
-          <span class="text-base-content/60 min-w-0 truncate">
-            <%= item["label"] %> · <%= item["percentage"] %>%<%= " · #{Date.parse(item["date"]).strftime("%d/%m/%Y")}" if item["date"].present? %>
-          </span>
-          <span class="text-base-content tabular-nums shrink-0" data-pricing-preview-target="installment" data-percentage="<%= item["percentage"] %>"><%= brl(item["amount"]) %></span>
-        </li>
-      <% end %>
-    </ul>
-  </div>
-
-  <div class="border-t border-base-300 px-6 py-4 flex flex-col gap-2">
-    <% if editable %>
-      <button type="submit" form="pricing-form" class="btn btn-primary w-full">Salvar e recalcular</button>
-      <%= button_to "Aprovar preço", approve_conversation_proposal_path(conversation), method: :post,
-            class: "btn btn-success btn-outline w-full",
-            form: { data: { turbo_confirm: "Aprovar o preço de #{brl(pricing.total_value)}? Isso trava a precificação e conclui a proposta." } } %>
-      <p class="text-xs text-base-content/50 text-center">Salve antes de aprovar — alterações não salvas não entram.</p>
-    <% else %>
-      <div class="alert alert-success alert-soft text-sm">
-        <span>
-          Preço aprovado<%= " em #{l(proposal.approved_at, format: '%d/%m/%Y')}" if proposal.approved_at %>. Proposta concluída.
-        </span>
-      </div>
-      <%# Reabrir (2026-09-27): o cliente às vezes pede mudança depois da aprovação. %>
-      <details class="group">
-        <summary class="btn btn-ghost btn-sm w-full list-none">Reabrir para ajuste</summary>
-        <%= form_with url: reopen_conversation_proposal_path(conversation), method: :post, class: "flex flex-col gap-2 mt-2" do |reopen_form| %>
-          <%= reopen_form.text_area :reason, rows: 2, class: "textarea textarea-sm w-full",
-                placeholder: "Motivo (opcional) — ex.: cliente pediu incluir campanha de fauna" %>
-          <%= reopen_form.submit "Reabrir precificação", class: "btn btn-warning btn-sm w-full",
-                data: { turbo_confirm: "Reabrir a precificação aprovada de #{brl(pricing.total_value)}? A proposta volta a ser editável e precisa ser aprovada de novo." } %>
-          <p class="text-xs text-base-content/50">O preço aprovado fica registrado. Documentos já gerados não mudam; a próxima geração sai como nova revisão.</p>
-        <% end %>
-      </details>
-    <% end %>
-  </div>
 </section>

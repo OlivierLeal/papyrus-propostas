@@ -21,6 +21,27 @@ class ProposalProfessionalsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 10 * professionals(:inativo).rate_man_hour * @pricing.bdi * @pricing.tax_multiplier, line.subtotal
   end
 
+  # 2026-10: "+ Novo item…" no "Adicionar à equipe" cria o item junto com a linha.
+  test "create com item novo cria o item e põe a linha nele; sem nome, não cria nada" do
+    assert_difference [ "@pricing.pricing_items.count", "@pricing.proposal_professionals.count" ], 1 do
+      post conversation_proposal_proposal_professionals_path(@conversation), params: {
+        proposal_professional: { professional_id: professionals(:biologa).id, deliverable_name: "Fauna", pricing_item_id: "new", man_hours: "8", field_days: "0" },
+        new_item_name: "  Diagnóstico de Fauna  "
+      }
+    end
+    item = @pricing.pricing_items.order(:position).last
+    assert_equal "Diagnóstico de Fauna", item.name
+    assert_equal item, @pricing.proposal_professionals.order(:id).last.pricing_item
+
+    assert_no_difference [ "@pricing.pricing_items.count", "@pricing.proposal_professionals.count" ] do
+      post conversation_proposal_proposal_professionals_path(@conversation), params: {
+        proposal_professional: { professional_id: professionals(:biologa).id, deliverable_name: "Fauna", pricing_item_id: "new", man_hours: "8", field_days: "0" },
+        new_item_name: ""
+      }
+    end
+    assert_equal "Informe o nome do novo item", flash[:alert]
+  end
+
   test "create rejects a line with no deliverable_name" do
     assert_no_difference "@pricing.proposal_professionals.count" do
       post conversation_proposal_proposal_professionals_path(@conversation), params: {

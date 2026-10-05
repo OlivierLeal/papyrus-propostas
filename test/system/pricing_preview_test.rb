@@ -45,6 +45,7 @@ class PricingPreviewTest < ApplicationSystemTestCase
   test "mudar um campo atualiza o custo dele, o item, a logística e o total — igual ao que o servidor grava" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
+    open_pricing_tab "itens"
 
     campaign_row = find("[data-pricing-preview-target='campaign']")
     within(campaign_row) do
@@ -72,6 +73,7 @@ class PricingPreviewTest < ApplicationSystemTestCase
   test "deslocamento até a hospedagem alonga o campo e as diárias da equipe, igual ao servidor" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
+    open_pricing_tab "itens"
 
     campaign_row = find("[data-pricing-preview-target='campaign']")
     within(campaign_row) do
@@ -80,6 +82,7 @@ class PricingPreviewTest < ApplicationSystemTestCase
       find("input[data-field='commute_hours']").fill_in(with: "2")
       assert_selector "[data-role='commute-note']", text: "2 → 4 dias em campo"
     end
+    open_pricing_tab "equipe"
     within("tr", text: proposal_professionals(:fauna_flora_line).professional.name) do
       assert_selector "[data-role='commute-extra']", text: "+48 desloc."
     end

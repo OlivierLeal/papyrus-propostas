@@ -1,12 +1,20 @@
 <%# Equipe da proposta. locals: form (form principal, #pricing-form), pricing, editable,
     conversation, professionals (ativos, pra busca de "Adicionar à equipe"). %>
 <% days_factors = pricing.days_factors %>
-<%# As linhas da mesma pessoa ficam juntas (a 1ª com nome e avatar, as outras com "↳"): uma pessoa pode
-    ter uma linha por item, e espalhadas pareciam gente repetida. %>
+<%# Linhas agrupadas pelo item da proposta (2026-10, remodelagem): cada grupo tem cabeçalho com o
+    custo da equipe do item. Com um item só, sem cabeçalho. Linha sem item cai no primeiro (é o que o
+    servidor faz, ProjectPricing#default_item). Dentro do item, a equipe fixa vem primeiro e as linhas
+    da mesma pessoa ficam juntas. %>
+<% items = pricing.pricing_items.to_a %>
+<% item_ids = items.map(&:id) %>
 <% first_id = pricing.proposal_professionals.group_by(&:professional_id).transform_values { |ls| ls.map(&:id).min } %>
-<% lines = pricing.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, first_id[line.professional_id], line.id ] } %>
+<% lines = pricing.proposal_professionals.sort_by { |line| [ item_ids.index(line.pricing_item_id) || 0, line.professional.always_included ? 0 : 1, first_id[line.professional_id], line.id ] } %>
+<% by_item = lines.group_by { |line| items[item_ids.index(line.pricing_item_id) || 0] } %>
+<% show_groups = items.size > 1 %>
+<%# Com vários itens, todos aparecem — inclusive os que ainda não têm ninguém. %>
+<% groups = show_groups ? items.map { |item| [ item, by_item.fetch(item, []) ] } : by_item.to_a %>
 <% sem_valor = lines.map(&:professional).uniq.select { |pro| !pro.cost_in_bdi? && pro.rate_man_hour.zero? && pro.rate_daily.zero? } %>
-<% item_options = pricing.pricing_items.map { |item| [ item.name, item.id ] } %>
+<% item_options = items.map { |item| [ item.name, item.id ] } %>
 
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
   <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5 pb-4">
@@ -20,6 +28,19 @@
       <span class="badge badge-ghost"><span data-pricing-preview-target="teamDays"><%= number_with_delimiter(lines.sum(&:field_days).to_f.round(1), delimiter: ".", separator: ",") %></span> diárias</span>
     </div>
   </div>
+
+  <%# Itens da proposta também se criam daqui (2026-10): a equipe é a 1ª etapa, e o item (estudo, etapa
+      ou item da lista do cliente) é onde a equipe, os campos e os custos se penduram. O nome já vai
+      junto; o grupo novo aparece vazio, pronto pra receber gente. %>
+  <% if editable %>
+    <div class="flex flex-wrap items-center gap-2 px-6 pb-4 text-sm" data-controller="enter-clicks">
+      <span class="text-base-content/60"><%= pluralize(items.size, "item", plural: "itens") %> na proposta.</span>
+      <%= text_field_tag "new_item_name", nil, id: "team_new_item_name", autocomplete: "off", placeholder: "Nome do novo item, ex.: Diagnóstico de Fauna",
+            class: "input input-sm w-72", aria: { label: "Nome do novo item" }, data: { action: "keydown->enter-clicks#press" } %>
+      <%= tag.button("+ Criar item", type: "submit", name: "structure_action", value: "add_team_item", class: "btn btn-outline btn-primary btn-sm",
+            data: { enter_clicks_target: "button" }) %>
+    </div>
+  <% end %>
 
   <% if sem_valor.any? %>
     <div role="alert" class="alert alert-warning alert-soft mx-6 mb-4 text-sm">
@@ -37,106 +58,127 @@
       <thead>
         <tr class="bg-base-200/60 text-xs uppercase tracking-wide text-base-content/50">
           <th class="font-semibold">Profissional</th>
-          <th class="font-semibold">Entregável</th>
-          <th class="font-semibold">Item</th>
+          <th class="font-semibold"><%= show_groups ? "Entregável · item" : "Entregável" %></th>
           <th class="font-semibold text-right">Horas-homem</th>
           <th class="font-semibold text-right">Diárias</th>
           <th class="font-semibold text-right" title="Sem BDI nem impostos">Custo</th>
           <th class="w-1"></th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-base-300">
-        <%= form.fields_for :proposal_professionals, lines do |pp_form| %>
-          <% line = pp_form.object %>
-          <% professional = line.professional %>
-          <% continuation = pp_form.index.positive? && lines[pp_form.index - 1].professional_id == line.professional_id %>
-          <% per_unit = line.per_unit? %>
-          <% unit_qty = per_unit ? line.pricing_item.client_quantity.to_f : nil %>
-          <tr class="align-top hover:bg-base-200/30 <%= "border-t-0" if continuation %>" data-pricing-preview-target="line" data-unit-qty="<%= unit_qty %>"
-              data-rate-hour="<%= professional.rate_man_hour.to_f %>" data-rate-day="<%= professional.rate_daily.to_f %>">
-            <td class="min-w-44">
-              <%= pp_form.hidden_field :id %>
-              <% if continuation %>
-                <div class="pl-12 pt-2 text-xs text-base-content/50" title="<%= professional.name %> — outra linha da mesma pessoa">↳ <%= professional.name.split.first %></div>
-              <% else %>
-              <div class="flex items-center gap-3">
-                <div class="size-9 rounded-full <%= professional.always_included ? "bg-info/15 text-info" : "bg-primary/10 text-primary" %> text-xs font-semibold flex items-center justify-center shrink-0">
-                  <%= initials(professional.name) %>
+      <% groups.each do |item, group_lines| %>
+        <tbody id="equipe-item-<%= item.id %>" class="divide-y divide-base-300 border-t border-base-300 scroll-mt-40">
+          <% if show_groups %>
+            <tr class="bg-base-200/50">
+              <td colspan="6" class="py-2">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span class="font-display font-semibold text-sm text-base-content"><%= item.name %></span>
+                  <% if item.mirrored? %>
+                    <span class="badge badge-soft badge-primary badge-xs">Planilha do cliente · <%= item.client_label %></span>
+                  <% end %>
+                  <span class="ml-auto text-xs text-base-content/60 tabular-nums">
+                    <%= pluralize(group_lines.map(&:professional_id).uniq.size, "pessoa", plural: "pessoas") %> ·
+                    <strong class="text-base-content" data-item-team-total="<%= item.id %>"><%= brl(group_lines.sum { |line| line.direct_cost(days_factors[line.pricing_item_id]) }.round(2)) %></strong>
+                  </span>
                 </div>
-                <div class="min-w-0">
-                  <div class="font-medium text-base-content flex items-center gap-1.5">
-                    <span class="truncate"><%= professional.name %></span>
-                    <% if professional.always_included %>
-                      <span class="badge badge-soft badge-info badge-xs">Fixo</span>
-                    <% end %>
+              </td>
+            </tr>
+          <% end %>
+          <% if group_lines.empty? %>
+            <tr><td colspan="6" class="text-sm text-base-content/50 py-3">Ninguém neste item ainda — escolha-o em "Adicionar à equipe", logo abaixo.</td></tr>
+          <% end %>
+          <%= form.fields_for :proposal_professionals, group_lines do |pp_form| %>
+            <% line = pp_form.object %>
+            <% professional = line.professional %>
+            <% per_unit = line.per_unit? %>
+            <% unit_qty = per_unit ? line.pricing_item.client_quantity.to_f : nil %>
+            <tr class="align-top hover:bg-base-200/30" data-pricing-preview-target="line" data-unit-qty="<%= unit_qty %>"
+                data-rate-hour="<%= professional.rate_man_hour.to_f %>" data-rate-day="<%= professional.rate_daily.to_f %>">
+              <td class="min-w-44">
+                <%= pp_form.hidden_field :id %>
+                <div class="flex items-center gap-3">
+                  <div class="size-9 rounded-full <%= professional.always_included ? "bg-info/15 text-info" : "bg-primary/10 text-primary" %> text-xs font-semibold flex items-center justify-center shrink-0">
+                    <%= initials(professional.name) %>
                   </div>
-                  <div class="text-xs text-base-content/60 truncate max-w-44"><%= professional.role %></div>
+                  <div class="min-w-0">
+                    <div class="font-medium text-base-content flex items-center gap-1.5">
+                      <span class="truncate"><%= professional.name %></span>
+                      <% if professional.always_included %>
+                        <span class="badge badge-soft badge-info badge-xs">Fixo</span>
+                      <% end %>
+                    </div>
+                    <div class="text-xs text-base-content/60 truncate max-w-44"><%= professional.role %></div>
+                  </div>
                 </div>
-              </div>
-              <% end %>
-            </td>
-            <td class="min-w-40">
-              <%= pp_form.text_field :deliverable_name, disabled: !editable, class: "input input-sm w-full", required: true %>
-            </td>
-            <td class="min-w-52">
-              <%= pp_form.select :pricing_item_id, item_options, {}, disabled: !editable, class: "select select-sm w-full",
-                    data: { role: "line-item" } %>
-            </td>
-            <td class="text-right">
-              <% if per_unit %>
-                <%= pp_form.number_field :man_hours_per_unit, value: decimal_input(line.man_hours_per_unit), step: "any", min: 0, disabled: !editable, autocomplete: "off",
-                      class: "input input-sm w-20 text-right tabular-nums", title: "Horas-homem por #{line.pricing_item.client_unit.presence || 'unidade'} do cliente" %>
-                <div class="text-[11px] mt-0.5 whitespace-nowrap text-primary" data-role="per-unit-hours">por unid. · total <%= decimal_label(line.man_hours) %></div>
-              <% else %>
-                <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
-                      class: "input input-sm w-20 text-right tabular-nums" %>
-              <% end %>
-              <% if professional.cost_in_bdi? %>
-                <div class="text-xs mt-1 whitespace-nowrap text-base-content/50" title="Custo incluso no BDI — sem valor de hora-homem/diária">custo no BDI</div>
-              <% else %>
-                <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_man_hour.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_man_hour) %>/h</div>
-              <% end %>
-            </td>
-            <td class="text-right">
-              <% if per_unit %>
-                <%= pp_form.number_field :field_days_per_unit, value: decimal_input(line.field_days_per_unit), step: "any", min: 0, disabled: !editable, autocomplete: "off",
-                      class: "input input-sm w-20 text-right tabular-nums", title: "Diárias por #{line.pricing_item.client_unit.presence || 'unidade'} do cliente" %>
-                <div class="text-[11px] mt-0.5 whitespace-nowrap text-primary" data-role="per-unit-days">por unid. · total <%= decimal_label(line.field_days) %></div>
-              <% else %>
-                <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
-                      class: "input input-sm w-20 text-right tabular-nums" %>
-              <% end %>
-              <% unless professional.cost_in_bdi? %>
-                <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
-              <% end %>
-              <% extra = line.commute_extra_days(days_factors[line.pricing_item_id]) %>
-              <%= tag.div("+#{decimal_label(extra)} desloc.", class: "text-xs mt-0.5 whitespace-nowrap text-info", hidden: !extra.positive?,
-                    data: { role: "commute-extra" }, title: "Hospedagem longe da área alonga os campos do item — as diárias crescem na mesma proporção") %>
-            </td>
-            <td class="text-right font-medium text-base-content tabular-nums whitespace-nowrap pt-5" data-role="subtotal"><%= brl(line.direct_cost(days_factors[line.pricing_item_id]).round(2)) %></td>
-            <td class="text-right pt-4">
-              <% if editable && line.removable? %>
-                <%= link_to conversation_proposal_proposal_professional_path(conversation, line),
-                      class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover da equipe",
-                      data: { turbo_method: :delete, turbo_confirm: "Remover #{professional.name} (#{line.deliverable_name}) da equipe?" } do %>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" /></svg>
+              </td>
+              <td class="min-w-40 w-full">
+                <%= pp_form.text_field :deliverable_name, disabled: !editable, class: "input input-sm w-full", required: true, aria: { label: "Entregável" } %>
+                <%# Item da linha: com vários, um seletor discreto embaixo (o grupo já diz o item; serve pra
+                    mover a linha). Com um só, campo escondido — a prévia ao vivo lê o item daqui. %>
+                <% if show_groups %>
+                  <%= pp_form.select :pricing_item_id, item_options, {}, disabled: !editable, class: "select select-xs select-ghost w-full mt-1 text-base-content/60",
+                        title: "Mover a linha para outro item", data: { role: "line-item" } %>
+                <% else %>
+                  <%= pp_form.hidden_field :pricing_item_id, data: { role: "line-item" } %>
                 <% end %>
-              <% elsif professional.always_included %>
-                <span class="tooltip tooltip-left inline-flex p-1 text-base-content/30" data-tip="Equipe fixa — não pode ser removida">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4" aria-label="Equipe fixa"><path fill-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" clip-rule="evenodd" /></svg>
-                </span>
-              <% end %>
-            </td>
-          </tr>
-        <% end %>
-        <% if lines.empty? %>
-          <tr><td colspan="7" class="text-center text-base-content/50 py-8">Nenhum profissional na equipe ainda.</td></tr>
-        <% end %>
-      </tbody>
+              </td>
+              <td class="text-right">
+                <% if per_unit %>
+                  <%= pp_form.number_field :man_hours_per_unit, value: decimal_input(line.man_hours_per_unit), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                        class: "input input-sm w-20 text-right tabular-nums", title: "Horas-homem por #{line.pricing_item.client_unit.presence || 'unidade'} do cliente" %>
+                  <div class="text-[11px] mt-0.5 whitespace-nowrap text-primary" data-role="per-unit-hours">por unid. · total <%= decimal_label(line.man_hours) %></div>
+                <% else %>
+                  <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                        class: "input input-sm w-20 text-right tabular-nums" %>
+                <% end %>
+                <% if professional.cost_in_bdi? %>
+                  <div class="text-xs mt-1 whitespace-nowrap text-base-content/50" title="Custo incluso no BDI — sem valor de hora-homem/diária">custo no BDI</div>
+                <% else %>
+                  <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_man_hour.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_man_hour) %>/h</div>
+                <% end %>
+              </td>
+              <td class="text-right">
+                <% if per_unit %>
+                  <%= pp_form.number_field :field_days_per_unit, value: decimal_input(line.field_days_per_unit), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                        class: "input input-sm w-20 text-right tabular-nums", title: "Diárias por #{line.pricing_item.client_unit.presence || 'unidade'} do cliente" %>
+                  <div class="text-[11px] mt-0.5 whitespace-nowrap text-primary" data-role="per-unit-days">por unid. · total <%= decimal_label(line.field_days) %></div>
+                <% else %>
+                  <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                        class: "input input-sm w-20 text-right tabular-nums" %>
+                <% end %>
+                <% unless professional.cost_in_bdi? %>
+                  <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
+                <% end %>
+                <% extra = line.commute_extra_days(days_factors[line.pricing_item_id]) %>
+                <%= tag.div("+#{decimal_label(extra)} desloc.", class: "text-xs mt-0.5 whitespace-nowrap text-info", hidden: !extra.positive?,
+                      data: { role: "commute-extra" }, title: "Hospedagem longe da área alonga os campos do item — as diárias crescem na mesma proporção") %>
+              </td>
+              <td class="text-right font-medium text-base-content tabular-nums whitespace-nowrap pt-5" data-role="subtotal"><%= brl(line.direct_cost(days_factors[line.pricing_item_id]).round(2)) %></td>
+              <td class="text-right pt-4">
+                <% if editable && line.removable? %>
+                  <%= link_to conversation_proposal_proposal_professional_path(conversation, line),
+                        class: "btn btn-ghost btn-xs btn-square text-error", title: "Remover da equipe",
+                        data: { turbo_method: :delete, turbo_confirm: "Remover #{professional.name} (#{line.deliverable_name}) da equipe?" } do %>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" /></svg>
+                  <% end %>
+                <% elsif professional.always_included %>
+                  <span class="tooltip tooltip-left inline-flex p-1 text-base-content/30" data-tip="Equipe fixa — não pode ser removida">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4" aria-label="Equipe fixa"><path fill-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" clip-rule="evenodd" /></svg>
+                  </span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      <% end %>
+      <% if lines.empty? %>
+        <tbody>
+          <tr><td colspan="6" class="text-center text-base-content/50 py-8">Nenhum profissional na equipe ainda.</td></tr>
+        </tbody>
+      <% end %>
       <% if lines.any? %>
         <tfoot>
           <tr class="bg-base-200/40 text-sm text-base-content">
-            <td colspan="3" class="font-semibold">Total da equipe</td>
+            <td colspan="2" class="font-semibold">Total da equipe</td>
             <td class="text-right tabular-nums" data-pricing-preview-target="teamHours"><%= number_with_delimiter(lines.sum(&:man_hours).to_f.round(1), delimiter: ".", separator: ",") %> HH</td>
             <td class="text-right tabular-nums" data-pricing-preview-target="teamDays"><%= number_with_delimiter(lines.sum(&:field_days).to_f.round(1), delimiter: ".", separator: ",") %></td>
             <td class="text-right font-semibold tabular-nums whitespace-nowrap" data-pricing-preview-target="teamTotal"><%= brl(lines.sum { |line| line.direct_cost(days_factors[line.pricing_item_id]) }.round(2)) %></td>
@@ -153,8 +195,8 @@
          data-controller="professional-picker"
          data-professional-picker-professionals-value="<%= professionals.map { |p| { id: p.id, name: p.name, role: p.role, specialties: p.specialties, fixed: p.always_included, rate: (p.rate_man_hour.positive? ? "#{brl(p.rate_man_hour)}/h" : nil) } }.to_json %>">
       <h3 class="text-sm font-semibold text-base-content mb-3">Adicionar à equipe</h3>
-      <div class="grid gap-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,0.9fr)_6.5rem_6rem_auto] items-end">
-        <fieldset class="fieldset p-0 relative">
+      <div class="grid gap-3 sm:grid-cols-6 items-end">
+        <fieldset class="fieldset p-0 relative sm:col-span-3">
           <legend class="fieldset-legend pt-0">Profissional</legend>
           <input type="text" autocomplete="off" placeholder="Buscar por nome, cargo ou especialidade..."
                  class="input input-sm w-full"
@@ -172,16 +214,22 @@
           <%= hidden_field_tag "proposal_professional[professional_id]", nil, form: "add-member-form", data: { professional_picker_target: "hiddenId" } %>
         </fieldset>
 
-        <fieldset class="fieldset p-0">
+        <fieldset class="fieldset p-0 sm:col-span-3">
           <legend class="fieldset-legend pt-0">Entregável</legend>
           <%= text_field_tag "proposal_professional[deliverable_name]", nil, form: "add-member-form", required: true,
                 placeholder: "Ex.: Diagnóstico de Flora", class: "input input-sm w-full",
                 data: { professional_picker_target: "deliverable" } %>
         </fieldset>
 
-        <fieldset class="fieldset p-0">
+        <%# Item da pessoa — ou um item novo, criado junto (ProposalProfessionalsController#create). %>
+        <fieldset class="fieldset p-0 sm:col-span-2" data-controller="new-item">
           <legend class="fieldset-legend pt-0">Item</legend>
-          <%= select_tag "proposal_professional[pricing_item_id]", options_for_select(item_options), form: "add-member-form", class: "select select-sm w-full" %>
+          <%= select_tag "proposal_professional[pricing_item_id]", options_for_select(item_options + [ [ "+ Novo item…", "new" ] ]), form: "add-member-form",
+                class: "select select-sm w-full", data: { new_item_target: "select", action: "new-item#toggle" } %>
+          <div data-new-item-target="name" hidden>
+            <%= text_field_tag "new_item_name", nil, id: "member_new_item_name", form: "add-member-form", autocomplete: "off", placeholder: "Nome do novo item, ex.: Diagnóstico de Fauna",
+                  class: "input input-sm w-full mt-1", aria: { label: "Nome do novo item" } %>
+          </div>
         </fieldset>
 
         <fieldset class="fieldset p-0">
@@ -194,7 +242,7 @@
           <%= number_field_tag "proposal_professional[field_days]", 0, form: "add-member-form", step: "any", min: 0, class: "input input-sm w-full text-right" %>
         </fieldset>
 
-        <button type="submit" form="add-member-form" class="btn btn-primary btn-sm" disabled
+        <button type="submit" form="add-member-form" class="btn btn-primary btn-sm sm:col-span-2" disabled
                 data-professional-picker-target="submit">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
           Adicionar à equipe

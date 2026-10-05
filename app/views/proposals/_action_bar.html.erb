@@ -1,0 +1,67 @@
+<%# Barra fixa da Tela de Precificação (2026-10, remodelagem): nome, total e as ações principais
+    sempre à vista — antes ficavam no fim do resumo lateral, longe de onde se edita. Fica FORA do
+    form principal: "Salvar e recalcular" se liga a ele pelo atributo `form=`, e "Aprovar preço"
+    (button_to) tem o próprio form. locals: pricing, proposal, conversation, editable %>
+<%
+  status_label, status_class = {
+    "draft" => [ "Rascunho", "badge-warning" ],
+    "priced" => [ "Precificado", "badge-info" ],
+    "approved" => [ "Aprovado", "badge-success" ]
+  }.fetch(proposal.status, [ proposal.status, "badge-ghost" ])
+%>
+<header class="sticky top-0 z-10 bg-base-100/95 backdrop-blur border-b border-base-300">
+  <div class="flex flex-wrap items-center gap-x-5 gap-y-3 px-4 lg:px-8 py-3">
+    <%= link_to conversation_path(conversation), class: "btn btn-ghost btn-sm btn-square", title: "Voltar para a proposta" do %>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
+      </svg>
+    <% end %>
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-2">
+        <h1 class="font-display text-xl font-bold text-base-content leading-tight">Precificação</h1>
+        <span class="badge badge-soft badge-sm <%= status_class %>"><%= status_label %></span>
+      </div>
+      <p class="text-sm text-base-content/60 truncate">
+        <span class="font-mono"><%= proposal.docx_numero_proposta %></span> ·
+        <%= conversation.client_name %> · <%= conversation.study_types_label %>
+      </p>
+    </div>
+
+    <div class="text-right">
+      <p class="text-[11px] uppercase tracking-wide text-base-content/50 font-semibold flex items-center justify-end gap-2">
+        <span class="badge badge-warning badge-soft badge-xs normal-case tracking-normal" data-pricing-preview-target="dirty" hidden
+              title="Os valores mudam na hora enquanto você edita; clique em Salvar e recalcular para gravar">Prévia · não salvo</span>
+        Total da proposta
+      </p>
+      <p class="font-display text-2xl font-bold text-base-content tabular-nums leading-tight" data-pricing-preview-target="summaryTotal"><%= brl(pricing.total_value) %></p>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <% if editable %>
+        <button type="submit" form="pricing-form" class="btn btn-primary btn-sm">Salvar e recalcular</button>
+        <%= button_to "Aprovar preço", approve_conversation_proposal_path(conversation), method: :post,
+              class: "btn btn-sm border-0 bg-gradient-to-br from-secondary to-[#ffd36b] text-secondary-content",
+              title: "Aprova o preço salvo",
+              data: { pricing_preview_target: "approve" },
+              form: { data: { turbo_confirm: "Aprovar o preço de #{brl(pricing.total_value)}? Isso trava a precificação e conclui a proposta." } } %>
+      <% else %>
+        <span class="badge badge-success badge-soft">
+          Aprovado<%= " em #{l(proposal.approved_at, format: '%d/%m/%Y')}" if proposal.approved_at %>
+        </span>
+        <%# Reabrir (2026-09-27): o cliente às vezes pede mudança depois da aprovação. %>
+        <details class="dropdown dropdown-end">
+          <summary class="btn btn-ghost btn-sm">Reabrir para ajuste</summary>
+          <div class="dropdown-content z-40 mt-2 w-80 bg-base-100 border border-base-300 rounded-box shadow-lg p-4">
+            <%= form_with url: reopen_conversation_proposal_path(conversation), method: :post, class: "flex flex-col gap-2" do |reopen_form| %>
+              <%= reopen_form.text_area :reason, rows: 2, class: "textarea textarea-sm w-full",
+                    placeholder: "Motivo (opcional) — ex.: cliente pediu incluir campanha de fauna" %>
+              <%= reopen_form.submit "Reabrir precificação", class: "btn btn-warning btn-sm w-full",
+                    data: { turbo_confirm: "Reabrir a precificação aprovada de #{brl(pricing.total_value)}? A proposta volta a ser editável e precisa ser aprovada de novo." } %>
+              <p class="text-xs text-base-content/50">O preço aprovado fica registrado. Documentos já gerados não mudam; a próxima geração sai como nova revisão.</p>
+            <% end %>
+          </div>
+        </details>
+      <% end %>
+    </div>
+  </div>
+</header>

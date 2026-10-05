@@ -5,8 +5,12 @@ class ProposalProfessionalsController < ApplicationController
 
   def create
     line = @pricing.proposal_professionals.new(line_params)
+    saved = ProposalProfessional.transaction do
+      line.pricing_item = create_new_item!(line) if line_params[:pricing_item_id] == "new"
+      (line.errors.empty? && line.save) || raise(ActiveRecord::Rollback)
+    end
 
-    if line.save
+    if saved
       @pricing.recalculate!
       redirect_to conversation_proposal_path(@conversation), notice: "#{line.professional.name} adicionado(a) à equipe."
     else
@@ -40,6 +44,18 @@ class ProposalProfessionalsController < ApplicationController
       return if @conversation.proposal.status != "approved"
 
       redirect_to conversation_proposal_path(@conversation), alert: "Esta proposta já foi aprovada."
+    end
+
+    # "+ Novo item…" no seletor (2026-10): cria o item com o nome digitado, na mesma transação da
+    # linha (rollback desfaz o item se a linha não salvar). Sem nome, a linha não salva.
+    def create_new_item!(line)
+      name = params[:new_item_name].to_s.strip
+      if name.empty?
+        line.errors.add(:base, "Informe o nome do novo item")
+        return
+      end
+
+      @pricing.pricing_items.create!(name: name, position: @pricing.pricing_items.maximum(:position).to_i + 1)
     end
 
     def line_params

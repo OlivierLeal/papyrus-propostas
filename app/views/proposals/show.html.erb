@@ -1,110 +1,158 @@
 <%
   pricing = @proposal.project_pricing
   editable = @proposal.status != "approved"
-  status_label, status_class = {
-    "draft" => [ "Rascunho", "badge-warning" ],
-    "priced" => [ "Precificado", "badge-info" ],
-    "approved" => [ "Aprovado", "badge-success" ]
-  }.fetch(@proposal.status, [ @proposal.status, "badge-ghost" ])
+  items = pricing.pricing_items.includes(:field_campaigns).to_a
+  checks = pricing_checks(@proposal, pricing, items)
+  campaigns_count = items.sum { |item| item.field_campaigns.length }
+  people_count = pricing.proposal_professionals.map(&:professional_id).uniq.size
+  external_total = pricing.external_costs_total
+  schedule_count = pricing.schedule_items.size
+  # Abas por etapa (2026-10, remodelagem: "a tela ficou complicada, muita informação"). Antes eram
+  # nove blocos empilhados; agora uma etapa por vez, cada aba com o resumo e as pendências dela.
+  tabs = [
+    [ "equipe", "Equipe", "#{brl(pricing.price_composition[:team])} · #{pluralize(people_count, 'pessoa', plural: 'pessoas')}" ],
+    [ "itens", "Itens e campo", "#{pluralize(items.size, 'item', plural: 'itens')} · #{pluralize(campaigns_count, 'campo', plural: 'campos')}" ],
+    [ "custos", "Custos externos", external_total.positive? ? brl(external_total) : "Nenhum lançado" ],
+    [ "cronograma", "Cronograma", schedule_count.positive? ? pluralize(schedule_count, "atividade", plural: "atividades") : "Sem atividades" ],
+    [ "pagamento", "Pagamento", "#{pluralize(pricing.payment_schedule.size, 'parcela', plural: 'parcelas')} · #{@proposal.document_split == 'separated' ? 'PT + PC' : 'doc. único'}" ]
+  ]
 %>
 
-<div class="p-4 lg:p-8">
-  <div class="flex flex-wrap items-start gap-3 mb-6">
-    <%= link_to conversation_path(@conversation), class: "btn btn-ghost btn-sm btn-square mt-1", title: "Voltar para a conversa" do %>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
-        <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
-      </svg>
-    <% end %>
-    <div class="min-w-0 flex-1">
-      <div class="flex flex-wrap items-center gap-2">
-        <h1 class="font-display text-2xl font-bold text-base-content leading-tight">Precificação</h1>
-        <span class="badge badge-soft <%= status_class %>"><%= status_label %></span>
-      </div>
-      <p class="text-sm text-base-content/60 mt-0.5">
-        <span class="font-mono"><%= @proposal.docx_numero_proposta %></span> ·
-        <%= @conversation.client_name %> · <%= @conversation.study_types_label %>
-      </p>
-    </div>
-  </div>
+<%# Formulários "satélite" (adicionar membro, item de cronograma, recalcular logística) ficam
+    FORA do form principal e vazios — os campos deles, desenhados dentro dos cards, se ligam a
+    eles pelo atributo HTML `form=`. Form dentro de form é HTML inválido: o navegador ignorava o
+    <form> interno e fechava o externo no primeiro </form>, e os campos iam pro formulário
+    errado (relato do consultor, 2026-09: "seleciono a pessoa e não consigo adicionar"). %>
+<% if editable %>
+  <%= tag.form(id: "add-member-form", action: conversation_proposal_proposal_professionals_path(@conversation), method: "post", class: "hidden") { token_tag } %>
+  <%= tag.form(id: "suggest-logistics-form", action: suggest_logistics_conversation_proposal_path(@conversation), method: "post", class: "hidden") { token_tag } %>
+  <%= tag.form(id: "rebuild-from-sheet-form", action: rebuild_from_client_sheet_conversation_proposal_path(@conversation), method: "post", class: "hidden",
+        data: { turbo_confirm: "Refazer os itens e a equipe a partir da planilha do cliente? Itens, equipe, campos e custos atuais são substituídos (BDI, impostos e parâmetros ficam)." }) { token_tag } %>
+  <% ScheduleItem::SCHEDULE_TYPE_LABELS.each_key do |schedule_type| %>
+    <%= tag.form(id: "add-schedule-#{schedule_type}", action: conversation_proposal_schedule_items_path(@conversation), method: "post", class: "hidden") { token_tag } %>
+  <% end %>
+<% end %>
 
-  <% if editable && @proposal.reopened_at %>
-    <div role="alert" class="alert alert-warning alert-soft mb-6 text-sm">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5 shrink-0"><path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.39Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0V5.36l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z" clip-rule="evenodd" /></svg>
-      <div>
-        <p class="font-medium">
-          Precificação reaberta em <%= l(@proposal.reopened_at, format: "%d/%m/%Y às %H:%M") %><%= " por #{@proposal.reopened_by.name}" if @proposal.reopened_by %>
-          <% if @proposal.approved_total %>— preço aprovado anterior: <%= brl(@proposal.approved_total) %><% end %>.
-        </p>
-        <% if @proposal.reopen_reason.present? %>
-          <p class="mt-0.5">Motivo: <%= @proposal.reopen_reason %></p>
+<div data-controller="pricing-preview tabs"
+     data-tabs-default-value="equipe" data-tabs-key-value="pricing-<%= @proposal.id %>"
+     data-pricing-preview-external-total-value="<%= external_total.to_f %>"
+     <% if editable %>data-action="input->pricing-preview#update change->pricing-preview#update"<% end %>>
+  <%= render "action_bar", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
+
+  <div class="px-4 lg:px-8 py-5">
+    <% if editable && @proposal.reopened_at %>
+      <div role="alert" class="alert alert-warning alert-soft mb-4 text-sm">
+        <div>
+          <p class="font-medium">
+            Precificação reaberta em <%= l(@proposal.reopened_at, format: "%d/%m/%Y às %H:%M") %><%= " por #{@proposal.reopened_by.name}" if @proposal.reopened_by %>
+            <% if @proposal.approved_total %>— preço aprovado anterior: <%= brl(@proposal.approved_total) %><% end %>.
+          </p>
+          <% if @proposal.reopen_reason.present? %>
+            <p class="mt-0.5">Motivo: <%= @proposal.reopen_reason %></p>
+          <% end %>
+          <p class="mt-0.5 text-base-content/60">Ajuste o que precisar e aprove de novo para concluir.</p>
+        </div>
+      </div>
+    <% end %>
+
+    <%# Pendências numa faixa só (ProposalsHelper#pricing_checks); cada uma leva à aba onde se resolve. %>
+    <% if editable %>
+      <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+        <% if checks.any? %>
+          <span class="font-semibold text-base-content/60 mr-1">Antes de aprovar:</span>
+          <% checks.each do |check| %>
+            <button type="button" class="inline-flex items-center gap-1.5 rounded-full border border-base-300 bg-base-100 pl-2 pr-3 py-1 hover:border-primary/50"
+                    data-tab="<%= check.tab %>" data-action="tabs#select">
+              <span class="size-2 rounded-full <%= check.level == :warning ? "bg-warning" : "bg-info" %>"></span>
+              <%= check.label %>
+            </button>
+          <% end %>
+        <% else %>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-success/10 text-success px-3 py-1 font-medium">
+            <span class="size-2 rounded-full bg-success"></span> Nada pendente — confira e aprove o preço.
+          </span>
         <% end %>
-        <p class="mt-0.5 text-base-content/60">Ajuste o que precisar e aprove de novo para concluir.</p>
       </div>
-    </div>
-  <% end %>
-
-  <%# Formulários "satélite" (adicionar membro, item de cronograma, recalcular logística) ficam
-      FORA do form principal e vazios — os campos deles, desenhados dentro dos cards, se ligam a
-      eles pelo atributo HTML `form=`. Form dentro de form é HTML inválido: o navegador ignorava o
-      <form> interno e fechava o externo no primeiro </form>, e os campos iam pro formulário
-      errado (relato do consultor, 2026-09: "seleciono a pessoa e não consigo adicionar"). %>
-  <% if editable %>
-    <%= tag.form(id: "add-member-form", action: conversation_proposal_proposal_professionals_path(@conversation), method: "post", class: "hidden") { token_tag } %>
-    <%= tag.form(id: "suggest-logistics-form", action: suggest_logistics_conversation_proposal_path(@conversation), method: "post", class: "hidden") { token_tag } %>
-    <%= tag.form(id: "rebuild-from-sheet-form", action: rebuild_from_client_sheet_conversation_proposal_path(@conversation), method: "post", class: "hidden",
-          data: { turbo_confirm: "Refazer os itens e a equipe a partir da planilha do cliente? Itens, equipe, campos e custos atuais são substituídos (BDI, impostos e parâmetros ficam)." }) { token_tag } %>
-    <% ScheduleItem::SCHEDULE_TYPE_LABELS.each_key do |schedule_type| %>
-      <%= tag.form(id: "add-schedule-#{schedule_type}", action: conversation_proposal_schedule_items_path(@conversation), method: "post", class: "hidden") { token_tag } %>
     <% end %>
-  <% end %>
 
-  <div class="grid xl:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start"
-       data-controller="pricing-preview"
-       data-pricing-preview-external-total-value="<%= pricing.external_costs_total.to_f %>"
-       <% if editable %>data-action="input->pricing-preview#update change->pricing-preview#update"<% end %>>
-    <div class="flex flex-col gap-6 min-w-0">
-      <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, id: "pricing-form", class: "flex flex-col gap-6" do |form| %>
-        <%= render "team_section", form: form, pricing: pricing, editable: editable, conversation: @conversation, professionals: @professionals %>
-        <datalist id="municipios-proposta">
-          <% municipality_suggestions(@conversation).each do |label| %><option value="<%= label %>"></option><% end %>
-        </datalist>
-        <%= render "items_section", form: form, pricing: pricing, editable: editable %>
-        <%= render "parameters_section", form: form, pricing: pricing, editable: editable %>
-        <%= render "payment_section", form: form, pricing: pricing, proposal: @proposal, editable: editable %>
+    <div class="grid xl:grid-cols-[minmax(0,1fr)_21rem] gap-6 items-start">
+      <div class="min-w-0">
+        <nav role="tablist" aria-label="Etapas da precificação" class="flex overflow-x-auto [scrollbar-width:none] border-b border-base-300 mb-5">
+          <% tabs.each do |key, label, hint| %>
+            <% pending = checks.count { |check| check.tab == key && check.level == :warning } %>
+            <button type="button" role="tab" data-tab="<%= key %>" data-tabs-target="tab" data-action="tabs#select" aria-selected="false"
+                    class="shrink-0 flex flex-col items-start gap-0.5 px-3 2xl:px-4 pt-2 pb-2.5 border-b-2 border-transparent text-base-content/60 hover:text-base-content aria-selected:text-base-content aria-selected:border-secondary">
+              <span class="font-display font-semibold text-sm flex items-center gap-1.5">
+                <%= label %>
+                <% if pending.positive? %><span class="badge badge-warning badge-soft badge-xs"><%= pending %></span><% end %>
+              </span>
+              <span class="text-xs tabular-nums whitespace-nowrap"><%= hint %></span>
+            </button>
+          <% end %>
+        </nav>
 
-        <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
-          <div class="px-6 pt-5">
-            <h2 class="font-semibold text-base-content">Cronograma</h2>
-            <p class="text-sm text-base-content/60 mt-0.5">
-              Sugerido pela IA a partir do ET/TR — ajuste aqui se precisar. Sem itens (ou sem data de início), a página não sai no documento.
-            </p>
+        <%= form_with model: pricing, url: conversation_proposal_path(@conversation), method: :patch, id: "pricing-form" do |form| %>
+          <div data-tabs-target="panel" data-tab="equipe" class="flex flex-col gap-6">
+            <%= render "team_section", form: form, pricing: pricing, editable: editable, conversation: @conversation, professionals: @professionals %>
           </div>
-          <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "servico", editable: editable %>
-          <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "implantacao", editable: editable %>
-        </section>
-      <% end %>
 
-      <%= render "external_costs_section", title: "Custos externos",
-            description: "ARTs, taxas, locações, passagens e outros custos repassados.",
-            empty_message: "Nenhum custo externo lançado.",
-            costs: pricing.other_external_costs, kind: nil, conversation: @conversation, editable: editable %>
+          <div data-tabs-target="panel" data-tab="itens" class="flex flex-col gap-6" hidden>
+            <datalist id="municipios-proposta">
+              <% municipality_suggestions(@conversation).each do |label| %><option value="<%= label %>"></option><% end %>
+            </datalist>
+            <%= render "route_section", form: form, pricing: pricing, editable: editable %>
+            <%= render "items_section", form: form, pricing: pricing, editable: editable %>
+            <%= render "unit_values_section", form: form, pricing: pricing, editable: editable %>
+          </div>
 
-      <%# Serviços Terceirizados (2026-09): 100% manual — a IA nunca marca nada como terceirizado,
-          e o texto da proposta nunca revela isso ao cliente (ver GenerateProposalDocumentTool). %>
-      <%= render "external_costs_section", title: "Serviços terceirizados",
-            description: "Uso interno — nunca aparece como terceirizado no documento do cliente.",
-            empty_message: "Nenhum serviço terceirizado lançado.",
-            costs: pricing.outsourced_costs, kind: "terceirizado", conversation: @conversation, editable: editable %>
-    </div>
+          <div data-tabs-target="panel" data-tab="cronograma" hidden>
+            <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+              <div class="px-6 pt-5">
+                <h2 class="font-semibold text-base-content">Cronograma</h2>
+                <p class="text-sm text-base-content/60 mt-0.5">
+                  Sugerido pela IA a partir do ET/TR — ajuste aqui se precisar. Sem itens (ou sem data de início), a página não sai no documento.
+                </p>
+              </div>
+              <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "servico", editable: editable %>
+              <%= render "schedule_section", form: form, pricing: pricing, conversation: @conversation, schedule_type: "implantacao", editable: editable %>
+            </section>
+          </div>
 
-    <%# Fixo ao rolar, mas nunca mais alto que a janela (sobra do shared/_layout: 92vh): com a composição
-        do preço o resumo passou da altura de telas de ~1000px e "Aprovar"/"Reabrir" ficavam inalcançáveis. %>
-    <aside class="flex flex-col gap-6 xl:sticky xl:top-6 xl:max-h-[calc(92vh-3rem)] xl:overflow-y-auto xl:overscroll-contain">
-      <%= render "summary", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
-      <%= render "precedents", matches: @precedent_matches %>
-      <div class="bg-base-100 rounded-box border border-base-300 shadow-sm p-5">
-        <%= render "documents/generated", conversation: @conversation %>
+          <div data-tabs-target="panel" data-tab="pagamento" hidden>
+            <%= render "payment_section", form: form, pricing: pricing, proposal: @proposal, editable: editable %>
+          </div>
+        <% end %>
+
+        <%# Custos externos têm forms próprios (adicionar/remover), por isso ficam fora do #pricing-form. %>
+        <div data-tabs-target="panel" data-tab="custos" class="flex flex-col gap-6" hidden>
+          <%= render "external_costs_section", title: "Custos externos",
+                description: "ARTs, taxas, locações, passagens e outros custos repassados, sem BDI.",
+                empty_message: "Nenhum custo externo lançado.",
+                costs: pricing.other_external_costs, kind: nil, conversation: @conversation, editable: editable %>
+
+          <%# Serviços Terceirizados (2026-09): 100% manual — a IA nunca marca nada como terceirizado,
+              e o texto da proposta nunca revela isso ao cliente (ver GenerateProposalDocumentTool). %>
+          <%= render "external_costs_section", title: "Serviços terceirizados",
+                description: "Uso interno — nunca aparece como terceirizado no documento do cliente.",
+                empty_message: "Nenhum serviço terceirizado lançado.",
+                costs: pricing.outsourced_costs, kind: "terceirizado", conversation: @conversation, editable: editable %>
+        </div>
       </div>
-    </aside>
+
+      <%# Fixo ao rolar (abaixo da barra do topo), mas nunca mais alto que a janela. %>
+      <aside class="flex flex-col gap-4 xl:sticky xl:top-24 xl:max-h-[calc(92vh-7.5rem)] xl:overflow-y-auto xl:overscroll-contain">
+        <%= render "summary", pricing: pricing, editable: editable %>
+        <%= render "precedents", matches: @precedent_matches %>
+        <details class="group bg-base-100 rounded-box border border-base-300 shadow-sm">
+          <summary class="flex items-center justify-between gap-2 px-5 py-4 cursor-pointer list-none">
+            <span class="font-semibold text-base-content">Documentos gerados</span>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/40 -rotate-90 group-open:rotate-0 transition-transform"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+          </summary>
+          <div class="px-5 pb-5">
+            <%= render "documents/generated", conversation: @conversation %>
+          </div>
+        </details>
+      </aside>
+    </div>
   </div>
 </div>

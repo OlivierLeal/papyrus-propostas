@@ -451,6 +451,45 @@ da equipe**: `ProposalProfessional#removable?` (fixo só pode perder linha EXTRA
 checado na view e em `ProposalProfessionalsController#destroy`, que também passou a recusar
 proposta aprovada (create e destroy).
 
+**Tela de Precificação em abas (2026-10, pedido do consultor: "a tela ficou complicada demais, muita
+informação"; protótipo aprovado).** Eram nove blocos empilhados; agora:
+- **Barra fixa no topo** (`proposals/_action_bar`): número/cliente, total (`summaryTotal`), selo de
+  prévia, "Salvar e recalcular" (`form=`) e "Aprovar preço" (ou "Reabrir para ajuste", num dropdown).
+- **Faixa "Antes de aprovar"** (`ProposalsHelper#pricing_checks`): profissional sem valor, custo sem
+  valor unitário, campo sem hospedagem, viagem aérea, desembolso ≠ 100%, quadro de preço que não sai
+  como escolhido, sem cronograma. Cada pendência leva à aba dela e conta no selo da aba. Não trava nada.
+- **5 abas** (`tabs_controller.js`, o mesmo do painel da proposta): Equipe · Itens e campo · Custos
+  externos · Cronograma · Pagamento. As abas só escondem partes do MESMO `#pricing-form` (o que foi
+  digitado numa vai junto ao salvar de outra); custos externos ficam fora dele (forms próprios). A aba
+  escolhida fica no `sessionStorage` e volta depois do redirect; âncora na URL (`#campo-12`, de
+  `PricingStructure`) abre a aba e os `<details>` dela; campo obrigatório inválido em aba escondida
+  mostra a aba (evento `invalid`), senão o navegador recusava o envio sem mostrar nada.
+- **Equipe agrupada por item** (cabeçalho com o custo do item, `data-item-team-total`, atualizado pela
+  prévia); o item da linha virou um seletor discreto embaixo do entregável (campo escondido com um item
+  só — a prévia lê o item dali). Linhas da mesma pessoa no mesmo item continuam juntas.
+  Com vários itens, os vazios também aparecem (com "ninguém neste item ainda"). "Adicionar à equipe" tem
+  "+ Novo item…" no seletor de item (`new_item_controller.js` mostra o campo do nome): o item nasce junto
+  com a linha, na mesma transação (`ProposalProfessionalsController#create_new_item!`).
+  E a própria aba Equipe cria item já com nome ("+ Criar item", `structure_action=add_team_item` +
+  `new_item_name`; Enter no campo aperta o botão, `enter_clicks_controller.js`) e volta pro grupo dele
+  (`#equipe-item-ID`) — a equipe é a 1ª etapa, então o item não pode depender da aba Itens e campo.
+- **Teste do fluxo completo (`test/system/pricing_flow_test.rb`)**: item pela Equipe → pessoa →
+  campo com alojamento e custo → custo externo → cronograma → quadro por item → aprovar, conferindo o
+  banco a cada etapa. Achados dele, já corrigidos: o aviso (toast) cobria "Aprovar preço" (foi pro
+  canto inferior direito, `shared/_flash`, vale pro sistema todo); "Aprovar" com alteração não salva
+  aprovava o preço anterior (agora trava, alvo `approve` da prévia); diárias da equipe e dias de campo
+  eram digitados em lugares diferentes sem nada conferindo — `ProposalsHelper#field_days_checks`
+  avisa, por item, diárias fora de pessoas × dias (até + viagem), campo sem ninguém com diária e
+  diárias sem campo (só informativo: embarcado não tem logística).
+- **Itens e campo**: "Deslocamento até o projeto" (`_route_section`), itens com os campos recolhidos
+  numa linha de resumo (pessoas, dias, veículo, hospedagem, custo — abertos se a proposta tem até 3),
+  empreendimentos recolhidos, e "Valores unitários da logística" recolhidos (`_unit_values_section`).
+  `_parameters_section` saiu.
+- **Lateral**: composição do preço com BDI e impostos editáveis ali (`form="pricing-form"`), projetos
+  parecidos e "Documentos gerados" recolhido. O desembolso saiu da lateral (está na aba Pagamento).
+- Testes de sistema da tela abrem a aba antes de mexer (`open_pricing_tab`, em
+  `ApplicationSystemTestCase`); `test/system/pricing_tabs_test.rb` trava o comportamento das abas.
+
 **Prévia ao vivo na Tela de Precificação (2026-09-27, pedido do consultor: "quando eu mudo a
 hora homem ele não atualiza o valor no frontend").** `pricing_preview_controller.js` refaz no
 navegador a MESMA conta do Ruby (`ProposalProfessional#expected_subtotal`,

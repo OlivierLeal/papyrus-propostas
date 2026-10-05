@@ -36,7 +36,7 @@ class ProposalsController < ApplicationController
       if pricing.update(pricing_params) && @proposal.update(document_split_params)
         # Local do projeto mudou na tela: refaz distância/dias de viagem (suggest_logistics! já recalcula).
         pricing.suggest_logistics! if pricing.saved_change_to_ibge_municipality_id?
-        anchor = PricingStructure.new(pricing).apply(params[:structure_action])
+        anchor = PricingStructure.new(pricing, new_item_name: params[:new_item_name]).apply(params[:structure_action])
         pricing.recalculate!
         @proposal.update!(status: "priced")
         redirect_to conversation_proposal_path(@conversation, anchor: anchor), notice: anchor ? nil : "Preço recalculado."

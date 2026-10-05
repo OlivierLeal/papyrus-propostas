@@ -10,8 +10,8 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static targets = [
     "line", "teamHours", "teamDays", "teamTotal", "item", "campaign", "itemCost", "logistics",
-    "summaryTotal", "summaryTeam", "summaryLogistics", "summaryItemCosts", "installment", "dirty",
-    "summaryDirect", "summaryBdi", "summaryTaxes", "summaryBdiRate", "summaryTaxRate", "compositionTotal"
+    "summaryTotal", "summaryTeam", "summaryLogistics", "summaryItemCosts", "installment", "dirty", "approve",
+    "summaryDirect", "summaryBdi", "summaryTaxes", "compositionTotal"
   ]
   static values = { externalTotal: Number }
 
@@ -105,6 +105,10 @@ export default class extends Controller {
       this.setRole(card, "item-costs", this.brl(this.round(values.costs)))
       this.setRole(card, "item-total", this.brl(this.round(values.team + values.campaigns + values.costs)))
     })
+    // Cabeçalho de cada item na tabela da equipe (agrupada por item).
+    this.element.querySelectorAll("[data-item-team-total]").forEach((element) => {
+      element.textContent = this.brl(this.round(raw(element.dataset.itemTeamTotal).team))
+    })
     // PricingItem#campaigns_total/#costs_total arredondam por item.
     Object.values(perItem).forEach((values) => {
       logistics += this.round(values.campaigns)
@@ -128,22 +132,21 @@ export default class extends Controller {
     this.set(this.summaryDirectTargets, this.brl(direct))
     this.set(this.summaryBdiTargets, this.brl(bdiAmount))
     this.set(this.summaryTaxesTargets, this.brl(this.round(team + logistics + itemCosts - direct - bdiAmount)))
-    this.set(this.summaryBdiRateTargets, `(× ${this.rate(this.field("bdi"))})`)
-    this.set(this.summaryTaxRateTargets, `(× ${this.rate(this.field("tax_multiplier"))})`)
     this.set(this.summaryTotalTargets, this.brl(total))
     this.set(this.compositionTotalTargets, this.brl(total))
     this.updateInstallments(total)
     this.dirtyTargets.forEach((element) => { element.hidden = false })
+    // Aprovar com alteração não salva aprovaria o preço ANTERIOR (o servidor só conhece o salvo).
+    this.approveTargets.forEach((button) => {
+      button.disabled = true
+      button.title = "Salve antes de aprovar — há alterações não salvas"
+    })
 
     // O desembolso editável (payment_schedule_controller) recalcula as parcelas com o novo total.
     this.dispatch("total", { detail: { total } })
   }
 
   // FieldCampaign#breakdown — custo DIRETO do campo, antes do BDI × impostos.
-  rate(value) {
-    return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  }
-
   campaignCost(row) {
     const people = this.inner(row, "people")
     const days = this.effectiveDays(this.inner(row, "days"), this.inner(row, "commute_hours"), row)

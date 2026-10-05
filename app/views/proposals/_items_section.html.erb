@@ -4,14 +4,20 @@
     locals: form, pricing, editable %>
 <% items = pricing.pricing_items.includes({ field_campaigns: :ibge_municipality }, proposal_professionals: :professional).to_a %>
 <% enterprises = pricing.pricing_enterprises.to_a %>
+<%# Com poucos campos eles já abrem; com muitos, ficam na linha de resumo e abrem sob demanda. %>
+<% open_campaigns = items.sum { |item| item.field_campaigns.length } <= 3 %>
 <% enterprise_options = [ [ "Comum a todos", "" ] ] + enterprises.map { |enterprise| [ enterprise.name, enterprise.id ] } %>
 
 <section id="itens" class="bg-base-100 rounded-box border border-base-300 shadow-sm">
   <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5 pb-4">
     <div>
-      <h2 class="font-semibold text-base-content">Itens e logística de campo</h2>
+      <h2 class="font-semibold text-base-content">Itens e idas a campo</h2>
       <p class="text-sm text-base-content/60 mt-0.5">
         Cada item soma a equipe dele, os campos (idas a campo) e os custos fechados. Valores puros; BDI e impostos entram no resumo ao lado.
+      </p>
+      <p class="text-sm mt-1">
+        <span class="text-base-content/60">Logística dos campos:</span>
+        <strong class="tabular-nums" data-pricing-preview-target="logistics"><%= brl(items.sum(&:campaigns_cost).round(2)) %></strong>
       </p>
     </div>
     <% if editable %>
@@ -47,50 +53,6 @@
       </span>
     </div>
   <% end %>
-
-  <%# Empreendimentos %>
-  <div id="empreendimentos" class="border-t border-base-300 px-6 py-4 bg-base-200/30">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h3 class="text-sm font-semibold text-base-content">Empreendimentos</h3>
-        <p class="text-xs text-base-content/60">
-          <% if enterprises.empty? %>
-            Um só. Cadastre quando a proposta cobrir mais de um — os itens sem empreendimento viram comuns e são rateados.
-          <% else %>
-            Itens sem empreendimento são comuns e rateados entre eles.
-          <% end %>
-        </p>
-      </div>
-      <% if editable %>
-        <%= structure_button("+ Empreendimento", "add_enterprise", editable: editable) %>
-      <% end %>
-    </div>
-    <% if enterprises.any? %>
-      <div class="flex flex-wrap items-end gap-3 mt-3">
-        <%= form.fields_for :pricing_enterprises, enterprises do |enterprise_form| %>
-          <div class="flex items-center gap-1">
-            <%= enterprise_form.hidden_field :id %>
-            <%= enterprise_form.text_field :name, disabled: !editable, required: true, class: "input input-sm w-52" %>
-            <% if editable %>
-              <%= structure_button("✕", "remove_enterprise:#{enterprise_form.object.id}", editable: editable, css: "btn btn-ghost btn-xs btn-square text-error",
-                    confirm: "Remover o empreendimento #{enterprise_form.object.name}? Os itens dele viram comuns.") %>
-            <% end %>
-          </div>
-        <% end %>
-        <fieldset class="fieldset p-0">
-          <legend class="fieldset-legend pt-0">Rateio dos itens comuns</legend>
-          <%= form.select :common_split, ProjectPricing::COMMON_SPLITS.invert, {}, disabled: !editable, class: "select select-sm w-72" %>
-        </fieldset>
-      </div>
-      <% totals = pricing.enterprise_totals %>
-      <dl class="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-sm">
-        <% totals.each do |name, value| %>
-          <div class="flex items-baseline gap-1.5"><dt class="text-base-content/60"><%= name %></dt><dd class="tabular-nums font-medium"><%= brl(value) %></dd></div>
-        <% end %>
-      </dl>
-      <p class="text-xs text-base-content/50 mt-1">Totais por empreendimento com BDI e impostos (é o que vai no quadro de preço), do último "Salvar e recalcular".</p>
-    <% end %>
-  </div>
 
   <div class="flex flex-col divide-y divide-base-300 border-t border-base-300">
     <%= form.fields_for :pricing_items, items do |item_form| %>
@@ -155,15 +117,34 @@
             <div class="flex flex-col gap-2 mt-2">
               <%= item_form.fields_for :field_campaigns, item.field_campaigns do |campaign_form| %>
                 <% campaign = campaign_form.object %>
-                <div id="campo-<%= campaign.id %>" class="rounded-box border border-base-300 p-3 scroll-mt-20" data-pricing-preview-target="campaign"
-                     data-item-id="<%= item.id %>" data-distance-km="<%= campaign.distance_km&.to_f %>">
+                <%# Campo recolhido numa linha de resumo (2026-10, remodelagem): abre pra editar. Os campos
+                    dentro do <details> fechado continuam indo no envio do formulário. %>
+                <details id="campo-<%= campaign.id %>" class="group/campo rounded-box border border-base-300 scroll-mt-40" data-pricing-preview-target="campaign"
+                         data-item-id="<%= item.id %>" data-distance-km="<%= campaign.distance_km&.to_f %>" <% if open_campaigns %>open<% end %>>
+                  <summary class="flex items-center gap-3 px-3 py-2.5 cursor-pointer list-none rounded-box hover:bg-base-200/40">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0 text-base-content/40 -rotate-90 group-open/campo:rotate-0 transition-transform"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-sm font-medium text-base-content truncate"><%= campaign.description %></span>
+                      <span class="block text-xs text-base-content/60 tabular-nums">
+                        <%= pluralize(campaign.people, "pessoa", plural: "pessoas") %> ·
+                        <%= decimal_label(campaign.days) %> <%= campaign.days == 1 ? "dia" : "dias" %><%= " + #{decimal_label(campaign.travel_days)} de viagem" if campaign.travel_days.positive? %> ·
+                        <%= campaign.vehicles %> <%= FieldCampaign::VEHICLE_TYPES[campaign.vehicle_type] %>
+                      </span>
+                    </span>
+                    <% if campaign.lodging_pending? %>
+                      <span class="badge badge-warning badge-soft badge-sm whitespace-nowrap">hospedagem a definir</span>
+                    <% elsif campaign.lodging_mode %>
+                      <span class="badge badge-ghost badge-sm whitespace-nowrap max-w-40 truncate" title="<%= campaign.lodging_name %>"><%= campaign.lodging_mode == "cliente" ? "hospedagem do cliente" : campaign.lodging_name.presence || FieldCampaign::LODGING_MODES[campaign.lodging_mode] %></span>
+                    <% end %>
+                    <span class="text-sm font-semibold tabular-nums whitespace-nowrap" data-role="campaign-total"><%= brl(campaign.cost(pricing).round(2)) %></span>
+                  </summary>
+                  <div class="px-3 pb-3 pt-1 border-t border-base-300">
                   <%= campaign_form.hidden_field :id %>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 mt-2">
                     <%= campaign_form.text_field :description, disabled: !editable, required: true, class: "input input-sm grow", aria: { label: "Descrição do campo" } %>
-                    <span class="text-sm font-semibold tabular-nums whitespace-nowrap" data-role="campaign-total"><%= brl(campaign_form.object.cost(pricing).round(2)) %></span>
                     <% if editable %>
-                      <%= structure_button("✕", "remove_campaign:#{campaign_form.object.id}", editable: editable, css: "btn btn-ghost btn-xs btn-square text-error",
-                            confirm: "Remover o campo #{campaign_form.object.description}?") %>
+                      <%= structure_button("Remover campo", "remove_campaign:#{campaign.id}", editable: editable, css: "btn btn-ghost btn-xs text-error",
+                            confirm: "Remover o campo #{campaign.description}?") %>
                     <% end %>
                   </div>
                   <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2">
@@ -185,7 +166,8 @@
                     <% end %>
                   </div>
                   <%= render "campaign_lodging", campaign_form: campaign_form, campaign: campaign, pricing: pricing, editable: editable %>
-                </div>
+                  </div>
+                </details>
               <% end %>
             </div>
             <p class="text-[11px] text-base-content/50 mt-1">
@@ -233,4 +215,51 @@
       </div>
     <% end %>
   </div>
+  <%# Empreendimentos %>
+  <details id="empreendimentos" class="group/emp border-t border-base-300 px-6 py-4 bg-base-200/30 scroll-mt-40" <% if enterprises.any? %>open<% end %>>
+    <summary class="flex flex-wrap items-center justify-between gap-3 cursor-pointer list-none">
+      <div>
+        <h3 class="text-sm font-semibold text-base-content flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-base-content/40 -rotate-90 group-open/emp:rotate-0 transition-transform"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+          Empreendimentos <span class="font-normal text-base-content/50">· <%= enterprises.empty? ? "um só" : enterprises.size %></span>
+        </h3>
+        <p class="text-xs text-base-content/60">
+          <% if enterprises.empty? %>
+            Um só. Cadastre quando a proposta cobrir mais de um — os itens sem empreendimento viram comuns e são rateados.
+          <% else %>
+            Itens sem empreendimento são comuns e rateados entre eles.
+          <% end %>
+        </p>
+      </div>
+      <% if editable %>
+        <%= structure_button("+ Empreendimento", "add_enterprise", editable: editable) %>
+      <% end %>
+    </summary>
+    <% if enterprises.any? %>
+      <div class="flex flex-wrap items-end gap-3 mt-3">
+        <%= form.fields_for :pricing_enterprises, enterprises do |enterprise_form| %>
+          <div class="flex items-center gap-1">
+            <%= enterprise_form.hidden_field :id %>
+            <%= enterprise_form.text_field :name, disabled: !editable, required: true, class: "input input-sm w-52" %>
+            <% if editable %>
+              <%= structure_button("✕", "remove_enterprise:#{enterprise_form.object.id}", editable: editable, css: "btn btn-ghost btn-xs btn-square text-error",
+                    confirm: "Remover o empreendimento #{enterprise_form.object.name}? Os itens dele viram comuns.") %>
+            <% end %>
+          </div>
+        <% end %>
+        <fieldset class="fieldset p-0">
+          <legend class="fieldset-legend pt-0">Rateio dos itens comuns</legend>
+          <%= form.select :common_split, ProjectPricing::COMMON_SPLITS.invert, {}, disabled: !editable, class: "select select-sm w-72" %>
+        </fieldset>
+      </div>
+      <% totals = pricing.enterprise_totals %>
+      <dl class="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-sm">
+        <% totals.each do |name, value| %>
+          <div class="flex items-baseline gap-1.5"><dt class="text-base-content/60"><%= name %></dt><dd class="tabular-nums font-medium"><%= brl(value) %></dd></div>
+        <% end %>
+      </dl>
+      <p class="text-xs text-base-content/50 mt-1">Totais por empreendimento com BDI e impostos (é o que vai no quadro de preço), do último "Salvar e recalcular".</p>
+    <% end %>
+  </details>
+
 </section>

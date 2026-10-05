@@ -93,6 +93,7 @@ class ProfessionalPickerTest < ApplicationSystemTestCase
   test "adicionar item de cronograma pelo rodapé da tabela" do
     sign_in
     visit conversation_proposal_path(@proposal.conversation)
+    open_pricing_tab "cronograma"
 
     fill_in "add-schedule-servico-activity", with: "Campanha de campo"
     fill_in "add-schedule-servico-phase", with: "Diagnóstico"
