@@ -40,6 +40,22 @@ class ConversationTest < ActiveSupport::TestCase
     assert_nil conversation.reload.ai_cost_usd
   end
 
+  test "ai_costs_usd matches ai_cost_usd per conversation without loading messages" do
+    priced = conversations(:reviewing_conversation)
+    unpriced = conversations(:priced_conversation)
+    model = Model.create!(model_id: "test-batch-priced-model", provider: "bedrock", name: "Test Priced Model",
+      pricing: { text_tokens: { standard: { input_per_million: 3.0, output_per_million: 15.0 } } })
+    unpriced_model = Model.create!(model_id: "test-batch-unpriced-model", provider: "bedrock", name: "Test Unpriced Model")
+    priced.messages.create!(role: "assistant", content: "a", model: model, input_tokens: 1_000_000, output_tokens: 0)
+    priced.messages.create!(role: "assistant", content: "b", model: model, input_tokens: 0, output_tokens: 200_000)
+    unpriced.messages.create!(role: "assistant", content: "c", model: unpriced_model, input_tokens: 1_000, output_tokens: 500)
+
+    costs = Conversation.ai_costs_usd([ priced, unpriced ])
+
+    assert_in_delta 6.0, costs[priced.id], 0.001
+    assert_nil costs[unpriced.id]
+  end
+
   test "status_label translates the status to Portuguese" do
     conversation = conversations(:reviewing_conversation)
     assert_equal "Em revisão", conversation.status_label

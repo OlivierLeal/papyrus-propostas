@@ -15,7 +15,7 @@
 
     <div class="flex items-center justify-between gap-2 text-xs text-base-content/40">
       <span><%= conversation.user.name %> · <%= conversation.created_at.strftime("%d/%m/%Y") %></span>
-      <% if (cost = conversation.ai_cost_usd) %>
+      <% if (cost = ai_costs[conversation.id]) %>
         <span title="Custo estimado de IA nesta conversa">
           ≈ <%= number_to_currency(cost, unit: "US$", separator: ",", delimiter: ".") %>
         </span>

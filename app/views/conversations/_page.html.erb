@@ -7,7 +7,7 @@
   <% group = year_group_label(chunk.first.created_at) %>
   <% if group == current_group %>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-      <%= render partial: "card", collection: chunk, as: :conversation %>
+      <%= render partial: "card", collection: chunk, as: :conversation, locals: { ai_costs: } %>
     </div>
   <% else %>
     <div class="flex items-center gap-3 mb-3 <%= "mt-8" if current_group %>">
@@ -16,7 +16,7 @@
       <div class="h-px bg-base-300 flex-1"></div>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <%= render partial: "card", collection: chunk, as: :conversation %>
+      <%= render partial: "card", collection: chunk, as: :conversation, locals: { ai_costs: } %>
     </div>
   <% end %>
   <% current_group = group %>

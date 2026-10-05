@@ -14,6 +14,7 @@ class ConversationsController < ApplicationController
     conversations = Conversation.search(@query)
     @pagy, @conversations = pagy(conversations, limit: PER_PAGE)
     @group_counts = group_counts(conversations)
+    @ai_costs = Conversation.ai_costs_usd(@conversations)
     # O título do ano só aparece quando o ano muda — numa página que continua o ano da anterior,
     # a grade segue sem título repetido.
     @previous_group = helpers.year_group_label(conversations.offset(@pagy.offset - 1).pick(:created_at)) if @pagy.offset.positive?

@@ -324,17 +324,40 @@ class Conversation < ApplicationRecord
     cost.total
   end
 
+  # O mesmo #ai_cost_usd para várias conversas de uma vez, sem carregar mensagem nenhuma: a Tela de
+  # Propostas fazia `includes(messages: :model)` só pra isto, e isso trazia o texto inteiro de
+  # todas as mensagens (ETs, snapshots, resultados de ferramenta — 5,5 MB em 24 cards). O custo só
+  # depende de tokens × preço do modelo, que é linear: somar os tokens por (conversa, modelo) no
+  # banco e precificar cada soma dá o mesmo total que precificar mensagem por mensagem. A conta
+  # continua sendo a da gem (RubyLLM::Cost), inclusive o `nil` quando falta preço.
+  def self.ai_costs_usd(conversations)
+    ids = conversations.map(&:id)
+    return {} if ids.empty?
+
+    rows = Message.where(conversation_id: ids).group(:conversation_id, :model_id)
+      .pluck(:conversation_id, :model_id, *%i[input_tokens output_tokens cached_tokens cache_creation_tokens thinking_tokens].map { |column| Arel.sql("SUM(#{column})") })
+    models = Model.where(id: rows.map(&:second).compact.uniq).index_by(&:id)
+
+    rows.group_by(&:first).transform_values do |groups|
+      costs = groups.map do |_, model_id, input, output, cached, cache_creation, thinking|
+        tokens = RubyLLM::Tokens.build(input:, output:, cached:, cache_creation:, thinking:)
+        RubyLLM::Cost.new(tokens:, model: models[model_id])
+      end
+      RubyLLM::Cost.aggregate(costs).total
+    end
+  end
+
   # Busca na tela de Propostas por cliente, código (ex.: "PTC26098") ou ano — um campo só, porque
   # o código já embute o ano (ver Proposal#docx_numero_proposta) e a maioria digita só um dos três
   # de cada vez. Filtra em Ruby, não em SQL: código não é coluna nenhuma, é calculado a partir de
   # created_at + id, então não dá pra fazer WHERE nele — aceitável na escala deste app (poucos
   # usuários). O filtro só decide os ids; a paginação (ConversationsController#index) vem depois,
   # sobre a relação. `includes(:proposal)` evita N+1 ao calcular o código de cada conversa.
-  # `messages: :model` entra pro card de custo de IA na Tela de Propostas (#ai_cost_usd) não
-  # disparar N+1 — cada Message#cost lê a `model_association` (pricing) pra calcular o valor.
+  # O custo de IA do card não vem daqui: é calculado em lote por .ai_costs_usd (sem carregar
+  # as mensagens).
   def self.search(query)
     normalized = query.to_s.strip.downcase
-    return order(created_at: :desc).includes(:user, :study_types, :proposal, messages: :model) if normalized.blank?
+    return order(created_at: :desc).includes(:user, :study_types, :proposal) if normalized.blank?
 
     # Acha os ids em duas passadas: a 1ª só decide quem bate (com o mínimo de includes pra
     # calcular o código sem N+1), a 2ª carrega o que a tela realmente precisa — SÓ para os ids que
@@ -347,7 +370,7 @@ class Conversation < ApplicationRecord
     ids = by_text + by_code
     return none if ids.empty?
 
-    where(id: ids).order(created_at: :desc).includes(:user, :study_types, :proposal, messages: :model)
+    where(id: ids).order(created_at: :desc).includes(:user, :study_types, :proposal)
   end
 
   def matches_search?(normalized_query)

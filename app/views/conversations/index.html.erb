@@ -32,6 +32,6 @@
       <% end %>
     </div>
   <% else %>
-    <%= render "page", conversations: @conversations, pagy: @pagy, previous_group: nil, group_counts: @group_counts, query: @query %>
+    <%= render "page", conversations: @conversations, pagy: @pagy, previous_group: nil, group_counts: @group_counts, query: @query, ai_costs: @ai_costs %>
   <% end %>
 </div>
