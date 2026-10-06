@@ -76,21 +76,34 @@ module Spreadsheets
     # Texto das abas pra IA entender a planilha: endereço, valor ou fórmula de cada célula. Com
     # `computed` (a mesma planilha recalculada, ver Recalculator), a fórmula vem com o resultado —
     # é o que a IA vê na rodada de correção. `only` limita às abas citadas.
-    def to_prompt_text(max_cells_per_sheet: 350, max_value_length: 160, computed: nil, only: nil)
+    #
+    # Limite por TAMANHO de texto, não por número de células (proposta 69, 2026-10: o corte em 350
+    # células escondia as linhas 56–73 de uma PQ — mobilização, reembolsáveis, seguro e o total
+    # geral — e a IA mapeou os itens deslocados). Quando corta, diz o que ficou de fora.
+    def to_prompt_text(max_chars_per_sheet: 60_000, max_value_length: 160, computed: nil, only: nil)
       sheets.filter_map do |s|
         next if only && only.none? { |name| name.to_s.casecmp?(s.name) }
 
-        lines = cells(s.name).first(max_cells_per_sheet).map do |cell|
+        all_cells = cells(s.name)
+        used = 0
+        lines = all_cells.map do |cell|
           content = cell.formula ? "=#{cell.formula}" : cell.value.to_s.gsub(/\s+/, " ")
           content = content.truncate(max_value_length)
           if cell.formula && computed
             result = computed.value(s.name, cell.ref)
             content += " → #{result.is_a?(Float) ? result.round(4) : result}"
           end
-          "#{cell.ref}: #{content}"
+          line = "#{cell.ref}: #{content}"
+          used += line.size + 1
+          break_line = used > max_chars_per_sheet
+          break_line ? nil : line
+        end
+        shown = lines.compact
+        if shown.size < all_cells.size
+          shown << "… (#{all_cells.size - shown.size} células omitidas por tamanho; a aba vai até #{all_cells.last.ref})"
         end
         header = "### Aba \"#{s.name}\"#{" (oculta)" unless s.state == "visible"}"
-        [ header, *lines ].join("\n")
+        [ header, *shown ].join("\n")
       end.join("\n\n")
     end
 

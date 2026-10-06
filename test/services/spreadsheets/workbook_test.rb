@@ -43,4 +43,12 @@ class Spreadsheets::WorkbookTest < ActiveSupport::TestCase
     @workbook.unhide("Equipe")
     assert_equal "visible", Spreadsheets::Workbook.open(@workbook.to_bytes).sheet("Equipe").state
   end
+
+  # Proposta 69: o corte em 350 células escondia o fim da planilha (total geral incluído).
+  test "texto pra IA não corta aba média e avisa quando corta por tamanho" do
+    workbook = Spreadsheets::Workbook.open(client_xlsx_bytes)
+    assert_no_match(/omitidas/, workbook.to_prompt_text)
+    short = workbook.to_prompt_text(max_chars_per_sheet: 40)
+    assert_match(/células omitidas por tamanho; a aba vai até/, short)
+  end
 end

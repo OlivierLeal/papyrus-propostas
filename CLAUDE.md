@@ -3105,6 +3105,20 @@ sempre (seção 1): **a IA interpreta a planilha e monta um PLANO; o Ruby calcul
     espelhados, 4 observadores × 0,25 = 2.994 diárias, total R$ 342 mil → R$ 1,31 milhão, e a PPU
     recalculada no LibreOffice com a diária a R$ 407,91 e o total igual ao da proposta (R$ 0,01 de
     arredondamento). A IA não é determinística: outra rodada deu R$ 1,30 milhão.
+- **Lista de preços rateada por ITEM, não por peça (2026-10, proposta 69: PQ da MIBA saiu com 0 células).**
+  Três causas: a IA não disse a quantidade de nenhuma linha (o executor recusou as 53); as frações de
+  ~50 peças não fechavam (30 rateios entre 50% e 762%) e ela citou "C5" (campo inteiro, não é peça); e
+  `Workbook#to_prompt_text` cortava em 350 células — a IA não via as linhas 56–73 (mobilização,
+  reembolsáveis, seguro, total geral) e mapeou deslocado. Agora: o plano diz `"itens": [{"item", "peso"}]`
+  por linha (catálogo lista "ITENS DA PRECIFICAÇÃO" com preço e peças) e `PlanExecutor#expand_item_compositions`
+  distribui todas as peças do item entre as linhas que o citam; o que é de item nenhum citado (gestão,
+  externos) vira comum, na proporção do custo de cada linha — cobertura 100% por construção.
+  `composicao` explícita continua valendo; "C5" vira as peças do campo. Sem quantidade, o executor usa a
+  coluna com cabeçalho "QUANT…" da mesma linha. Texto da planilha limitado por tamanho (60 mil
+  caracteres/aba, avisa o que omitiu). A conferência do total desconta o que a planilha já somava antes
+  do preenchimento (verba fixa do cliente: R$ 150 mil de reembolsáveis na 69). Ao vivo na 69: 65
+  células, M73 = total da proposta, só "seguro" em falta. Mobilização/desmobilização ainda levam fatia
+  igual do item (a IA escolhe o peso) — não puxam só a logística.
 - `professionals.social_charges_percent` (fração; digitado em % no cadastro) — só pra planilha que
   separa salário e encargos. Em branco, vai cheio (encargos 0%).
 - Verificado ao vivo na conversa 65 (Bedrock real): PPU → TOTAL GERAL recalculado R$ 353.925,00 =

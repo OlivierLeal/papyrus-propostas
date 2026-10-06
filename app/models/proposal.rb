@@ -787,7 +787,7 @@ class Proposal < ApplicationRecord
         end
         next if sheets.empty?
 
-        text = workbook.to_prompt_text(only: sheets.map(&:name), max_cells_per_sheet: 250)
+        text = workbook.to_prompt_text(only: sheets.map(&:name), max_chars_per_sheet: PRICE_LIST_MAX_CHARS)
         { attachment: attachment, workbook: workbook, text: text }
       rescue Spreadsheets::Workbook::Error, Zip::Error
         nil

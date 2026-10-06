@@ -128,9 +128,22 @@ class FillClientSpreadsheetJob < ApplicationJob
 
     @recalculated = Spreadsheets::Recalculator.call(result.bytes, File.extname(fill.source_filename))
     value = @recalculated&.value(total_cell["aba"], total_cell["celula"])
-    [ result, value.is_a?(Numeric) ? value.to_d.round(2) : nil ]
+    return [ result, nil ] unless value.is_a?(Numeric)
+
+    # O que a planilha já somava antes do preenchimento é do cliente (proposta 69: verba de R$ 150 mil
+    # de despesas reembolsáveis no total geral) — a conferência compara só o que a Papyrus pôs.
+    [ result, (value.to_d - client_baseline(source_bytes, total_cell, fill)).round(2) ]
   rescue Spreadsheets::Workbook::Error
     [ result, nil ]
+  end
+
+  def client_baseline(source_bytes, total_cell, fill)
+    @client_baselines ||= {}
+    @client_baselines[total_cell.values_at("aba", "celula")] ||= begin
+      original = Spreadsheets::Recalculator.call(source_bytes, File.extname(fill.source_filename))
+      value = original&.value(total_cell["aba"], total_cell["celula"])
+      value.is_a?(Numeric) ? value.to_d : 0.to_d
+    end
   end
 
   def correction_prompt(plan, result, sheet_total, target, catalog)
@@ -139,6 +152,7 @@ class FillClientSpreadsheetJob < ApplicationJob
     <<~TEXT
       CONFERÊNCIA: preenchi a planilha com o seu plano e recalculei. O total que a planilha calcula
       (#{plan.dig('celula_total', 'aba')}!#{plan.dig('celula_total', 'celula')}) deu R$ #{format('%.2f', sheet_total)},
+      já descontado o que o próprio cliente deixou preenchido (verbas fixas),
       mas o preço da proposta é R$ #{format('%.2f', target)} (custo direto R$ #{format('%.2f', catalog['proposta.custo_direto'].value)}).
       #{"Avisos do preenchimento: #{(result.warnings + result.issues).join(' | ')}" if (result.warnings + result.issues).any?}
 
@@ -218,13 +232,16 @@ class FillClientSpreadsheetJob < ApplicationJob
 
       TIPOS DE PLANILHA
       1. Lista de preços do cliente (PPU, planilha de quantidades): o cliente dá os itens e as
-         quantidades, o licitante preenche o PREÇO UNITÁRIO. Use "precos_unitarios": para cada
-         célula de preço unitário, diga a quantidade (célula da quantidade na mesma linha, em
-         "quantidade_celula") e a "composicao" — quais PEÇAS DE CUSTO do catálogo compõem aquele
-         item e em que fração. Cada peça tem que ser distribuída por inteiro: a soma das frações de
-         uma peça, em todos os itens, é 1 (ex.: coordenação 0,5 no item de gestão e 0,5 no de
-         relatório). Toda peça de custo precisa entrar em algum item. O sistema aplica BDI e
-         impostos e faz o total da planilha bater com o total da proposta.
+         quantidades, o licitante preenche o PREÇO UNITÁRIO. Use "precos_unitarios": uma entrada
+         por célula de preço unitário (só as células que o licitante preenche, nunca subtotal), com
+         "quantidade_celula" (a célula da quantidade NA MESMA LINHA) e "itens": a que ITEM(NS) DA
+         PRECIFICAÇÃO (lista "ITENS DA PRECIFICAÇÃO" no catálogo) aquela linha corresponde, com
+         "peso" quando a linha pesa mais que as outras do mesmo item (padrão 1). O SISTEMA distribui
+         todo o custo do item entre as linhas que o citam, rateia o que não é de item nenhum (gestão,
+         externos) e aplica BDI e impostos — você não faz conta nem fração. Toda linha de preço do
+         cliente deve citar ao menos um item; todo item com custo deve ser citado por alguma linha
+         (item de gestão/coordenação que não corresponde a nenhuma linha pode ficar sem citação: vira
+         custo comum). Só use "composicao" (peças com fração) se precisar separar uma peça específica.
       2. Formação de preço / composição de custos (DFP, BDI, encargos): o licitante abre salário,
          encargos, equipamentos, serviços, BDI. Use "tabelas" (uma linha por profissional ou por
          custo, a partir da linha-modelo da aba) e "celulas" (percentuais de BDI e tributos,
@@ -248,7 +265,11 @@ class FillClientSpreadsheetJob < ApplicationJob
         .salario_hora_diaria. Nunca diária numa coluna de horas.
       - Não preencha célula só pra pôr zero: deixe em branco o que não se aplica.
       - "celula_total": a célula onde a planilha calcula o PREÇO TOTAL (ex.: total geral, valor
-        total da proposta). O sistema recalcula e confere com o total da proposta.
+        total da proposta). O sistema recalcula e confere com o total da proposta, descontando o que
+        o próprio cliente já deixou preenchido (verba fixa de despesas reembolsáveis etc.).
+      - Valor que o CLIENTE já preencheu (verba fixa, reembolsável) não se toca. Linha de preço que
+        não se aplica ao que a Papyrus vai fazer (mobilização/desmobilização sem custo próprio,
+        seguro não previsto) fica em branco — se ela mudar o preço, vira "faltando" ou "duvidas".
       - Chave com valor "NÃO INFORMADO" pode ser citada: o sistema avisa o consultor que falta.
       - Quando a planilha pede algo que a proposta não tem, ou os quantitativos do cliente não
         batem com a proposta (ex.: diárias pedidas × diárias precificadas) de um jeito que muda o
@@ -263,7 +284,7 @@ class FillClientSpreadsheetJob < ApplicationJob
        "abas_mostrar": ["aba"],
        "celulas": [{"aba": "…", "celula": "B26", "fato": "papyrus.cnpj"}, {"aba": "…", "celula": "C3", "texto": "SIM"}],
        "precos_unitarios": [{"aba": "…", "celula": "F7", "descricao": "…", "quantidade_celula": "E7",
-                             "composicao": [{"peca": "L124", "fracao": 1}, {"peca": "C5.hospedagem", "fracao": 0.5}]}],
+                             "itens": [{"item": 61, "peso": 1}]}],
        "tabelas": [{"aba": "…", "linha_modelo": 3, "linhas": [{"A": {"fato": "L124.profissional"}, "C": {"fato": "L124.salario_hh"}, "D": {"texto": "Horista"}}]}],
        "celula_total": {"aba": "…", "celula": "E3"},
        "faltando": ["…"],

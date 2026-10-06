@@ -116,6 +116,49 @@ class Spreadsheets::PlanExecutorTest < ActiveSupport::TestCase
     end
   end
 
+  # Proposta 69 (2026-10): a IA não disse onde estava a quantidade de nenhuma das 53 linhas e a
+  # planilha saiu vazia. A quantidade é a coluna "Quantidade" da mesma linha.
+  test "sem quantidade no plano, usa a coluna Quantidade da mesma linha" do
+    plan = { "precos_unitarios" => [
+      { "aba" => "PPU", "celula" => "F3", "composicao" => @pieces.map { |key| { "peca" => key, "fracao" => 1 } } }
+    ] }
+    result = run_plan(plan)
+
+    assert_equal [ "F3" ], result.entries.map { |entry| entry[:celula] }
+    assert_equal @total, (100 * Spreadsheets::Workbook.open(result.bytes).value("PPU", "F3").to_d).round(2)
+  end
+
+  # A IA só diz a que item cada linha corresponde; o Ruby distribui as peças do item e rateia o que
+  # não é de item nenhum — toda peça entra uma vez, o total fecha sem conta de fração da IA.
+  test "rateio por item da precificação: cobre todas as peças e fecha o total" do
+    items = @proposal.project_pricing.pricing_items.order(:position).to_a
+    plan = { "precos_unitarios" => [
+      { "aba" => "PPU", "celula" => "F3", "quantidade_celula" => "E3", "itens" => [ { "item" => items.first.id, "peso" => 3 } ] },
+      { "aba" => "PPU", "celula" => "F4", "quantidade_celula" => "E4", "itens" => items.map(&:id) }
+    ] }
+    result = run_plan(plan)
+
+    assert_empty result.issues
+    # Centavo de arredondamento: com quantidade 3 nem todo total cabe num preço unitário em centavos.
+    assert_in_delta @total.to_f, result.totals[:planilha], 0.02
+    assert_match(/#{Regexp.escape(items.first.name)} × 75%/, result.entries.first[:origem])
+  end
+
+  test "campo inteiro citado como peça (C5) vira as peças dele" do
+    group = @pieces.find { |key| key.match?(/\AC\d+\./) }&.split(".")&.first
+    skip "fixture sem campo com custo" unless group
+
+    others = @pieces.reject { |key| key.start_with?("#{group}.") }
+    plan = { "precos_unitarios" => [
+      { "aba" => "PPU", "celula" => "F3", "quantidade_celula" => "E3",
+        "composicao" => [ { "peca" => group, "fracao" => 1 } ] + others.map { |key| { "peca" => key, "fracao" => 1 } } }
+    ] }
+    result = run_plan(plan)
+
+    assert_empty result.issues
+    assert_empty result.warnings.grep(/inexistente/)
+  end
+
   private
 
   def run_plan(plan)

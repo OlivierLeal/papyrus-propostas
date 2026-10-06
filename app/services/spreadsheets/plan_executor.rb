@@ -9,6 +9,7 @@ module Spreadsheets
   #   { "abas_mostrar": ["Remuneração"],
   #     "celulas": [{ "aba", "celula", "fato" | "texto" | "numero" }],
   #     "precos_unitarios": [{ "aba", "celula", "descricao", "quantidade" | "quantidade_celula",
+  #                            "itens": [{ "item", "peso" }],   (itens da precificação — preferido)
   #                            "composicao": [{ "peca", "fracao" }] }],
   #     "tabelas": [{ "aba", "linha_modelo", "linhas": [{ "<coluna>" => { "fato" | "texto" | "numero" } }] }],
   #     "tipo_planilha": "preco" | "formulario",   (só planilha de preço tem o custo inteiro conferido)
@@ -143,6 +144,7 @@ module Spreadsheets
     # quantidade × unitário tem que dar o total da proposta; o item de menor quantidade absorve o
     # arredondamento (o resíduo que sobrar, de centavos, vai pro relatório).
     def write_unit_prices(specs)
+      specs = expand_item_compositions(specs)
       scale = fraction_scale(specs)
       rows = specs.filter_map do |spec|
         quantity = quantity_for(spec)
@@ -175,12 +177,7 @@ module Spreadsheets
         spec = row[:spec]
         guard do
           @workbook.write(spec["aba"], spec["celula"], row[:unit])
-          parts = Array(spec["composicao"]).filter_map do |part|
-            fraction = part["fracao"].to_d * scale.fetch(part["peca"].to_s, 1)
-            next if fraction.zero?
-
-            "#{part['peca']}#{" × #{number(fraction)}" unless fraction == 1}"
-          end.join(" + ")
+          parts = spec["rateio"] || composition_text(spec, scale)
           @entries << { aba: spec["aba"], celula: spec["celula"], valor: display(row[:unit]),
                         origem: "#{spec['descricao'].presence || 'preço unitário'}: (#{parts.truncate(260)}) × BDI e impostos ÷ #{number(row[:quantity])}" }
         end
@@ -190,6 +187,15 @@ module Spreadsheets
       residual = (sheet_total - target).round(2)
       @warnings << "A planilha soma R$ #{display(sheet_total)}, #{residual.positive? ? 'acima' : 'abaixo'} do total da proposta em R$ #{display(residual.abs)} (arredondamento do preço unitário)." unless residual.zero?
       { planilha: sheet_total.to_f, proposta: target.to_f }
+    end
+
+    def composition_text(spec, scale)
+      Array(spec["composicao"]).filter_map do |part|
+        fraction = part["fracao"].to_d * scale.fetch(part["peca"].to_s, 1)
+        next if fraction.zero?
+
+        "#{part['peca']}#{" × #{number(fraction)}" unless fraction == 1}"
+      end.join(" + ")
     end
 
     # A IA erra a conta das frações (0,6 + 0,3 numa peça). Mantém a PROPORÇÃO que ela quis entre os
@@ -208,9 +214,99 @@ module Spreadsheets
     def quantity_for(spec)
       return spec["quantidade"].to_s.tr(",", ".").to_d if spec["quantidade"].present?
 
-      ref = spec["quantidade_celula"].presence
+      ref = spec["quantidade_celula"].presence || quantity_cell_in_row(spec["aba"], spec["celula"].to_s)
       value = ref && guard { @workbook.value(spec["aba"], ref) }
       value.is_a?(Numeric) ? value.to_d : nil
+    end
+
+    # A IA às vezes não diz onde está a quantidade (proposta 69: 53 linhas, nenhuma com quantidade —
+    # planilha saiu vazia). A quantidade da linha é a coluna cujo cabeçalho, acima, diz "QUANTIDADE".
+    def quantity_cell_in_row(sheet, ref)
+      row = ref[/\d+/].to_i
+      return if sheet.blank? || row.zero?
+
+      @sheet_cells ||= {}
+      cells = (@sheet_cells[sheet] ||= guard { @workbook.cells(sheet) } || [])
+      header = cells.select do |cell|
+        cell.ref[/\d+/].to_i < row && cell.value.is_a?(String) && I18n.transliterate(cell.value).match?(/\bQUANT/i)
+      end.max_by { |cell| cell.ref[/\d+/].to_i }
+      header && "#{header.ref[/[A-Z]+/]}#{row}"
+    end
+
+    # Rateio por ITEM da precificação (preferido, 2026-10): a IA só diz a que item(ns) cada linha do
+    # cliente corresponde (e um peso, se não forem iguais); o Ruby distribui TODAS as peças do item
+    # entre as linhas que o citam. Peça de item que nenhuma linha cita (gestão, custo externo) é
+    # comum: vai pra todas as linhas na proporção do custo próprio delas. Assim toda peça entra uma
+    # vez por construção — na proposta 69 a IA errou as frações de 30 peças e citou "C5" (o campo
+    # inteiro, que não é peça). "composicao" explícita continua valendo e não é rateada de novo.
+    def expand_item_compositions(specs)
+      specs = specs.map { |spec| spec.merge("composicao" => expand_groups(Array(spec["composicao"]))) }
+      rows_of_item = Hash.new { |hash, key| hash[key] = [] }
+      specs.each_with_index { |spec, index| item_refs(spec).each { |id, weight| rows_of_item[id] << [ index, weight ] } }
+      return specs if rows_of_item.empty?
+
+      direct = specs.flat_map { |spec| spec["composicao"].map { |part| part["peca"].to_s } }.to_set
+      extra = Array.new(specs.size) { [] }
+      common = []
+      @catalog.pieces.each do |piece|
+        next if direct.include?(piece.key)
+
+        rows = rows_of_item[@catalog.item_of(piece.key)]
+        next common << piece if rows.empty?
+
+        total = rows.sum(0.to_d) { |_, weight| weight }
+        rows.each { |index, weight| extra[index] << { "peca" => piece.key, "fracao" => weight / total } }
+      end
+      notes = Array.new(specs.size) { [] }
+      rows_of_item.each do |id, rows|
+        name = @catalog.pricing.pricing_items.find { |item| item.id == id }&.name || "item #{id}"
+        total = rows.sum(0.to_d) { |_, weight| weight }
+        rows.each { |index, weight| notes[index] << "#{name}#{" × #{number(weight / total * 100)}%" unless weight == total}" }
+      end
+
+      if common.any?
+        own = specs.each_with_index.map do |spec, index|
+          (spec["composicao"] + extra[index]).sum(0.to_d) { |part| piece_amount(part) }
+        end
+        total_own = own.sum
+        specs.each_index do |index|
+          share = total_own.positive? ? own[index] / total_own : 1.to_d / specs.size
+          next if share.zero?
+
+          common.each { |piece| extra[index] << { "peca" => piece.key, "fracao" => share } }
+          notes[index] << "#{number(share * 100)}% dos custos comuns"
+        end
+      end
+      specs.each_with_index.map do |spec, index|
+        spec.merge("composicao" => spec["composicao"] + extra[index], "rateio" => notes[index].join(" + ").presence)
+      end
+    end
+
+    def item_refs(spec)
+      refs = Array(spec["itens"]).map { |ref| ref.is_a?(Hash) ? [ ref["item"], ref["peso"] ] : [ ref, nil ] }
+      refs << [ spec["item"], nil ] if spec["item"].present?
+      refs.filter_map do |id, weight|
+        weight = weight.present? ? weight.to_s.tr(",", ".").to_d : 1.to_d
+        [ id.to_s[/\d+/].to_i, weight ] if id.to_s[/\d+/] && weight.positive?
+      end
+    end
+
+    # "C5" (o campo inteiro) vira as peças dele (C5.veiculo, C5.combustivel…), com a mesma fração.
+    def expand_groups(parts)
+      parts.flat_map do |part|
+        key = part["peca"].to_s
+        next [ part ] if @catalog[key]&.piece
+
+        group = @catalog.pieces.select { |piece| piece.key.start_with?("#{key}.") }
+        group.any? ? group.map { |piece| part.merge("peca" => piece.key) } : [ part ]
+      end
+    end
+
+    def piece_amount(part)
+      fact = @catalog[part["peca"].to_s]
+      return 0.to_d unless fact&.piece
+
+      fact.value * part["fracao"].to_d * @catalog.piece_multiplier(fact.key)
     end
 
     # Toda peça de custo tem que entrar uma vez (rateio: frações somando 1).

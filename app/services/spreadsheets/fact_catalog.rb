@@ -47,6 +47,25 @@ module Spreadsheets
     # Texto pro prompt: uma linha por fato, com o valor (a IA precisa ver pra entender o que é, mas é
     # instruída a nunca copiar número — só a chave).
     def to_prompt_text
+      [ items_prompt_text, facts_prompt_text ].compact_blank.join("\n\n")
+    end
+
+    # Itens da precificação com o custo (com BDI e impostos) e as peças de cada um — é por eles que a
+    # IA mapeia as linhas de uma lista de preços do cliente ("itens" em precos_unitarios).
+    def items_prompt_text
+      by_item = pieces.group_by { |piece| item_of(piece.key) }
+      lines = pricing.pricing_items.order(:position).map do |item|
+        own = Array(by_item[item.id])
+        price = own.sum(0.to_d) { |piece| piece.value * piece_multiplier(piece.key) }
+        "item #{item.id} = #{display(Fact.new('', '', price.round(2), :money, false))} — #{item.name} " \
+          "(#{own.size} peças: #{own.map(&:key).first(12).join(', ')}#{', …' if own.size > 12})"
+      end
+      common = Array(by_item[nil])
+      lines << "sem item (custos externos, rateados entre todas as linhas): #{common.map(&:key).join(', ')}" if common.any?
+      "ITENS DA PRECIFICAÇÃO (preço com BDI e impostos)\n#{lines.join("\n")}"
+    end
+
+    def facts_prompt_text
       facts.group_by { |fact| fact.key.split(".").first.sub(/\d.*/, "") }.map do |_, group|
         group.map do |fact|
           shown = fact.missing? ? "NÃO INFORMADO" : display(fact)
