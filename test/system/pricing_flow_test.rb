@@ -100,7 +100,7 @@ class PricingFlowTest < ApplicationSystemTestCase
     expected = @pricing.reload.total_value
     assert_selector "[data-pricing-preview-target='summaryTotal']", text: ActiveSupport::NumberHelper.number_to_currency(expected, unit: "R$", separator: ",", delimiter: ".")
     accept_confirm { click_button "Aprovar preço" }
-    assert_text "Preço aprovado"
+    assert_text "Aprovado em" # o aviso some sozinho; o selo do topo fica
     assert_equal "approved", @proposal.reload.status
     shot "08_aprovado"
   end

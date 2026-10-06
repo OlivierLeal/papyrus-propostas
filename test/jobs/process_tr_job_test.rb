@@ -36,6 +36,22 @@ class ProcessTrJobTest < ActiveSupport::TestCase
     assert_equal "tr.pdf", finding.document_name
   end
 
+  # 2026-10 (proposta 34): o que é cada arquivo do campo TR — dá o título do anexo e decide se entra.
+  test "records what each document is, for the annex title; contractual types never go as annex" do
+    attach_tr!(filename: "portaria.pdf")
+    reply = { documentos: [ { arquivo: "portaria.pdf", tipo: "Portaria", numero: "25.288/2022", anexar: true, motivo: "renova a LP" } ], achados: [] }
+
+    stub_ai_complete(reply.to_json) { ProcessTrJob.perform_now(@conversation.id) }
+
+    blob_id = @conversation.attachments_of_kind("tr").first.blob_id.to_s
+    assert_equal({ "tipo" => "Portaria", "numero" => "25.288/2022", "motivo" => "renova a LP", "anexar" => true },
+      @conversation.reload.reference_document_profiles[blob_id])
+
+    reply[:documentos].first.merge!(tipo: "Minuta de contrato", anexar: true)
+    stub_ai_complete(reply.to_json) { ProcessTrJob.perform_now(@conversation.id) }
+    assert_equal false, @conversation.reload.reference_document_profiles[blob_id]["anexar"], "o tipo decide, não o palpite da IA"
+  end
+
   test "marks tr as skipped and still checks completion when there is no TR attachment" do
     # processing_conversation já tem et: pending — sem TR anexado, este job só marca tr como
     # skipped e não dispara o resumo sozinho (falta o ET ainda).

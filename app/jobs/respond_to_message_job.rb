@@ -40,10 +40,14 @@ class RespondToMessageJob < ApplicationJob
     # CLAUDE.md seção 11.1) — mesma disciplina de curadoria da ferramenta acima, card pendente até
     # o consultor aprovar.
     conversation.with_tool(LearnFromRevisedProposalTool.new(conversation: conversation))
+    # TR do estudo como Anexo I (2026-10): procurar o do órgão, ou marcar um arquivo enviado como TR.
+    conversation.with_tool(FindTermOfReferenceTool.new(conversation: conversation))
+    conversation.with_tool(SetTermOfReferenceTool.new(conversation: conversation))
     # #complete_with_lock, nunca #complete cru — serializa este turno contra qualquer
     # #ask_internally concorrente na MESMA conversa (ex.: SuggestScheduleJob, enfileirado de
     # dentro de uma tool call deste turno, ver Conversation#complete_with_lock).
     conversation.complete_with_lock
+    DocumentClaimCheck.new(conversation, before_message_ids, docs_before).call
     # Antes de tirar o "digitando…": é a remoção dele que destrava a caixa de mensagem na tela.
     conversation.release_ai_turn!
 

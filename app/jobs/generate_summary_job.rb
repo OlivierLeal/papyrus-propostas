@@ -15,6 +15,8 @@ class GenerateSummaryJob < ApplicationJob
 
     conversation.mark_step!("summary", "done")
     conversation.update!(status: "reviewing")
+    # Sem TR do cliente, procura o do órgão (CAL/internet) e propõe num card (FindTermOfReferenceJob).
+    FindTermOfReferenceJob.perform_later(conversation.id) unless conversation.client_term_of_reference?
   rescue StandardError => e
     Rails.logger.error("GenerateSummaryJob failed for conversation #{conversation_id}: #{e.class} #{e.message}")
     conversation&.mark_step!("summary", "failed")

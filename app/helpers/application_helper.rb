@@ -101,7 +101,9 @@ module ApplicationHelper
     "remember_for_future_proposals" => "Propôs guardar uma memória",
     "learn_from_revised_proposal" => "Leu a versão revisada da proposta",
     "register_pending_issue" => "Abriu uma pendência",
-    "answer_pending_issue" => "Registrou a resposta de uma pendência"
+    "answer_pending_issue" => "Registrou a resposta de uma pendência",
+    "find_term_of_reference" => "Começou a procurar o Termo de Referência do órgão",
+    "set_term_of_reference" => "Marcou o Termo de Referência do estudo"
   }.freeze
 
   def tool_step?(message)

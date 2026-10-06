@@ -9,6 +9,12 @@ Rails.application.routes.draw do
     end
     resources :messages, only: :create
 
+    resources :term_of_reference_candidates, only: [] do
+      member do
+        post :accept
+        post :reject
+      end
+    end
     resources :knowledge_notes, only: [] do
       member do
         post :approve

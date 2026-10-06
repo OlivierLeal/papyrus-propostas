@@ -64,17 +64,20 @@ class ProposalDocxFiller
   # vazio) quando o valor vier em branco — usado pra item de lista opcional (ex.: obrigação extra
   # da CONTRATANTE/PAPYRUS que só existe quando o ET pede algo específico): a maioria das
   # propostas não tem nenhuma, e um item de lista vazio ("● ") ficaria visível no documento final.
-  def fill(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [])
-    build(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
+  #
+  # annex: TermOfReferenceAnnex::Annex ou lista deles (documentos do órgão como Anexo I, II…) —
+  # entram no fim do documento, depois das assinaturas. Em #fill_split só a técnica recebe.
+  def fill(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil)
+    build(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex)
   end
 
   # technical_overrides/commercial_overrides: placeholders que diferem entre os dois arquivos
   # (ex.: título da capa) — mesclados por cima de `placeholders` só na respectiva variante. Quem
   # decide os valores é quem chama (ver GenerateProposalDocumentTool); este serviço não sabe o
   # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
-  def fill_split(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {})
+  def fill_split(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {}, annex: nil)
     {
-      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :technical) },
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex) { |doc| trim_body!(doc, keep: :technical) },
       commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :commercial) }
     }
   end
@@ -108,7 +111,7 @@ class ProposalDocxFiller
   private
     # Sempre opera numa cópia descartável — Zip::File#open com bloco reescreve o arquivo no
     # próprio caminho ao sair do bloco, então nunca toca no modelo original.
-    def build(placeholders:, tables:, images: {}, schedules: {}, remove_paragraph_if_blank: [])
+    def build(placeholders:, tables:, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil)
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
         FileUtils.cp(@template_path, tmp.path)
 
@@ -154,11 +157,77 @@ class ProposalDocxFiller
             remove_technical_closing_duplicate!(doc)
           end
           renumber_price_quadros!(doc)
+          # Depois do corte técnico/comercial: o anexo vai no fim do arquivo que sobrou, e o
+          # tratamento de "PAPYRUS" acima não mexe no texto do órgão.
+          append_annexes!(doc, annex, zip)
           zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
         end
 
         File.binread(tmp.path)
       end
+    end
+
+    # Os anexos entram antes do <w:sectPr> final do corpo. Texto (documento digital) vai em retrato;
+    # página escaneada vai como imagem, em retrato ou paisagem conforme a página do original — cada
+    # troca de orientação fecha a seção anterior com um parágrafo de <w:sectPr> (mesma mecânica do
+    # cronograma). A 1ª quebra reaproveita as propriedades da seção que já existia (capa com titlePg
+    # incluída); a última seção do anexo passa a ser a do <w:sectPr> final.
+    ANNEX_PORTRAIT_AREA = [ 8504, 14004 ].freeze  # dxa: largura × altura úteis (PORTRAIT_SECT_XML)
+    ANNEX_LANDSCAPE_AREA = [ 14002, 8504 ].freeze # dxa (LANDSCAPE_SECT_XML)
+    ANNEX_FIRST_PAGE_ROOM = 0.88                  # a 1ª página divide espaço com o título
+
+    def append_annexes!(doc, annexes, zip)
+      annexes = Array(annexes)
+      final_section = doc.at_xpath("//w:body/w:sectPr", NS)
+      return if annexes.empty? || final_section.nil?
+
+      base_props = final_section.children.map(&:to_xml).join
+      state = { orientation: :portrait, props: base_props, changed: false, image: 0 }
+      xml = +""
+      annexes.each do |annex|
+        if annex.images? && !annex.separate?
+          annex.pages.each_with_index do |page, index|
+            broke = switch_orientation!(xml, state, page.landscape? ? :landscape : :portrait)
+            xml << TermOfReferenceAnnex::Writer.title_xml(annex.title, page_break: !broke) if index.zero?
+            xml << annex_image_xml(zip, annex, page, index, state, page_break: index.positive? && !broke)
+          end
+        else
+          broke = switch_orientation!(xml, state, :portrait)
+          xml << TermOfReferenceAnnex::Writer.title_xml(annex.title, page_break: !broke) << annex.content_xml
+        end
+      end
+
+      final_section.add_previous_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
+      return unless state[:changed]
+
+      final_section.children.each(&:remove)
+      final_section.add_child(state[:props])
+    end
+
+    # Fecha a seção corrente quando a orientação muda. Devolve true se abriu página nova.
+    def switch_orientation!(xml, state, orientation)
+      return false if state[:orientation] == orientation
+
+      xml << section_break_paragraph_xml(state[:props])
+      state[:orientation] = orientation
+      state[:props] = orientation == :landscape ? LANDSCAPE_SECT_XML : PORTRAIT_SECT_XML
+      state[:changed] = true
+    end
+
+    def annex_image_xml(zip, annex, page, index, state, page_break:)
+      state[:image] += 1
+      area_width, area_height = page.landscape? ? ANNEX_LANDSCAPE_AREA : ANNEX_PORTRAIT_AREA
+      area_height *= ANNEX_FIRST_PAGE_ROOM if index.zero?
+      scale = [ area_width / page.width_pt, area_height / page.height_pt ].min
+      width_emu = (page.width_pt * scale * 635).round
+      height_emu = (page.height_pt * scale * 635).round
+
+      filename = "anexo_#{annex.number}_#{index + 1}.jpg"
+      rel_id = "rIdAnexo#{annex.number}p#{index + 1}"
+      write_image!(zip, rel_id, filename, page.jpeg)
+      ppr = %(#{"<w:pageBreakBefore/>" if page_break}<w:spacing w:before="0" w:after="0"/><w:jc w:val="center"/>)
+      %(<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:pPr>#{ppr}</w:pPr>) +
+        drawing_run_xml(rel_id, filename, width_emu, height_emu, docpr_id: 9100 + state[:image]) + "</w:p>"
     end
 
     # Separa as seções técnicas das comerciais. A capa e a carta de apresentação (tudo antes da
@@ -280,9 +349,9 @@ class ProposalDocxFiller
     # <w:document>), então precisa carregar as próprias. cx/cy em EMU por chamada (não fixo) —
     # o mapa da área de estudo sempre usa a mesma proporção 4:3 (IMAGE_WIDTH_EMU/IMAGE_HEIGHT_EMU),
     # mas o infográfico do cronograma varia de altura conforme o número de linhas de círculos.
-    def drawing_run_xml(rel_id, filename, width_emu, height_emu)
+    def drawing_run_xml(rel_id, filename, width_emu, height_emu, docpr_id: 9001)
       <<~XML
-        <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="#{width_emu}" cy="#{height_emu}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="9001" name="#{filename}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="#{filename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="#{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="#{width_emu}" cy="#{height_emu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>
+        <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="#{width_emu}" cy="#{height_emu}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="#{docpr_id}" name="#{filename}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="#{filename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="#{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="#{width_emu}" cy="#{height_emu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>
       XML
     end
 

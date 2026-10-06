@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_06_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -62,6 +62,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
     t.bigint "framing_confirmed_by_id"
     t.bigint "model_id"
     t.jsonb "processing_steps", default: {}, null: false
+    t.jsonb "reference_document_profiles", default: {}, null: false
     t.datetime "setup_completed_at"
     t.string "status", default: "setup", null: false
     t.datetime "updated_at", null: false
@@ -343,6 +344,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
     t.bigint "model_id"
     t.integer "output_tokens"
     t.string "role", null: false
+    t.boolean "system_notice", default: false, null: false
     t.text "thinking_signature"
     t.text "thinking_text"
     t.integer "thinking_tokens"
@@ -747,6 +749,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
     t.index ["code"], name: "index_study_types_on_code", unique: true
   end
 
+  create_table "term_of_reference_candidates", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "decided_at"
+    t.bigint "decided_by_id"
+    t.string "error"
+    t.string "norm_code"
+    t.text "reason"
+    t.string "source", null: false
+    t.string "status", default: "pending", null: false
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.string "url"
+    t.index ["conversation_id"], name: "index_term_of_reference_candidates_on_conversation_id"
+    t.index ["decided_by_id"], name: "index_term_of_reference_candidates_on_decided_by_id"
+  end
+
   create_table "tool_calls", force: :cascade do |t|
     t.json "arguments", default: {}
     t.datetime "created_at", null: false
@@ -826,5 +845,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_120000) do
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "spreadsheet_fills", "active_storage_blobs", column: "source_blob_id"
   add_foreign_key "spreadsheet_fills", "conversations"
+  add_foreign_key "term_of_reference_candidates", "conversations"
+  add_foreign_key "term_of_reference_candidates", "users", column: "decided_by_id"
   add_foreign_key "tool_calls", "messages"
 end

@@ -354,6 +354,27 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes xml, "Ajuste de escopo conforme pedido do consultor"
   end
 
+  # 2026-10: TR do estudo como Anexo I (texto editável) — vai no único e na técnica, nunca na comercial.
+  test "the TR goes as Anexo I in the combined and technical documents, never in the commercial one" do
+    message = @proposal.conversation.messages.create!(role: "user", content: "TR do órgão")
+    message.attachments.attach(io: StringIO.new(annex_tr_docx), filename: "TR do órgão.docx")
+    candidate = @proposal.conversation.term_of_reference_candidates.create!(source: "consultor", title: "TR do órgão.docx", status: "accepted")
+    candidate.file.attach(message.attachments.first.blob)
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    @proposal.update!(document_split: "combined")
+    result = JSON.parse(tool.execute(**@args))
+    assert_includes result["message"], TermOfReferenceAnnex::TITLE
+    assert_includes document_texts(@proposal.generated_documents.first), TermOfReferenceAnnex::TITLE
+    assert_includes document_texts(@proposal.generated_documents.first), "Conteúdo mínimo do estudo"
+
+    @proposal.update!(document_split: "separated")
+    tool.execute(**@args)
+    latest = @proposal.reload.generated_documents.select { |d| d.blob.metadata["version"].to_i == @proposal.version }
+    assert_includes document_texts(latest.find { |d| d.blob.metadata["kind"] == "tecnica" }), TermOfReferenceAnnex::TITLE
+    assert_not_includes document_texts(latest.find { |d| d.blob.metadata["kind"] == "comercial" }), TermOfReferenceAnnex::TITLE
+  end
+
   test "the cover title matches the document: combined shows 'técnica e comercial', split shows only its own half" do
     @proposal.update!(document_split: "combined")
     tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
@@ -1360,5 +1381,15 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert_equal Date.new(2026, 11, 1), pricing.reload.schedule_papyrus_start_date
     refute_match(/presumi/, result["message"])
+  end
+
+  private
+
+  def annex_tr_docx
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    Zip::OutputStream.write_buffer do |zip|
+      zip.put_next_entry("word/document.xml")
+      zip.write(%(<w:document xmlns:w="#{w}"><w:body><w:p><w:r><w:t>Conteúdo mínimo do estudo</w:t></w:r></w:p></w:body></w:document>))
+    end.string
   end
 end

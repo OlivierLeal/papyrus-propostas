@@ -28,7 +28,6 @@ class RebuildPricingFromClientSheetJob < ApplicationJob
   def notify(proposal, result)
     items = proposal.project_pricing.pricing_items.reload.select(&:mirrored?).map { |item| item.client_label.presence || item.name }
     text = format(MESSAGES.fetch(result || :failed), items: items.to_sentence(last_word_connector: " e "))
-    proposal.conversation.messages.create!(role: "assistant", content: text)
-    proposal.conversation.broadcast_refresh
+    proposal.conversation.post_system_notice!(text)
   end
 end

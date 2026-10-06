@@ -1,0 +1,38 @@
+<%# TR do estudo encontrado pelo sistema (CAL/internet) ou indicado no chat. Pendente, espera o
+    consultor decidir se vira o Anexo I da proposta. locals: candidate %>
+<div id="<%= dom_id(candidate) %>" class="flex flex-col gap-3">
+  <div class="flex flex-col gap-1 min-w-0">
+    <span class="text-xs uppercase tracking-wide opacity-70">Termo de Referência do estudo</span>
+    <p class="text-sm font-medium"><%= candidate.title %></p>
+    <p class="text-xs opacity-70">
+      Fonte: <%= candidate.source_label %>
+      <% if candidate.url.present? %>
+        · <%= link_to "abrir o link", candidate.url, target: "_blank", rel: "noopener noreferrer", class: "link" %>
+      <% end %>
+    </p>
+    <% if candidate.reason.present? %>
+      <p class="text-xs opacity-70"><%= candidate.reason %></p>
+    <% end %>
+  </div>
+
+  <% case candidate.status %>
+  <% when "pending" %>
+    <p class="text-xs opacity-70">Usar como "<%= TermOfReferenceAnnex::TITLE %>"? Ele vai no fim da proposta em texto editável e as exigências dele entram na leitura do estudo.</p>
+    <div class="flex items-center gap-2">
+      <%= button_to "Usar como Anexo I", accept_conversation_term_of_reference_candidate_path(candidate.conversation, candidate), class: "btn btn-xs btn-primary" %>
+      <%= button_to "Descartar", reject_conversation_term_of_reference_candidate_path(candidate.conversation, candidate), class: "btn btn-xs btn-ghost" %>
+    </div>
+  <% when "accepting" %>
+    <p class="text-xs opacity-70 flex items-center gap-2"><span class="loading loading-spinner loading-xs"></span> Buscando o arquivo e lendo o TR…</p>
+  <% when "accepted" %>
+    <p class="text-xs text-success">Vai como Anexo I a partir da próxima geração do documento.</p>
+  <% when "failed" %>
+    <p class="text-xs text-error"><%= candidate.error.presence || "Não consegui buscar o arquivo." %> Baixe pelo link e mande o arquivo no chat dizendo que é o TR.</p>
+    <div class="flex items-center gap-2">
+      <%= button_to "Tentar de novo", accept_conversation_term_of_reference_candidate_path(candidate.conversation, candidate), class: "btn btn-xs btn-outline" %>
+      <%= button_to "Descartar", reject_conversation_term_of_reference_candidate_path(candidate.conversation, candidate), class: "btn btn-xs btn-ghost" %>
+    </div>
+  <% else %>
+    <p class="text-xs opacity-60">Descartado.</p>
+  <% end %>
+</div>

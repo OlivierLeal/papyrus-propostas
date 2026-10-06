@@ -6,7 +6,9 @@ class ProcessTrJob < ApplicationJob
   # do escopo em si (ver ProcessEtJob e a nota de terminologia em CLAUDE.md seção 2).
   def perform(conversation_id)
     conversation = Conversation.find(conversation_id)
-    attachments = conversation.attachments_of_kind("tr")
+    # O do setup ou, sem ele, o aceito no card (achado no CAL/internet ou indicado no chat —
+    # TermOfReferenceCandidate, que reenfileira este job ao aceitar).
+    attachments = conversation.term_of_reference_attachments
     return conversation.mark_step!("tr", "skipped") if attachments.empty?
 
     conversation.mark_step!("tr", "running")
@@ -15,11 +17,12 @@ class ProcessTrJob < ApplicationJob
     Rails.logger.info("[ProcessTrJob] anexos convertidos para texto: #{prepared.converted.join(', ')}") if prepared.converted?
 
     conversation.ask_internally(
-      [ prompt, prepared.inline_text ].compact_blank.join("\n\n"),
+      [ prompt(attachments), prepared.inline_text ].compact_blank.join("\n\n"),
       with: prepared.attachments,
       hide_response: true
     )
     record_findings!(conversation, attachments)
+    record_document_profiles!(conversation, attachments)
     conversation.assign_study_types_from_findings!
     conversation.mark_step!("tr", "done")
   rescue StandardError => e
@@ -31,8 +34,9 @@ class ProcessTrJob < ApplicationJob
 
   private
     # Ver nota em ProcessEtJob sobre não usar RubyLLM::Schema (structured output) com Gemini.
-    def prompt
+    def prompt(attachments)
       menu = StudyType.ai_menu
+      files = attachments.map { |attachment| "\"#{attachment.filename}\"" }.join(", ")
       fields = ProjectFinding::FIELDS.map { |key, config| "- #{key}: #{config[:label]}" }.join("\n")
 
       <<~TEXT
@@ -81,10 +85,21 @@ class ProcessTrJob < ApplicationJob
         caracteres). Nunca parafraseie nem invente um trecho: ele é mostrado ao consultor para ele
         conferir. Achado de natureza "inferencia" ou "sugestao" pode vir sem trecho.
 
+        Diga também O QUE É cada arquivo (#{files}), na mesma ordem — ele pode ir como anexo da
+        proposta, com o título do tipo dele. "tipo" é EXATAMENTE um destes:
+        #{TermOfReferenceAnnex::TYPES.map { |type| "\"#{type}\"" }.join(", ")}.
+        Licença, portaria que concede licença e parecer do órgão NÃO são Termo de Referência — use o
+        tipo real. "numero" é o número oficial do ato quando houver (ex.: "25.288/2022"), senão null.
+        "anexar" é false quando o arquivo é contratual/comercial (minuta, condições de compra, edital,
+        carta-convite, proposta) — esses nunca vão pra proposta.
+
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
 
         {
+          "documentos": [
+            { "arquivo": "nome do arquivo", "tipo": "Portaria", "numero": "25.288/2022", "anexar": true, "motivo": "portaria do órgão que renova a LP" }
+          ],
           "achados": [
             {
               "campo": "condicionantes",
@@ -102,6 +117,23 @@ class ProcessTrJob < ApplicationJob
 
     # Grava os achados com o documento de origem. Vários anexos entram como um documento só para a
     # IA (é assim que o TR é lido), então o blob registrado é o do arquivo principal.
+    # O que é cada arquivo — título do anexo e se ele entra (TermOfReferenceAnnex). Tipo fora do
+    # menu é ignorado (aí vale o palpite pelo nome/1ª página, TermOfReferenceAnnex::Guess).
+    def record_document_profiles!(conversation, attachments)
+      reply = conversation.messages.where(role: "assistant").order(:created_at).last
+      parsed = AiJsonResponse.parse(reply&.content)
+      documents = Array(parsed.is_a?(Hash) ? parsed["documentos"] : nil).select { |d| d.is_a?(Hash) }
+      return if documents.empty?
+
+      profiles = attachments.each_with_index.filter_map do |attachment, index|
+        found = documents.find { |d| d["arquivo"].to_s.strip.casecmp?(attachment.filename.to_s) } || documents[index]
+        next unless found && TermOfReferenceAnnex::TYPES.include?(found["tipo"])
+
+        [ attachment.blob_id.to_s, found.slice("tipo", "numero", "motivo").merge("anexar" => found["anexar"] != false && TermOfReferenceAnnex::ANNEXABLE_TYPES.include?(found["tipo"])) ]
+      end.to_h
+      conversation.update!(reference_document_profiles: conversation.reference_document_profiles.merge(profiles)) if profiles.any?
+    end
+
     def record_findings!(conversation, attachments)
       reply = conversation.messages.where(role: "assistant").order(:created_at).last
       return unless reply

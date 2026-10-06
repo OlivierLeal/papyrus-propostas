@@ -121,7 +121,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     "como o serviço será executado, antes de entrar nos tópicos (ver topicos_escopo). Se o escopo for simples " \
     "demais pra render nenhum tópico à parte, pode ser o texto inteiro da seção. Se o estado da proposta trouxer " \
     "[ENQUADRAMENTO LEGAL × O QUE FOI SOLICITADO], o PRIMEIRO parágrafo é o que aquele bloco manda escrever " \
-    "(o que a legislação enquadra, o que foi solicitado, e o que esta proposta contempla ou que a CONTRATANTE define)."
+    "(o que a legislação enquadra, o que foi solicitado, e o que esta proposta contempla ou que a CONTRATANTE define). " \
+    "Se o estado da proposta listar documento(s) que vão como anexo (Termo de Referência, Portaria…), NÃO transcreva " \
+    "nada deles aqui nem nos tópicos: resuma por tema e remeta pelo nome que o estado dá (ex.: \"conforme a Portaria " \
+    "nº 25.288/2022 (Anexo I)\") — o sistema anexa o documento inteiro."
   param :topicos_escopo, type: "array", required: false,
     desc: "Etapas do PROCESSO de execução do serviço — não é um resumo do que será diagnosticado (isso já está em " \
           "caracterizacao_do_empreendimento/objetivo_dos_servicos), é como a Papyrus vai EXECUTAR: reuniões, " \
@@ -306,8 +309,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     args = proposal.content_json.symbolize_keys.merge(atualizar_cronograma: false)
     result = JSON.parse(new(conversation: proposal.conversation, background_ready: true).execute(**args))
     content = result["success"] ? result["message"] : "Não consegui gerar a proposta: #{result['error']}"
-    proposal.conversation.messages.create!(role: "assistant", content: content)
-    proposal.conversation.broadcast_refresh
+    proposal.conversation.post_system_notice!(content)
   end
 
   # Trava de confirmação do enquadramento (Conversation#framing_confirmation_required?). A mensagem
@@ -372,6 +374,10 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     description = @proposal.version == 1 ? "Emissão Inicial" : args[:descricao_revisao].to_s.presence || "Revisão solicitada pelo consultor"
 
     filler = ProposalDocxFiller.new(Rails.root.join("app/templates/docx/proposta_tecnica_comercial.docx"))
+    # Documentos do órgão (o do campo TR) como Anexo I, II… — na única e na técnica, nunca na comercial.
+    annexes = somente_comercial?(args) ? nil : TermOfReferenceAnnex.build(@conversation.term_of_reference_attachments, profiles: @conversation.reference_document_profiles)
+    annex = annexes&.annexes.presence
+    annex_note = annexes ? annex_message(annexes) : ""
     images = build_images
     schedules = build_schedules
     placeholders = build_placeholders(args, images)
@@ -393,14 +399,15 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       technical_filename = @proposal.docx_filename("tecnica")
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
-        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") }
+        technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") },
+        annex: annex
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, a pedido do consultor. " \
-          "Peça \"gerar completo\"/\"com a comercial\" quando quiser o documento inteiro." \
+          "Peça \"gerar completo\"/\"com a comercial\" quando quiser o documento inteiro.#{annex_note}" \
           "#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}" }.to_json
     elsif somente_comercial?(args)
       commercial_filename = @proposal.docx_filename("comercial")
@@ -421,7 +428,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       files = filler.fill_split(
         placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") },
-        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("comercial") }
+        commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("comercial") },
+        annex: annex
       )
       attach!(files[:technical], technical_filename, "tecnica", description)
       attach!(files[:commercial], commercial_filename, "comercial", description)
@@ -429,15 +437,15 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
+          "disponíveis na Tela de Precificação.#{annex_note}#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined")
-      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank)
+      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex)
       attach!(bytes, combined_filename, "combined", description)
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{annex_note}#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -445,6 +453,21 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   end
 
   private
+    def annex_message(result)
+      notes = result.annexes.map do |annex|
+        how = if annex.separate? then "só o título — #{annex.page_count} páginas, mande o arquivo original junto"
+        elsif annex.images? then "páginas como imagem (o original é escaneado)"
+        else "em texto editável (revise no Word: figuras não vêm e tabela de PDF vira texto)"
+        end
+        "\"#{annex.title}\" (#{how})"
+      end
+      skipped = result.skipped.map { |filename, tipo| "#{filename} (#{tipo.downcase})" }
+      text = +""
+      text << " Anexado no fim do documento: #{notes.join('; ')}." if notes.any?
+      text << " Não anexei, por não ser documento do órgão: #{skipped.join(', ')}." if skipped.any?
+      text
+    end
+
     # Falha aqui nunca derruba a geração do .docx — a planilha é um anexo à parte.
     def client_spreadsheets_note
       queued = SpreadsheetFill.queue_automatic!(@conversation)

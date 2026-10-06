@@ -214,6 +214,23 @@ consertos:
    página passou a depender de `ai_responding?`, e não mais de "a última mensagem é do usuário",
    que ficava eterno quando o job falhava.
 
+**IA anunciando documento que não gerou (2026-10-06, conversa 34: "Proposta regenerada com sucesso!
+…Rev.03.docx" sem chamar a ferramenta — o Rev.03 nunca existiu).** Causa: a geração em segundo plano
+(`GenerateProposalDocumentTool.generate_pending!`) postava "Gerado o arquivo…" como mensagem da IA, logo
+depois de uma tarefa interna; no histórico ela via "ela mesma" anunciando arquivo sem chamar ferramenta e
+imitava. Medido ao vivo: mesmo sem esse exemplo, o Haiku ainda anuncia sem chamar nesta conversa longa.
+- Texto postado pelo SISTEMA é `messages.system_notice` (`Conversation#post_system_notice!`: geração
+  em segundo plano, busca do TR, reorganização pela planilha). `LlmHistoryTrimming#as_system_notices`
+  manda como mensagem de USUÁRIO marcada ("Aviso automático do sistema… NÃO foi escrito por você"). A
+  migração marcou as 8 antigas (prefixo do texto + vem logo depois de mensagem interna).
+- `DocumentClaimCheck` (fim do turno do `RespondToMessageJob`): consultor pediu pra gerar a proposta,
+  a IA não chamou ferramenta nenhuma, nenhum documento novo e nada esperando em segundo plano, e a
+  resposta diz que gerou (frase de sucesso, não a negativa) ou cita revisão que não existe → a resposta
+  é apagada, a IA recebe um aviso interno e responde de novo com a chamada OBRIGATÓRIA
+  (`with_tools(choice: :generate_proposal_document)`; só o aviso não bastou ao vivo). Se ainda assim
+  nada sair, o chat mostra um aviso honesto (`FALLBACK`). Pedido de planilha/XML não conta.
+- O estado da proposta diz que arquivo só existe depois do success da ferramenta.
+
 **Bolha "(sem conteúdo)" no chat = passo em que a IA só chamou ferramenta (2026-09-27, relato do
 consultor).** O ruby_llm grava cada volta de ferramenta como uma mensagem `assistant` SEM texto, com
 as `tool_calls` (a resposta de verdade vem na mensagem seguinte). O resultado da ferramenta
@@ -842,6 +859,55 @@ efeito dominó de sempre ao inserir capítulo novo, ver "ITENS NÃO PREVISTOS" a
   com o cargo). Apoio fica fora do quadro: `professionals.technical_team` (cadastro "Aparece no quadro
   de equipe técnica"; a migração desmarca Carolene e Melissa) — continua na precificação. Molina
   ganhou "Biólogo" na habilitação.
+
+**TR do estudo como ANEXO I, em texto editável (2026-10, Sara: "o TR tem que vir como anexo e não
+no escopo"; Papyrus: texto editável, título "ANEXO I – TERMO DE REFERÊNCIA", na única e na técnica,
+nunca na comercial; o TR pode vir do órgão pelo CAL ou pela internet, procurado sozinho).**
+- **Qual é o TR** (`Conversation#term_of_reference_attachments`): o do setup (kind `tr`) vence; sem ele,
+  o último `TermOfReferenceCandidate` aceito. O `ProcessTrJob` lê o mesmo (aceitar reenfileira ele).
+- **Teste na proposta 34 (mesmo dia): o "TR" era a portaria escaneada da licença, e o OCR deu lixo**
+  (carimbo, assinatura, logo, formulário em paisagem, itens colados num paredão). Virou:
+  - **Título pelo tipo real** ("ANEXO I – PORTARIA Nº 25.288/2022"): o `ProcessTrJob` pede à IA
+    `documentos` (tipo de um menu fechado, `TermOfReferenceAnnex::TYPES`, número, `anexar`) e grava em
+    `conversations.reference_document_profiles` ({ blob_id => … }). Sem isso (documento antigo),
+    `TermOfReferenceAnnex::Guess` adivinha pelo nome do arquivo e pela 1ª página. Minuta, condições
+    de compra, edital/carta-convite e proposta NUNCA viram anexo (a mensagem da ferramenta avisa).
+    Vários arquivos → Anexo I, II…; o estado da proposta dá o nome pra o escopo remeter ("conforme a
+    Portaria nº 25.288/2022 (Anexo I)"). O título não leva o nome do órgão (regra do texto Papyrus).
+  - **PDF escaneado vai como IMAGEM das páginas** (pdftoppm 150 dpi, JPEG), sem OCR — em ato oficial,
+    erro de OCR vira citação errada. Página deitada abre seção em paisagem (`append_annexes!`: a 1ª
+    quebra copia as props da seção existente, com o titlePg da capa; a última seção do anexo vira o
+    sectPr final). PDF digital e `.docx` continuam em texto editável.
+  - Acima de `MAX_PAGES` (40) o anexo sai só com o título e "enviado em arquivo à parte".
+  - Ao vivo na 34: a IA classificou "Portaria 25.288/2022"; o anexo saiu com 1 página retrato + 2
+    paisagem, rodapé e numeração certos, capa intacta.
+- **Anexo** (`TermOfReferenceAnnex`): relê o arquivo e reescreve no padrão Papyrus — `.docx` por estilo
+  (título, parágrafo, lista, tabela simples), PDF por heurística (título numerado/caixa alta, lista por
+  marcador, número do item juntado ao título, sumário com pontilhado removido, cabeçalho/rodapé
+  repetido removido), PDF escaneado por OCR, `.doc/.odt/.rtf` via LibreOffice. Figura vira
+  "[figura do documento original]". PDF do SEI com Calibri perde a ligadura "ti" (sai espaço:
+  "obje vo") — `Reader#repair_ligatures` junta só finais que não existem sozinhos ("vo", "vidade",
+  "ca"…; "fica/ficar" só com o caractere "ﬁ", senão "deverá ficar" virava "deverátificar" — medido
+  nos PDFs do dev: zero mudança nos sem defeito). `ProposalDocxFiller#append_annex!` põe o anexo
+  antes do `sectPr` final, DEPOIS do corte técnico/comercial (`fill(annex:)`/`fill_split(annex:)` só
+  na técnica). Título em página nova, `outlineLvl 0` (navegação do Word) sem o estilo Título 1 (não
+  vira capítulo numerado); listas com `numId 2`; texto do órgão não passa pelo "PAPYRUS" em negrito.
+- **Escopo**: o snapshot diz se há Anexo I e manda resumir e remeter ("conforme o Termo de Referência
+  (Anexo I)") em vez de transcrever; o `param :escopo_e_metodologia` repete isso.
+- **Busca automática** (`FindTermOfReferenceJob`, no fim do `GenerateSummaryJob` quando não há TR do
+  cliente; `FindTermOfReferenceTool` no chat força de novo). O SISTEMA faz as primeiras buscas (CAL e
+  Tavily, termos de estudo/órgão/atividade) e entrega à IA pra julgar — medido ao vivo: deixando só
+  com ela, às vezes respondia "não achei" sem pesquisar. A IA pode ler o texto completo e buscar
+  mais; responde `termo_referencia` ou null (na dúvida, null). `WebSearchTool` entrou no fim de
+  `Conversation#internal_tools` (só leitura). Card (`term_of_reference_candidates/_card`): "Usar como
+  Anexo I" → `AcceptTermOfReferenceJob` (PDF da norma via `SearchLegalNormsTool#full_text`/`LegalNorm`,
+  ou `TermOfReferenceAnnex::Downloader`: só http(s), nunca IP interno, até 25 MB, só PDF/Word,
+  cabeçalho de navegador). Descartado não volta. `SetTermOfReferenceTool`: o consultor diz que um
+  arquivo do chat é o TR → aceito na hora.
+- Ao vivo: VESTAS (eólica em terra, INEMA) e Petrobras (offshore, IBAMA) → null, correto (o TR sai
+  por processo, não há genérico publicado); eólica offshore simulada → achou o TR do IBAMA de 2020.
+  **O site do IBAMA (ibama.gov.br/phocadownload) responde 403 a download automático** (proteção
+  contra robô; não contornar) — o card mostra o erro e pede pra baixar pelo link e mandar no chat.
 
 **Validade da proposta sempre 90 dias, inclusive na técnica-sozinha (2026-08):** a seção
 "VALIDADE DA PROPOSTA" (texto fixo "Esta proposta tem validade de 90 dias.", sem placeholder —

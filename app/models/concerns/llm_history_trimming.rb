@@ -44,12 +44,26 @@ module LlmHistoryTrimming
       ActiveRecord::Associations::Preloader.new(records: messages, associations: [ { attachments_attachments: :blob }, :tool_calls, :parent_tool_call, :model ]).call
       ordered = super
       segments = llm_history_segments(ordered)
-      return ordered if segments.size <= 1
+      return as_system_notices(ordered) if segments.size <= 1
 
       current = segments.pop
       call_ids = tool_call_ids_by_message(ordered.select { |m| m.role.to_s == "assistant" }.map(&:id))
       past = segments.flat_map { |segment| trimmed_llm_segment(segment, call_ids) }
-      with_history_cache_point(past, call_ids) + current[:messages]
+      as_system_notices(with_history_cache_point(past, call_ids) + current[:messages])
+    end
+
+    # Aviso postado pelo sistema (Message#system_notice) vai como mensagem de USUÁRIO marcada, não
+    # como fala da IA: como fala dela, um "Gerado o arquivo…Rev.02" sem chamada de ferramenta ensinava
+    # que gerar é só escrever isso (conversa 34, 2026-10).
+    SYSTEM_NOTICE_PREFIX = "[Aviso automático do sistema, mostrado ao consultor — NÃO foi escrito por você; " \
+      "você só gera documento chamando a ferramenta]"
+
+    def as_system_notices(list)
+      list.map do |message|
+        next message unless message.is_a?(ActiveRecord::Base) && message.try(:system_notice)
+
+        Rewritten.new(RubyLLM::Message.new(role: :user, content: "#{SYSTEM_NOTICE_PREFIX} #{message.content}"))
+      end
     end
 
     # Segmento = de uma mensagem de usuário até a próxima. O snapshot não abre segmento (faz parte
@@ -105,7 +119,7 @@ module LlmHistoryTrimming
     # snapshot — o snapshot muda a cada turno e invalidaria o prefixo).
     def with_history_cache_point(past, call_ids)
       index = past.rindex do |m|
-        m.is_a?(ActiveRecord::Base) && %w[user assistant].include?(m.role.to_s) && !llm_snapshot?(m) &&
+        m.is_a?(ActiveRecord::Base) && %w[user assistant].include?(m.role.to_s) && !llm_snapshot?(m) && !m.try(:system_notice) &&
           call_ids[m.id].blank? && m.content_raw.blank? && m.content.present? && !m.attachments.attached?
       end
       return past unless index

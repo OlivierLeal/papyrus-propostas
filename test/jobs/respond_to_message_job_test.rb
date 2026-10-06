@@ -46,8 +46,9 @@ class RespondToMessageJobTest < ActiveSupport::TestCase
     # ou anexar uma versão final revisada a qualquer momento.
     # SetProjectLocationTool também: o local pode ser definido antes de a proposta existir.
     # RegisterPendingIssueTool também (a IA pode abrir pendência a qualquer momento); a de responder
-    # só entra quando há pendência aberta.
-    assert_equal [ GenerateProposalDocumentTool, SetProjectLocationTool, RememberForFutureProposalsTool, RegisterPendingIssueTool, LearnFromRevisedProposalTool ], with_tool_calls
+    # só entra quando há pendência aberta. As do TR do estudo (procurar/marcar) também valem sempre.
+    assert_equal [ GenerateProposalDocumentTool, SetProjectLocationTool, RememberForFutureProposalsTool, RegisterPendingIssueTool,
+                   LearnFromRevisedProposalTool, FindTermOfReferenceTool, SetTermOfReferenceTool ], with_tool_calls
   end
 
   test "registers both the document-generation and external-cost tools when there is a proposal" do

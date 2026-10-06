@@ -66,6 +66,11 @@
         <% if fill %>
           <%= render "spreadsheet_fills/card", fill: fill %>
         <% end %>
+      <% elsif parsed_content.is_a?(Hash) && parsed_content["term_of_reference_candidate_id"].present? %>
+        <% candidate = TermOfReferenceCandidate.find_by(id: parsed_content["term_of_reference_candidate_id"]) %>
+        <% if candidate %>
+          <%= render "term_of_reference_candidates/card", candidate: candidate %>
+        <% end %>
       <% elsif parsed_content.is_a?(Hash) && parsed_content["knowledge_note_id"].present? %>
         <% note = KnowledgeNote.find_by(id: parsed_content["knowledge_note_id"]) %>
         <% if note %>

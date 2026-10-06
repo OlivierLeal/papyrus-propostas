@@ -17,6 +17,7 @@ class Conversation < ApplicationRecord
   has_many :project_conflicts, dependent: :destroy
   has_many :project_issues, dependent: :destroy
   has_many :spreadsheet_fills, dependent: :destroy
+  has_many :term_of_reference_candidates, dependent: :destroy
   belongs_to :framing_confirmed_by, class_name: "User", optional: true
 
   STATUSES = %w[setup processing reviewing pricing completed].freeze
@@ -620,7 +621,10 @@ class Conversation < ApplicationRecord
     @internal_tools ||= [
       (SearchHistoricalArchiveTool.new if HistoricalProposalChunk.embedded.exists?),
       (SearchLegalNormsTool.new if Cal::Client.configured?),
-      (SearchLegalNormsArchiveTool.new if LegalNormChunk.embedded.exists?)
+      (SearchLegalNormsArchiveTool.new if LegalNormChunk.embedded.exists?),
+      # Só leitura também; no fim da lista pra não mudar a ordem das outras (prefixo do cache).
+      # Usada pela busca do TR do órgão (FindTermOfReferenceJob) quando o CAL não tem.
+      (WebSearchTool.new if WebSearch::Client.configured?)
     ].compact
   end
 
@@ -650,7 +654,10 @@ class Conversation < ApplicationRecord
   # esse anexo "duplicar" nesta lista — ET com 2 arquivos virava 4 depois do primeiro
   # processamento, por exemplo.
   def attachments_of_kind(kind)
-    messages.where(internal: false).flat_map(&:attachments).select { |attachment| attachment.blob.metadata["kind"] == kind.to_s }
+    # Uma consulta só (com o blob): roda a cada turno pelo bloco do TR no estado da proposta.
+    ActiveStorage::Attachment.includes(:blob)
+      .where(record_type: "Message", name: "attachments", record_id: messages.where(internal: false).select(:id))
+      .order(:id).select { |attachment| attachment.blob.metadata["kind"] == kind.to_s }
   end
 
   # .last, não .first: só existe um chamador hoje (ProcessKmzJob, kind "kmz"), e desde que o KMZ
@@ -660,6 +667,26 @@ class Conversation < ApplicationRecord
   # Message#stale_for_llm?.
   def attachment_of_kind(kind)
     attachments_of_kind(kind).last
+  end
+
+  # O TR do estudo desta proposta (2026-10): o que o cliente mandou no setup; sem ele, o último que
+  # o consultor aceitou no card (TermOfReferenceCandidate — achado no CAL/internet ou indicado no
+  # chat). É o que vira o Anexo I do .docx e o que o ProcessTrJob lê.
+  def term_of_reference_attachments
+    client = attachments_of_kind("tr")
+    return client if client.any?
+
+    accepted = term_of_reference_candidates.accepted.order(:decided_at).last
+    accepted&.file&.attached? ? [ accepted.file.attachment ] : []
+  end
+
+  def client_term_of_reference? = attachments_of_kind("tr").any?
+
+  # Texto que o SISTEMA posta no chat (geração em segundo plano, busca do TR, reorganização da
+  # precificação). Marcado como aviso: volta pra IA como aviso do sistema, nunca como fala dela —
+  # senão ela imita (conversa 34: anunciou um Rev.03 que nunca existiu, sem chamar a ferramenta).
+  def post_system_notice!(text)
+    messages.create!(role: "assistant", content: text, system_notice: true).tap { broadcast_refresh }
   end
 
   def processing_step_status(step)
@@ -1037,8 +1064,10 @@ class Conversation < ApplicationRecord
         - Logística: #{pricing.distance_km} km até o projeto, R$ #{pricing.logistics_total} nos campos#{logistics_filled ? " (parâmetros preenchidos)" : " (parâmetros ainda não preenchidos)"}
         - Custos externos: #{external_costs.presence || "nenhum lançado"}
         - Preço total calculado: R$ #{pricing.total_value}
-        - Documentos gerados: #{generated_documents_state_text}
+        - Documentos gerados: #{generated_documents_state_text} (arquivo só existe depois que
+          generate_proposal_document devolve success — nunca anuncie arquivo ou revisão fora desta lista)
         - Planilhas do cliente: #{spreadsheet_fills_state_text}
+        - Termo de Referência (TR do estudo): #{term_of_reference_state_text}
         #{team_all_zero || !logistics_filled ? proposal_state_zero_warning : ""}
       TEXT
     end
@@ -1053,6 +1082,28 @@ class Conversation < ApplicationRecord
       latest_version = blobs.map { |b| b.metadata["version"].to_i }.max
       latest = blobs.select { |b| b.metadata["version"].to_i == latest_version }.map { |b| b.filename.to_s }
       "#{blobs.size} arquivo(s) .docx ao todo; versão mais recente: #{latest.join(', ')}"
+    end
+
+    # O TR anexado muda como o escopo é escrito: com Anexo I, o escopo resume e remete a ele em vez
+    # de transcrever o TR (2026-10, Sara: "o TR tem que vir como anexo e não no escopo").
+    def term_of_reference_state_text
+      files = term_of_reference_attachments
+      plan = TermOfReferenceAnnex.labels(files, profiles: reference_document_profiles) if files.any?
+      if plan&.any?
+        "vai(ão) no fim do documento: #{plan.annexes.map(&:label).join('; ')}. No escopo, NÃO transcreva nem " \
+          "copie esse(s) documento(s): resuma por tema e remeta a ele pelo nome (ex.: \"conforme a " \
+          "#{plan.annexes.first.label}\"). Não precisa anexar nada — o sistema anexa sozinho." \
+          "#{" Não vão como anexo (não são documento do órgão): #{plan.skipped.map(&:first).join(', ')}." if plan.skipped.any?}"
+      elsif files.any?
+        "o arquivo do campo TR (#{files.map { |f| f.filename.to_s }.join(', ')}) não é documento do órgão " \
+          "(#{plan.skipped.map(&:last).join(', ').downcase}) e não vai como anexo. Escreva o escopo normalmente, sem citar Anexo."
+      elsif (open = term_of_reference_candidates.open.order(:id).last)
+        "o sistema encontrou um TR (#{open.title}) e está esperando o consultor decidir no card do chat se ele vira o Anexo I"
+      else
+        "nenhum — o cliente não enviou e nenhum foi aceito. Escreva o escopo normalmente, sem citar Anexo. " \
+          "Se o consultor pedir pra procurar o TR do órgão, use find_term_of_reference; se ele disser que um " \
+          "arquivo já enviado no chat é o TR, use set_term_of_reference."
+      end
     end
 
     def spreadsheet_fills_state_text

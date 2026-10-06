@@ -25,6 +25,46 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     }
   end
 
+  # 2026-10: TR do estudo como Anexo I — no fim do documento único e da técnica; nunca na comercial.
+  test "anexo do TR vai no fim do documento único e da técnica, nunca na comercial" do
+    block = TermOfReferenceAnnex::Block
+    profile = TermOfReferenceAnnex::Profile.new(tipo: "Termo de Referência", numero: nil, anexar: true, motivo: nil)
+    annex = TermOfReferenceAnnex::Annex.new(number: "I", profile: profile, filename: "TR.docx", pages: [], page_count: nil,
+      blocks: [ block.of(:heading, "1. OBJETIVO"), block.of(:paragraph, "Texto do órgão sobre a papyrus.") ])
+
+    combined = parsed_document(@filler.fill(placeholders: @placeholders, tables: @tables, annex: annex))
+    split = @filler.fill_split(placeholders: @placeholders, tables: @tables, annex: annex)
+
+    body = combined.at_xpath("//w:body", NS).element_children
+    title_index = body.index { |node| node.xpath(".//w:t", NS).map(&:text).join == TermOfReferenceAnnex::TITLE }
+    assert title_index, "o anexo entra no documento único"
+    assert_equal "sectPr", body.last.name, "as propriedades da seção final continuam por último"
+    assert_equal title_index + 3, body.size - 1, "o anexo é a última coisa antes do sectPr"
+    assert_includes document_text(split[:technical]), TermOfReferenceAnnex::TITLE
+    assert_not_includes document_text(split[:commercial]), TermOfReferenceAnnex::TITLE
+    assert_includes combined.xpath("//w:t", NS).map(&:text), "Texto do órgão sobre a papyrus.", "o texto do órgão não passa pelo tratamento de PAPYRUS"
+  end
+
+  # Escaneado vai como imagem (2026-10, proposta 34): página deitada abre seção em paisagem, e a capa
+  # continua com o tratamento da 1ª página (titlePg na seção que a quebra fecha).
+  test "anexo escaneado: uma imagem por página, paisagem em seção própria, capa intacta" do
+    profile = TermOfReferenceAnnex::Profile.new(tipo: "Portaria", numero: "25.288/2022", anexar: true, motivo: nil)
+    pages = [ [ 596, 841 ], [ 841, 596 ], [ 841, 596 ] ].map { |w, h| TermOfReferenceAnnex::Page.new(jpeg: "\xFF\xD8jpeg".b, width_pt: w, height_pt: h) }
+    annex = TermOfReferenceAnnex::Annex.new(number: "I", profile: profile, filename: "p.pdf", blocks: [], pages: pages, page_count: 3)
+
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, annex: annex)
+    doc = parsed_document(bytes)
+
+    assert_includes document_text(bytes), "ANEXO I – PORTARIA Nº 25.288/2022"
+    assert_equal %w[word/media/anexo_I_1.jpg word/media/anexo_I_2.jpg word/media/anexo_I_3.jpg], zip_entry_names(bytes).grep(/anexo_/).sort
+    breaks = doc.xpath("//w:body/w:p/w:pPr/w:sectPr", NS)
+    assert breaks.last.at_xpath("w:titlePg", NS), "a quebra antes da paisagem fecha a seção da capa com o tratamento dela"
+    final = doc.at_xpath("//w:body/w:sectPr", NS)
+    assert_equal "landscape", final.at_xpath("w:pgSz", NS)["w:orient"], "as páginas deitadas ficam na última seção, em paisagem"
+    assert_nil final.at_xpath("w:titlePg", NS)
+    assert_equal 3, doc.xpath("//wp:docPr", "wp" => "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing").map { |n| n["id"] }.grep(/\A91/).uniq.size
+  end
+
   test "fill does not modify the original template file" do
     original_bytes = File.binread(TEMPLATE_PATH)
 
