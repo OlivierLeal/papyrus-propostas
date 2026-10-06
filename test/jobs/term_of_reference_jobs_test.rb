@@ -58,6 +58,19 @@ class TermOfReferenceJobsTest < ActiveJob::TestCase
     assert_equal [ "tr.pdf" ], @conversation.term_of_reference_attachments.map { |a| a.filename.to_s }
   end
 
+  # Bug achado em 2026-10-06: o aceite chamava um método privado da ferramenta do CAL.
+  test "aceitar um TR do CAL usa o PDF da norma guardada" do
+    norm = LegalNorm.new(codigo: "NL555", referencia: "NL555 — Resolução 4636/18", full_text: "Roteiro de conteúdo mínimo")
+    norm.pdf.attach(io: StringIO.new("%PDF-1.4 norma"), filename: "NL555.pdf", content_type: "application/pdf")
+    norm.save!
+    candidate = @conversation.term_of_reference_candidates.create!(source: "cal", norm_code: "NL555", title: "Resolução 4636/18", status: "accepting")
+
+    with_cal_configured { AcceptTermOfReferenceJob.perform_now(candidate.id) }
+
+    assert candidate.reload.accepted?, candidate.error
+    assert_equal "NL555.pdf", candidate.file.filename.to_s
+  end
+
   test "falha ao baixar fica registrada no card, e o TR do cliente sempre vence o aceito" do
     candidate = @conversation.term_of_reference_candidates.create!(source: "internet", url: "https://orgao.gov.br/tr.pdf", title: "TR", status: "accepting")
     with_downloader(->(_url) { raise TermOfReferenceAnnex::Downloader::Error, "O link não é um PDF nem um arquivo do Word." }) do

@@ -25,7 +25,7 @@ class AcceptTermOfReferenceJob < ApplicationJob
   def attach_file!(candidate)
     case candidate.source
     when "cal"
-      SearchLegalNormsTool.new.full_text(candidate.norm_code) # guarda a norma (texto + PDF) se ainda não estiver
+      SearchLegalNormsTool.new.execute(codigo_norma: candidate.norm_code) # guarda a norma (texto + PDF) se ainda não estiver
       norm = LegalNorm.find_by(codigo: candidate.norm_code)
       raise ArgumentError, "Não consegui baixar o documento da norma no CAL." unless norm&.pdf&.attached?
 
