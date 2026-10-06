@@ -7,17 +7,19 @@
 # Aceito, o arquivo fica em `file` e passa a ser o TR da conversa (Conversation#term_of_reference_
 # attachments): vira o Anexo I do .docx e o ProcessTrJob lê ele como leria o TR do setup.
 class TermOfReferenceCandidate < ApplicationRecord
-  SOURCES = %w[cal internet consultor].freeze
+  SOURCES = %w[biblioteca cal internet consultor].freeze
   STATUSES = %w[pending accepting accepted rejected failed].freeze
 
   belongs_to :conversation
   belongs_to :decided_by, class_name: "User", optional: true
+  belongs_to :reference_term, optional: true
   has_one_attached :file
 
   validates :source, inclusion: { in: SOURCES }
   validates :status, inclusion: { in: STATUSES }
   validates :title, presence: true
   validates :norm_code, presence: true, if: -> { source == "cal" }
+  validates :reference_term, presence: true, if: -> { source == "biblioteca" }
   validates :url, presence: true, format: { with: %r{\Ahttps?://}i }, if: -> { source == "internet" }
 
   scope :accepted, -> { where(status: "accepted") }
@@ -27,6 +29,7 @@ class TermOfReferenceCandidate < ApplicationRecord
 
   def source_label
     case source
+    when "biblioteca" then "biblioteca de TRs da Papyrus (#{reference_term&.label})"
     when "cal" then "CAL/Ius Natura (#{norm_code})"
     when "internet" then "internet"
     else "arquivo enviado na conversa"

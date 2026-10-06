@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_06_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_06_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -556,6 +556,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_170000) do
     t.index ["reopened_by_id"], name: "index_proposals_on_reopened_by_id"
   end
 
+  create_table "reference_terms", force: :cascade do |t|
+    t.string "activities"
+    t.string "content_type"
+    t.datetime "created_at", null: false
+    t.text "descriptor"
+    t.string "document_type"
+    t.vector "embedding", limit: 1024
+    t.string "embedding_model"
+    t.binary "file_data"
+    t.string "filename", null: false
+    t.text "full_text"
+    t.string "municipality"
+    t.text "notes"
+    t.string "number"
+    t.string "organ"
+    t.string "sha256", null: false
+    t.string "source_path"
+    t.string "status", default: "active", null: false
+    t.string "study_types", default: [], array: true
+    t.text "summary"
+    t.string "title", null: false
+    t.string "uf"
+    t.datetime "updated_at", null: false
+    t.index ["sha256"], name: "index_reference_terms_on_sha256", unique: true
+  end
+
   create_table "schedule_items", force: :cascade do |t|
     t.string "activity_name", null: false
     t.datetime "created_at", null: false
@@ -757,6 +783,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_170000) do
     t.string "error"
     t.string "norm_code"
     t.text "reason"
+    t.bigint "reference_term_id"
     t.string "source", null: false
     t.string "status", default: "pending", null: false
     t.string "title", null: false
@@ -764,6 +791,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_170000) do
     t.string "url"
     t.index ["conversation_id"], name: "index_term_of_reference_candidates_on_conversation_id"
     t.index ["decided_by_id"], name: "index_term_of_reference_candidates_on_decided_by_id"
+    t.index ["reference_term_id"], name: "index_term_of_reference_candidates_on_reference_term_id"
   end
 
   create_table "tool_calls", force: :cascade do |t|
@@ -846,6 +874,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_170000) do
   add_foreign_key "spreadsheet_fills", "active_storage_blobs", column: "source_blob_id"
   add_foreign_key "spreadsheet_fills", "conversations"
   add_foreign_key "term_of_reference_candidates", "conversations"
+  add_foreign_key "term_of_reference_candidates", "reference_terms"
   add_foreign_key "term_of_reference_candidates", "users", column: "decided_by_id"
   add_foreign_key "tool_calls", "messages"
 end

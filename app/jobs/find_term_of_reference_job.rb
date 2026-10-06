@@ -49,7 +49,19 @@ class FindTermOfReferenceJob < ApplicationJob
 
     cal = subjects.flat_map { |subject| cal_search("termo de referência #{subject}") }.uniq(&:first).first(10)
     web = subjects.flat_map { |subject| web_search([ "termo de referência", subject, activity, organ ].compact_blank.uniq.join(" ")) }.uniq(&:first).first(10)
-    { cal: cal, web: web }
+    { library: library_search(conversation), cal: cal, web: web }
+  end
+
+  # Biblioteca de TRs da Papyrus (ReferenceTerm): busca pelo mesmo descritor do serviço do acervo.
+  def library_search(conversation)
+    ReferenceTerm.similar_to(conversation.service_descriptor, limit: SEED_RESULTS_PER_QUERY).map do |term|
+      studies = StudyType.where(code: term.study_types).pluck(:name).join(", ")
+      [ term.id, "#{term.label}#{" (#{term.municipality})" if term.municipality.present?} — estudos: #{studies.presence || 'não indicado'}; " \
+                 "atividade: #{term.activities.presence || 'genérico'}. #{term.summary.to_s.truncate(240)}" ]
+    end
+  rescue StandardError => e
+    Rails.logger.warn("FindTermOfReferenceJob: busca na biblioteca falhou: #{e.class} #{e.message}")
+    []
   end
 
   def cal_search(query)
@@ -73,21 +85,20 @@ class FindTermOfReferenceJob < ApplicationJob
   end
 
   def seeds_text(seeds)
-    cal = seeds[:cal].map { |code, text| "- #{code}: #{text}" }
-    web = seeds[:web].map { |url, text| "- #{url}: #{text}" }
+    lines = ->(list, key) { list.to_a.map { |id, text| "- #{key}#{id}: #{text}" }.join("\n").presence || "(nada)" }
     <<~TEXT
       Resultados que o sistema já buscou (ponto de partida — leia o texto completo das normas
       promissoras com search_legal_norms/codigo_norma e busque mais se nenhum servir):
+      Biblioteca de TRs da Papyrus (TRs oficiais que a Papyrus já juntou — PREFIRA quando servir):
+      #{lines.call(seeds[:library], "id ")}
       CAL:
-      #{cal.join("
-").presence || "(nada)"}
+      #{lines.call(seeds[:cal], "")}
       Internet:
-      #{web.join("
-").presence || "(nada)"}
+      #{lines.call(seeds[:web], "")}
     TEXT
   end
 
-  def searchable? = Cal::Client.configured? || WebSearch::Client.configured?
+  def searchable? = ReferenceTerm.searchable.exists? || Cal::Client.configured? || WebSearch::Client.configured?
 
   # O automático fica quieto quando não acha (não é pendência de ninguém); o pedido no chat responde.
   def tell(conversation, text, force)
@@ -129,6 +140,8 @@ class FindTermOfReferenceJob < ApplicationJob
       "conteúdo mínimo" + estudo; o nome do órgão + "TR" + atividade).
 
       Onde procurar, nesta ordem:
+      0. A BIBLIOTECA de TRs da Papyrus listada acima: TR oficial que a Papyrus já tem. Se um deles é
+         do órgão competente e serve pra este estudo e atividade, proponha ele (fonte "biblioteca").
       1. CAL (search_legal_norms_archive, se existir, e search_legal_norms): muitos TRs saem como
          portaria/instrução normativa/resolução que "aprova o Termo de Referência" para o estudo e a
          atividade. Leia o TEXTO COMPLETO (search_legal_norms com codigo_norma) antes de concluir — a
@@ -146,11 +159,22 @@ class FindTermOfReferenceJob < ApplicationJob
       Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois):
       {"termo_referencia": null}
       ou
+      {"termo_referencia": {"fonte": "biblioteca", "id_biblioteca": 12, "titulo": "...", "justificativa": "..."}}
+      ou
       {"termo_referencia": {"fonte": "cal", "codigo_norma": "NL1234", "titulo": "Portaria nº ... — TR para EIA/RIMA de ...", "justificativa": "por que serve pra este caso, em uma frase"}}
       ou
       {"termo_referencia": {"fonte": "internet", "url": "https://.../tr.pdf", "titulo": "...", "justificativa": "..."}}
       Na dúvida, null — é melhor não propor nada do que propor o TR errado.
     TEXT
+  end
+
+  def library_candidate(conversation, found)
+    term = ReferenceTerm.active.find_by(id: found["id_biblioteca"].to_i)
+    return nil unless term
+    return nil if conversation.term_of_reference_candidates.where(status: "rejected", reference_term: term).exists?
+
+    conversation.term_of_reference_candidates.new(source: "biblioteca", reference_term: term, title: term.title,
+      reason: found["justificativa"].to_s.strip.presence)
   end
 
   def parse(conversation)
@@ -163,6 +187,8 @@ class FindTermOfReferenceJob < ApplicationJob
     return nil unless found.is_a?(Hash)
 
     source = found["fonte"].to_s
+    return library_candidate(conversation, found) if source == "biblioteca"
+
     code = found["codigo_norma"].to_s.strip.presence
     url = found["url"].to_s.strip.presence
     return nil unless (source == "cal" && code) || (source == "internet" && url)

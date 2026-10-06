@@ -24,6 +24,14 @@ class AcceptTermOfReferenceJob < ApplicationJob
 
   def attach_file!(candidate)
     case candidate.source
+    when "biblioteca"
+      term = candidate.reference_term
+      raise ArgumentError, "O TR da biblioteca não está mais disponível." unless term&.file_data.present?
+
+      candidate.file.attach(io: StringIO.new(term.file_data), filename: term.filename, content_type: term.content_type)
+      # O tipo/número já está na biblioteca: o título do anexo sai certo sem esperar a leitura do TR.
+      conversation = candidate.conversation
+      conversation.update!(reference_document_profiles: conversation.reference_document_profiles.merge(candidate.file.blob_id.to_s => term.document_profile))
     when "cal"
       SearchLegalNormsTool.new.execute(codigo_norma: candidate.norm_code) # guarda a norma (texto + PDF) se ainda não estiver
       norm = LegalNorm.find_by(codigo: candidate.norm_code)
