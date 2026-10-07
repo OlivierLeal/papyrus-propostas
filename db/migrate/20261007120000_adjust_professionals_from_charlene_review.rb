@@ -18,10 +18,9 @@ class AdjustProfessionalsFromCharleneReview < ActiveRecord::Migration[8.1]
              'Apoio às campanhas de campo (mateiro/auxiliar).', TRUE, FALSE, FALSE, FALSE, NOW(), NOW()
       WHERE NOT EXISTS (SELECT 1 FROM professionals WHERE name = 'Auxiliar de Campo');
     SQL
-
-    # A diária mudou por SQL: recalcula as propostas abertas, como o callback do cadastro faria.
-    Professional.reset_column_information
-    Professional.where(name: FAUNA_BIOLOGISTS).find_each { |professional| professional.send(:recalculate_open_pricings) }
+    # O recálculo das propostas abertas fica em RecalculateOpenPricingsAfterCharleneReview: ele usa o
+    # código novo, que depende das colunas de AddOwnValuesToProposalProfessionals (rodar aqui quebrou
+    # em produção com "undefined method fixed_amount").
   end
 
   def down
