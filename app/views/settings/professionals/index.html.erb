@@ -39,12 +39,11 @@
               <% end %>
             </td>
             <td class="text-base-content/70"><%= professional.role %></td>
-            <% if professional.cost_in_bdi? %>
-              <td colspan="2" class="text-base-content/60"><span class="badge badge-ghost badge-sm">Custo incluso no BDI</span></td>
-            <% else %>
-              <td class="text-base-content/70"><%= number_to_currency(professional.rate_man_hour, unit: "R$", separator: ",", delimiter: ".") %></td>
-              <td class="text-base-content/70"><%= number_to_currency(professional.rate_daily, unit: "R$", separator: ",", delimiter: ".") %></td>
-            <% end %>
+            <td class="text-base-content/70">
+              <%= number_to_currency(professional.rate_man_hour, unit: "R$", separator: ",", delimiter: ".") %>
+              <% if professional.cost_in_bdi? %><span class="badge badge-ghost badge-sm ml-1" title="Só cobra quando elabora um produto da proposta">Apoio no BDI</span><% end %>
+            </td>
+            <td class="text-base-content/70"><%= number_to_currency(professional.rate_daily, unit: "R$", separator: ",", delimiter: ".") %></td>
             <td>
               <% if professional.active? %>
                 <span class="badge badge-success badge-soft">Ativo</span>

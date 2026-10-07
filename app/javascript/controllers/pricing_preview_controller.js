@@ -28,7 +28,8 @@ export default class extends Controller {
       const days = this.inner(row, "days")
       const itemId = row.dataset.itemId
       planned[itemId] = (planned[itemId] || 0) + days
-      effective[itemId] = (effective[itemId] || 0) + this.effectiveDays(days, this.inner(row, "commute_hours"), row)
+      // Dias de viagem também viram diária de quem vai a campo (PricingItem#days_factor).
+      effective[itemId] = (effective[itemId] || 0) + this.effectiveDays(days, this.inner(row, "commute_hours"), row) + this.inner(row, "travel_days")
       this.updateCommuteNote(row)
     })
 
@@ -62,7 +63,19 @@ export default class extends Controller {
         extraCell.hidden = !(extra > 0)
         extraCell.textContent = `+${this.short(extra)} desloc.`
       }
-      const lineDirect = lineHours * Number(row.dataset.rateHour) + (lineDays + extra) * Number(row.dataset.rateDay)
+      // Valores desta proposta (terceirizado): em branco vale o cadastro (ProposalProfessional#hour_rate).
+      const ownRate = (role, fallback) => {
+        const input = row.querySelector(`[data-role='${role}']`)
+        return input && input.value.trim() !== "" ? this.number(input) : fallback
+      }
+      const hourRate = ownRate("rate-hour", Number(row.dataset.rateHour))
+      const dayRate = ownRate("rate-day", Number(row.dataset.rateDay))
+      const fixed = ownRate("fixed-amount", 0)
+      const hourLabel = row.querySelector("[data-role='hour-rate-label']")
+      if (hourLabel) hourLabel.textContent = `× ${this.brl(hourRate)}/h`
+      const dayLabel = row.querySelector("[data-role='day-rate-label']")
+      if (dayLabel) dayLabel.textContent = `× ${this.brl(dayRate)}/dia`
+      const lineDirect = fixed + lineHours * hourRate + (lineDays + extra) * dayRate
       const subtotal = this.round(lineDirect * multiplier)
       hours += lineHours
       days += lineDays

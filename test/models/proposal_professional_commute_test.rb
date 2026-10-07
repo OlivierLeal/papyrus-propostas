@@ -24,4 +24,16 @@ class ProposalProfessionalCommuteTest < ActiveSupport::TestCase
     assert_equal 1.5, line.commute_extra_days(1.4) # 3 × 0,4 = 1,2 → 1,5
     assert_equal 0, line.commute_extra_days(1)
   end
+
+  # Charlene (2026-10): "as diárias de deslocamento também precisam ser lançadas" — os dias de
+  # viagem do campo viram diária de quem vai a campo, igual ao deslocamento diário.
+  test "travel days of the campaigns also become daily rates for the field team" do
+    pricing = project_pricings(:priced_pricing)
+    field_campaigns(:campo_servico).update!(travel_days: 2) # 2 dias em campo + 2 de viagem → fator 2
+
+    pricing.recalculate!
+
+    assert_equal 48, proposal_professionals(:fauna_flora_line).reload.commute_extra_days
+    assert_equal 0, proposal_professionals(:coordenacao_line).reload.commute_extra_days
+  end
 end

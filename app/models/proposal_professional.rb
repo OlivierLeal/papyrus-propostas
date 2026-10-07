@@ -18,6 +18,8 @@ class ProposalProfessional < ApplicationRecord
 
   validates :deliverable_name, presence: true
   validates :man_hours, :field_days, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :fixed_amount, numericality: { greater_than_or_equal_to: 0 }
+  validates :rate_man_hour_override, :rate_daily_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
 
   # C1 = horas-homem × valor da hora-homem; C2 = diárias × valor da diária
   # C3 = subtotal do profissional = (C1 + C2) × BDI × impostos (ver CLAUDE.md seção 5)
@@ -42,7 +44,15 @@ class ProposalProfessional < ApplicationRecord
   # C1 + C2: horas-homem × valor/hora + diárias (com o acréscimo de deslocamento) × valor/diária,
   # ANTES de BDI e impostos — é o "custo direto" da composição do preço na tela.
   def direct_cost(days_factor = nil)
-    man_hours * professional.rate_man_hour + (field_days + commute_extra_days(days_factor)) * professional.rate_daily
+    fixed_amount + man_hours * hour_rate + (field_days + commute_extra_days(days_factor)) * day_rate
+  end
+
+  # Valores desta proposta (terceirizado com preço próprio, 2026-10); em branco vale o cadastro.
+  def hour_rate = rate_man_hour_override || professional.rate_man_hour
+  def day_rate = rate_daily_override || professional.rate_daily
+
+  def own_values?
+    fixed_amount.positive? || rate_man_hour_override.present? || rate_daily_override.present?
   end
 
   # Hospedagem longe da área alonga os campos do item (FieldCampaign#effective_days) — quem vai a

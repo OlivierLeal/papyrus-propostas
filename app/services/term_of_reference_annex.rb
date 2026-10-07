@@ -438,7 +438,7 @@ module TermOfReferenceAnnex
     # page_break: false quando uma quebra de seção (página nova) já vem logo antes.
     def self.title_xml(title, page_break: true)
       writer = new([])
-      ppr = %(#{"<w:pageBreakBefore/>" if page_break}<w:outlineLvl w:val="0"/><w:spacing w:after="240"/><w:jc w:val="center"/>)
+      ppr = %(#{"<w:pageBreakBefore/>" if page_break}<w:spacing w:after="240"/><w:jc w:val="center"/><w:outlineLvl w:val="0"/>)
       writer.send(:p_xml, ppr, writer.send(:run_xml, title, bold: true, size: 24))
     end
 

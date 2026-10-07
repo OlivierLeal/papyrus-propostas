@@ -173,7 +173,8 @@ class ProposalsController < ApplicationController
         :schedule_papyrus_start_date, :schedule_empreendimento_start_date,
         payment_dates: [],
         payment_schedule_items: %i[ label percentage date ],
-        proposal_professionals_attributes: %i[ id deliverable_name pricing_item_id man_hours field_days man_hours_per_unit field_days_per_unit ],
+        proposal_professionals_attributes: %i[ id deliverable_name pricing_item_id man_hours field_days man_hours_per_unit field_days_per_unit
+                                               fixed_amount rate_man_hour_override rate_daily_override ],
         pricing_enterprises_attributes: %i[ id name ],
         pricing_items_attributes: [
           :id, :name, :pricing_enterprise_id, :client_quantity, { cost_items: %i[ description quantity unit_value ] },

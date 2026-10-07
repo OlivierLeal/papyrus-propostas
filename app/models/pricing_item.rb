@@ -46,9 +46,12 @@ class PricingItem < ApplicationRecord
 
   # Quanto os campos do item cresceram por deslocamento até a hospedagem (dias ajustados ÷
   # planejados; 1 = nada) — ProposalProfessional#commute_extra_days alonga as diárias da equipe.
+  # Quanto as diárias da equipe do item crescem sobre os dias planejados em campo: deslocamento
+  # diário longo (effective_days) e, desde 2026-10, os dias de VIAGEM até o campo (Charlene: "as
+  # diárias de deslocamento também precisam ser lançadas") — quem vai a campo é pago na viagem.
   def days_factor
     planned = field_campaigns.sum(&:days)
-    planned.positive? ? field_campaigns.sum(&:effective_days) / planned : 1.to_d
+    planned.positive? ? field_campaigns.sum(&:trip_days) / planned : 1.to_d
   end
 
   def campaigns_total

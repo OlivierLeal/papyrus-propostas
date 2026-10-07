@@ -148,6 +148,42 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     assert_includes document_text(bytes), "A PAPYRUS vai elaborar o EIA/RIMA, com apoio técnico da PAPYRUS."
   end
 
+  # PTC26047 (2026-10): o Word abriu com "conteúdo ilegível". O w:rPr/w:pPr/w:tcPr tem ORDEM fixa
+  # no schema; <w:b/> acrescentado no fim do rPr (PAPYRUS em negrito, linha de total) e o
+  # <w:noProof/> do campo PAGE do rodapé vinham depois de color/sz. O LibreOffice aceita; o Word não.
+  SCHEMA_ORDER = {
+    "rPr" => %w[rStyle rFonts b bCs i iCs caps smallCaps strike dstrike outline shadow emboss imprint noProof snapToGrid
+                vanish webHidden color spacing w kern position sz szCs highlight u effect bdr shd fitText vertAlign rtl cs em lang
+                eastAsianLayout specVanish oMath],
+    "pPr" => %w[pStyle keepNext keepLines pageBreakBefore framePr widowControl numPr suppressLineNumbers pBdr shd tabs
+                suppressAutoHyphens kinsoku wordWrap overflowPunct topLinePunct autoSpaceDE autoSpaceDN bidi adjustRightInd
+                snapToGrid spacing ind contextualSpacing mirrorIndents suppressOverlap jc textDirection textAlignment
+                textboxTightWrap outlineLvl divId cnfStyle rPr sectPr pPrChange],
+    "tcPr" => %w[cnfStyle tcW gridSpan hMerge vMerge tcBorders shd noWrap tcMar textDirection tcFitText vAlign hideMark]
+  }.freeze
+
+  test "o documento gerado respeita a ordem do schema em rPr, pPr e tcPr (corpo, cabeçalhos e rodapés)" do
+    tables = @tables.merge(3 => { rows: [ [ "Item", "1,00" ], [ "TOTAL", "1,00" ] ], auto_number: true, bold_unnumbered: true })
+    block = TermOfReferenceAnnex::Block
+    profile = TermOfReferenceAnnex::Profile.new(tipo: "Termo de Referência", numero: nil, anexar: true, motivo: nil)
+    annex = TermOfReferenceAnnex::Annex.new(number: "I", profile: profile, filename: "TR.docx", pages: [], page_count: nil,
+      blocks: [ block.of(:heading, "1. OBJETIVO"), block.of(:paragraph, "Texto."), block.of(:list, "Item."), block.of(:table, rows: [ %w[A B], %w[1 2] ]) ])
+    bytes = @filler.fill(placeholders: @placeholders.merge("OBJETIVO_SERVICOS" => "A Papyrus vai elaborar o EIA."), tables: tables,
+      schedules: { "servico" => schedule_payload("servico") }, annex: annex)
+
+    Zip::File.open_buffer(StringIO.new(bytes)) do |zip|
+      zip.glob("word/{document,header*,footer*}.xml").each do |entry|
+        doc = Nokogiri::XML(entry.get_input_stream.read)
+        SCHEMA_ORDER.each do |element, order|
+          doc.xpath("//w:#{element}", NS).each do |node|
+            positions = node.element_children.map { |child| order.index(child.name) }.compact
+            assert_equal positions.sort, positions, "#{entry.name}: w:#{element} fora de ordem: #{node.element_children.map(&:name).join(', ')}"
+          end
+        end
+      end
+    end
+  end
+
   test "fill does not touch 'papyrus' embedded inside another word (e.g. the model's e-mail addresses)" do
     bytes = @filler.fill(placeholders: @placeholders, tables: @tables)
 

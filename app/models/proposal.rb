@@ -65,6 +65,19 @@ class Proposal < ApplicationRecord
       campanha de fauna/flora, levantamento). É contagem de DIAS, nunca de horas.
   TEXT
 
+  # Regras de ordem e agrupamento do cronograma (Charlene, 2026-10, PTC26047: o protocolo saiu
+  # antes da aprovação do EMI, e a fauna em campanhas separadas por grupo).
+  SCHEDULE_RULES = <<~TEXT.strip
+    REGRAS DE ORDEM (obrigatórias):
+    - O estudo é enviado à CONTRATANTE, ela revisa/aprova, e SÓ DEPOIS vem o protocolo no órgão
+      ambiental. Protocolo nunca antes (nem no mesmo período) do envio e da aprovação do estudo.
+      Depois do protocolo: análise do órgão (com eventuais complementações) e emissão da licença.
+    - Campanhas de campo do MESMO meio acontecem JUNTAS: a fauna é UMA campanha com todos os
+      grupos ao mesmo tempo (avifauna, mastofauna, herpetofauna, quirópteros…) — nunca um grupo
+      depois do outro. Seca e chuvosa (sazonalidade) são campanhas diferentes.
+    - Nunca escreva o nome nem a sigla do órgão (INEMA, IBAMA…): use "órgão ambiental".
+  TEXT
+
   SCHEDULE_FILENAME_LABELS = { "servico" => "Cronograma_Servico", "implantacao" => "Cronograma_Implantacao" }.freeze
 
   def schedule_filename(type)
@@ -95,19 +108,32 @@ class Proposal < ApplicationRecord
 
   # functions: { nome normalizado => macrogrupo } que a IA passa na geração (funcoes_equipe).
   # Apoio (professionals.technical_team = false) não entra no quadro — Charlene, 2026-10-01.
-  def team_rows_for_docx(functions: {})
+  # Revisão da Charlene na PTC26047 (2026-10): registro (CREA/CRBio) só da Diretoria, a não ser que
+  # o cliente peça o de todos (`registrations: true`); quem é só apoio de CAMPO (mateiro, auxiliar)
+  # não entra no quadro; e a FUNÇÃO é curta — o detalhe depois do travessão sai.
+  FIELD_SUPPORT_DELIVERABLE = /\b(?:apoio|auxiliar)\s+(?:de\s+)?campo\b|\bmateiro\b/i
+
+  def team_rows_for_docx(functions: {}, registrations: false)
     lines = project_pricing&.proposal_professionals&.includes(:professional)&.to_a || []
     lines = lines.select { |line| line.professional.technical_team || line.professional.always_included }
 
     # UMA linha por profissional (2026-09-29): com a precificação por item, a mesma pessoa tem uma
     # linha de equipe em cada item (campo, elaboração, protocolo…) e saía repetida no quadro.
     lines.group_by(&:professional)
+      .reject { |professional, own| !professional.always_included && own.all? { |line| line.deliverable_name.to_s.match?(FIELD_SUPPORT_DELIVERABLE) } }
       .sort_by { |professional, _| [ DOCX_TEAM_SECTORS.fetch(docx_team_sector(professional)), professional.name.to_s ] }
       .map do |professional, professional_lines|
-        habilitacao = [ professional.specialties.presence, professional.registration.presence ].compact.join(" — ")
+        registration = professional.registration.presence if registrations || docx_team_sector(professional) == :diretoria
+        habilitacao = [ professional.specialties.presence, registration ].compact.join(" — ")
         function = (functions[self.class.normalize_person_name(professional.name)] unless professional.always_included)
-        [ docx_team_sector_label(professional), function || docx_team_function(professional, professional_lines), professional.name.to_s, habilitacao ]
+        function = self.class.short_team_function(function || docx_team_function(professional, professional_lines))
+        [ docx_team_sector_label(professional), function, professional.name.to_s, habilitacao ]
       end
+  end
+
+  # "Apoio Técnico — Flora e Geoprocessamento" → "Apoio Técnico".
+  def self.short_team_function(text)
+    text.to_s.split(/\s+[—–]\s+/).first.to_s.sub(/\s*\([^)]*\)\z/, "").strip
   end
 
   # Equipe fixa (Diretoria/Coordenação) aparece com o CARGO, não com o entregável que a IA escreveu
@@ -201,12 +227,15 @@ class Proposal < ApplicationRecord
       item.proposal_professionals.sort_by { |line| [ line.professional.always_included ? 0 : 1, line.id ] }.each do |line|
         pro = line.professional
         who = [ pro.name, line.deliverable_name.presence ].compact.join(" – ")
+        if line.fixed_amount.positive?
+          cost_rows << (rows << [ nil, "Produto: #{line.deliverable_name.presence || pro.name}", line.fixed_amount ]).last
+        end
         if line.man_hours.positive?
-          cost_rows << (rows << [ nil, "Horas-homem: #{who} (#{number_br(line.man_hours)} HH × R$ #{format_currency(pro.rate_man_hour)})", line.man_hours * pro.rate_man_hour ]).last
+          cost_rows << (rows << [ nil, "Horas-homem: #{who} (#{number_br(line.man_hours)} HH × R$ #{format_currency(line.hour_rate)})", line.man_hours * line.hour_rate ]).last
         end
         days = line.field_days + line.commute_extra_days(factor)
         if days.positive?
-          cost_rows << (rows << [ nil, "Diárias de campo: #{who} (#{number_br(days)} × R$ #{format_currency(pro.rate_daily)})", days * pro.rate_daily ]).last
+          cost_rows << (rows << [ nil, "Diárias de campo: #{who} (#{number_br(days)} × R$ #{format_currency(line.day_rate)})", days * line.day_rate ]).last
         end
       end
       item.field_campaigns.each do |campaign|
@@ -269,6 +298,19 @@ class Proposal < ApplicationRecord
   # generated_documents (version/description); a data de cada uma é a do próprio blob
   # (created_at), sem precisar de coluna própria. Chamado com `version` já incrementado pra
   # versão atual (ver GenerateProposalDocumentTool) — a linha dela entra por último.
+  REVISION_DESCRIPTION_MAX = 70
+
+  # Sumário de Revisões leva uma descrição curta (Charlene, 2026-10: a Rev.01 da PTC26047 saiu com
+  # um parágrafo inteiro de mudanças). Fica a 1ª frase/oração, e no máximo ~70 caracteres sem
+  # cortar palavra.
+  def self.short_revision_description(text)
+    text = text.to_s.squish.sub(/\ARevis[ãa]o\s*\d*\s*[—–:-]?\s*/i, "").gsub(/\s*\([^)]*\)/, "")
+    first = text.split(/(?<=[.;:])\s|\s[—–]\s/).first.to_s.sub(/[.;:,]\z/, "").strip
+    short = first.truncate(REVISION_DESCRIPTION_MAX, separator: " ", omission: "")
+    short = short.sub(/\s+(?:de|do|da|dos|das|e|para|com|em|no|na|ao|à|a|o|os|as)\z/i, "") while short.match?(/\s(?:de|do|da|dos|das|e|para|com|em|no|na|ao|à|a|o|os|as)\z/i)
+    short
+  end
+
   def docx_revision_rows(current_description:)
     # Blobs sem version no metadata são de antes desse controle existir — sem número de revisão
     # nem descrição pra mostrar, não entram na tabela (evita linha "-1" em branco no documento).
@@ -279,7 +321,7 @@ class Proposal < ApplicationRecord
       .map do |v, blobs|
         blob = blobs.first
         rev_num = format("%02d", v.to_i - 1)
-        desc = blob.metadata["description"].to_s.strip
+        desc = self.class.short_revision_description(blob.metadata["description"])
         if v.to_i > 1 && (desc.blank? || desc.downcase.in?([ "emissão inicial", "emissao inicial" ]))
           desc = "Revisão solicitada pelo consultor"
         end
@@ -291,7 +333,7 @@ class Proposal < ApplicationRecord
     curr_desc = if version <= 1
       "Emissão Inicial"
     else
-      desc = current_description.to_s.strip
+      desc = self.class.short_revision_description(current_description)
       if desc.blank? || desc.downcase.in?([ "emissão inicial", "emissao inicial" ])
         "Revisão solicitada pelo consultor"
       else
@@ -831,7 +873,7 @@ class Proposal < ApplicationRecord
       describe = lambda do |professional|
         "- professional_id: #{professional.id} | #{professional.name} (#{professional.role}) | " \
         "habilitação: #{professional.specialties.presence || '—'}" \
-        "#{' | CUSTO NO BDI: entra só com o papel, man_hours e field_days = 0' if professional.cost_in_bdi?}"
+        "#{' | APOIO NO BDI: entra com o papel e man_hours/field_days = 0; só ganha horas se ELABORAR um produto desta proposta (ex.: APR, PGR)' if professional.cost_in_bdi?}"
       end
       active = Professional.active.order(:name).to_a
       fixed, roster = active.partition(&:always_included)
@@ -969,6 +1011,8 @@ class Proposal < ApplicationRecord
         Não invente números de dias de campo/vistorias fora do que já está definido nesta
         proposta — se não souber a duração exata, estime de forma razoável a partir do escopo.
 
+        #{SCHEDULE_RULES}
+
         Por fim, em "marcos_infografico", escolha os ATÉ 6 pontos MAIS IMPORTANTES do
         "cronograma_servico" pra um resumo visual (infográfico de linha do tempo que o cliente vê
         de cara): os marcos/entregas que o cliente mais quer acompanhar — assinatura do contrato,
@@ -1020,6 +1064,8 @@ class Proposal < ApplicationRecord
         (curto, ex.: "Protocolo no órgão ambiental") e "periodo" (a semana 1-based em que o ponto
         acontece). No máximo 6 — se o cronograma for pequeno, pode ter menos.
 
+        #{SCHEDULE_RULES}
+
         Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), exatamente
         neste formato:
 
@@ -1053,7 +1099,7 @@ class Proposal < ApplicationRecord
         periodo = marco["periodo"].to_i
         next if nome.blank? || periodo < 1
 
-        { "nome" => nome, "periodo" => periodo }
+        { "nome" => OrganNames.genericize(nome), "periodo" => periodo }
       end.sort_by { |marco| marco["periodo"] }.first(6)
     end
 
@@ -1185,10 +1231,10 @@ class Proposal < ApplicationRecord
         next if seen.include?(key)
 
         seen << key
-        man_hours, field_days = professional.cost_in_bdi? ? [ 0, 0 ] : [ effort(line["man_hours"]), effort(line["field_days"]) ]
+        man_hours, field_days = [ effort(line["man_hours"]), effort(line["field_days"]) ]
         attrs = { deliverable_name: deliverable, pricing_item: item, man_hours: man_hours, field_days: field_days }
         if item.mirrored? # esforço POR UNIDADE do cliente; ProposalProfessional multiplica pela quantidade
-          per_unit = professional.cost_in_bdi? ? [ 0, 0 ] : [ effort(line["man_hours_por_unidade"]), effort(line["field_days_por_unidade"]) ]
+          per_unit = [ effort(line["man_hours_por_unidade"]), effort(line["field_days_por_unidade"]) ]
           attrs.merge!(man_hours_per_unit: per_unit[0], field_days_per_unit: per_unit[1], man_hours: 0, field_days: 0)
         end
         placeholder = if professional.always_included

@@ -12,7 +12,8 @@ class ProposalProfessionalsController < ApplicationController
 
     if saved
       @pricing.recalculate!
-      redirect_to conversation_proposal_path(@conversation), notice: "#{line.professional.name} adicionado(a) à equipe."
+      verb = params[:restored].present? ? "de volta à" : "adicionado(a) à"
+      redirect_to conversation_proposal_path(@conversation), notice: "#{line.professional.name} #{verb} equipe."
     else
       redirect_to conversation_proposal_path(@conversation), alert: line.errors.full_messages.to_sentence
     end
@@ -28,6 +29,9 @@ class ProposalProfessionalsController < ApplicationController
     line.destroy
     @pricing.recalculate!
 
+    # Desfazer (Charlene, 2026-10: "qd excluimos alguém, não conseguimos desfazer"): a faixa da aba
+    # Equipe recria a linha igual, pelo mesmo create.
+    flash[:removed_line] = { "name" => line.professional.name, "attributes" => line.slice(*RESTORABLE).compact.transform_values(&:to_s) }
     redirect_to conversation_proposal_path(@conversation), notice: "Linha removida."
   end
 
@@ -58,7 +62,10 @@ class ProposalProfessionalsController < ApplicationController
       @pricing.pricing_items.create!(name: name, position: @pricing.pricing_items.maximum(:position).to_i + 1)
     end
 
+    RESTORABLE = %w[professional_id pricing_item_id deliverable_name man_hours field_days man_hours_per_unit field_days_per_unit
+                    fixed_amount rate_man_hour_override rate_daily_override].freeze
+
     def line_params
-      params.require(:proposal_professional).permit(:professional_id, :pricing_item_id, :deliverable_name, :man_hours, :field_days)
+      params.require(:proposal_professional).permit(*RESTORABLE)
     end
 end

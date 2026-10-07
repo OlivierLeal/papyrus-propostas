@@ -114,7 +114,9 @@ module ProposalsHelper
       team_days = lines_by_item.fetch(item.id, []).sum(&:field_days)
       campaigns = item.field_campaigns
       min_days = campaigns.sum { |campaign| campaign.people * campaign.days }
-      max_days = campaigns.sum { |campaign| campaign.people * (campaign.days + campaign.travel_days) }
+      # Viagem e deslocamento entram sozinhos (PricingItem#days_factor): as diárias digitadas são só
+      # os dias EM CAMPO, então o esperado é pessoas × dias.
+      max_days = min_days
 
       if campaigns.any? && team_days.zero?
         PricingCheck.new(label: "#{item.name}: tem campo, mas ninguém da equipe com diárias", tab: "itens", level: :warning)

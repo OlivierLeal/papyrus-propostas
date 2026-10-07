@@ -19,6 +19,17 @@ class ScheduleItem < ApplicationRecord
 
   validates :schedule_type, inclusion: { in: SCHEDULE_TYPES }
   validates :phase_name, :activity_name, presence: true
+
+  # O cronograma vai pro documento do cliente: o órgão sempre genérico (OrganNames).
+  before_validation { self.phase_name, self.activity_name = OrganNames.genericize(phase_name), OrganNames.genericize(activity_name) }
+
+  # Itens gravados antes da regra: mesma troca só pra exibição no documento, sem gravar.
+  def self.genericized(items)
+    items.each do |item|
+      item.phase_name = OrganNames.genericize(item.phase_name)
+      item.activity_name = OrganNames.genericize(item.activity_name)
+    end
+  end
   validates :start_period, :duration_periods, :position,
     presence: true, numericality: { only_integer: true }
   validates :start_period, numericality: { greater_than_or_equal_to: 1 }

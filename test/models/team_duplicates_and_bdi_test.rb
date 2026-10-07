@@ -35,18 +35,22 @@ class TeamDuplicatesAndBdiTest < ActiveSupport::TestCase
     end
   end
 
-  test "custo no BDI: valores zerados no cadastro, sem esforço na sugestão, fora do rateio da planilha" do
+  # Apoio no BDI (Charlene, 2026-10): o valor fica no cadastro; sem esforço a linha não custa nada e
+  # não entra no rateio da planilha, e quando a pessoa elabora um produto (ex.: APR) ela é cobrada.
+  test "apoio no BDI: valor fica no cadastro, sem esforço não custa nem entra no rateio, com produto é cobrado" do
     diretora = professionals(:diretora)
     diretora.update!(cost_in_bdi: true, rate_man_hour: 300)
-    assert_equal [ 0, 0 ], [ diretora.rate_man_hour, diretora.rate_daily ]
+    assert_equal 300, diretora.reload.rate_man_hour
 
-    lines = [ { "professional_id" => diretora.id, "deliverable_name" => "Direção", "man_hours" => 40, "field_days" => 3 } ]
+    lines = [ { "professional_id" => diretora.id, "deliverable_name" => "Direção", "man_hours" => 0, "field_days" => 0 },
+              { "professional_id" => diretora.id, "deliverable_name" => "APR", "man_hours" => 8, "field_days" => 0 } ]
     @proposal.send(:apply_team_lines!, @pricing, lines, @item)
-    line = @pricing.proposal_professionals.find_by(professional: diretora, deliverable_name: "Direção")
-    assert_equal [ 0, 0 ], [ line.man_hours, line.field_days ]
+    support = @pricing.proposal_professionals.find_by(professional: diretora, deliverable_name: "Direção")
+    product = @pricing.proposal_professionals.where(professional: diretora).where("deliverable_name LIKE ?", "%APR%").first
 
     catalog = Spreadsheets::FactCatalog.new(@proposal)
-    assert_not catalog["L#{line.id}"].piece
-    assert_includes stub_class_method(Rag::PrecedentFinder, :new, ->(*) { raise "sem acervo" }) { @proposal.send(:team_suggestion_prompt) }, "CUSTO NO BDI"
+    assert_not catalog["L#{support.id}"].piece if support
+    assert_equal 2400, product.direct_cost(1)
+    assert_includes stub_class_method(Rag::PrecedentFinder, :new, ->(*) { raise "sem acervo" }) { @proposal.send(:team_suggestion_prompt) }, "APOIO NO BDI"
   end
 end

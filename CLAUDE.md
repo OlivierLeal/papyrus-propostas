@@ -507,6 +507,38 @@ informação"; protótipo aprovado).** Eram nove blocos empilhados; agora:
 - Testes de sistema da tela abrem a aba antes de mexer (`open_pricing_tab`, em
   `ApplicationSystemTestCase`); `test/system/pricing_tabs_test.rb` trava o comportamento das abas.
 
+**Revisão da Charlene na PTC26047 (2026-10-07, grupo "IA Propostas Papyrus", conversa 68).**
+- **Apoio no BDI** (`cost_in_bdi`): Diretoria e apoio da operação (Carolene, Yuri — os outros nomes
+  citados não estão no cadastro) não cobram hora, o custo está no BDI/despesas administrativas; mas
+  "caso hajam produtos (ex.: APR), cobramos". O valor da hora/diária deixou de ser zerado no cadastro;
+  a IA dá 0 HH salvo produto, e a linha com esforço é cobrada normalmente.
+- **Terceirizado com preço próprio**: `proposal_professionals.fixed_amount` (valor fechado do produto) e
+  `rate_man_hour_override`/`rate_daily_override` (em branco = cadastro). `ProposalProfessional#direct_cost`
+  soma o fixo; `#hour_rate`/`#day_rate` valem pra tela, prévia JS (data-role fixed-amount/rate-*),
+  quadro detalhado do `.docx` e `FactCatalog`. Caso real: Wlisses, R$ 5.000 + 5 × R$ 350.
+- **Viagem vira diária**: `PricingItem#days_factor` = Σ `trip_days` (dias ajustados + viagem) ÷ dias
+  planejados — quem vai a campo ganha as diárias de deslocamento no "+N desloc."; JS igual.
+  `field_days_checks` espera pessoas × dias (sem viagem, que entra sozinha).
+- Cadastro (migração `AdjustProfessionalsFromCharleneReview`): biólogos de fauna R$ 380/diária,
+  profissional "Auxiliar de Campo" (R$ 200/diária, fora do quadro técnico), Carolene e Yuri no BDI.
+- **Quadro de Equipe**: registro (CREA/CRBio) só da Diretoria, salvo `registros_equipe: true` (cliente
+  pediu); apoio de campo (entregável "apoio/auxiliar de campo", "mateiro") fora; FUNÇÃO perde o que vem
+  depois do travessão (`Proposal.short_team_function`).
+- **Texto**: tempo de escritório sai do texto técnico (`OFFICE_TIME_SENTENCE`); `OrganNames.genericize`
+  troca sigla de órgão por "órgão ambiental" no texto, nos itens do cronograma (`ScheduleItem`, também na
+  exibição de itens antigos) e nos marcos do infográfico; geoprocessamento só no tópico próprio; nova
+  revisão parte da anterior (`Conversation#last_generation_state_text`, bloco [ÚLTIMA VERSÃO GERADA]).
+- **Cronograma**: `Proposal::SCHEDULE_RULES` nos dois prompts — protocolo só depois do envio e da
+  aprovação do estudo pela CONTRATANTE; campanhas do mesmo meio juntas (fauna = uma campanha com todos os
+  grupos; seca/chuvosa separadas).
+- **TR encontrado e não aceito**: ela pediu "incluir o TR no anexo" e o card ficou pendente — a revisão
+  disse que o TR estava no Anexo I sem estar. `SetTermOfReferenceTool(usar_encontrado: true)` aceita pelo
+  chat; o estado da proposta diz que TR pendente NÃO vai no documento; a geração espera o download
+  (`pending_generation` "term_of_reference", liberado no `ensure` do `AcceptTermOfReferenceJob`).
+- **Tela**: remover alguém da equipe deixa a faixa "X saiu da equipe · Desfazer" (flash `removed_line`,
+  recria pelo mesmo create); cabeçalho de cada item na aba Equipe mostra "+ logística R$ X (N campos)",
+  link que abre o item em Itens e campo (`tabs_controller` segue `hashchange`).
+
 **Prévia ao vivo na Tela de Precificação (2026-09-27, pedido do consultor: "quando eu mudo a
 hora homem ele não atualiza o valor no frontend").** `pricing_preview_controller.js` refaz no
 navegador a MESMA conta do Ruby (`ProposalProfessional#expected_subtotal`,
@@ -990,6 +1022,18 @@ por um modelo ANTIGO passar pelo `insert_schedule_section`, `landscape_refs` nã
 e mantém `rId16` (sai levemente torto, mas nunca dangling ref). Teste trava
 `footerReference r:id` = `rId16` na quebra retrato e `rId20` na paisagem, e que o modelo traz
 `word/footer2.xml`.
+
+**"O Word encontrou conteúdo ilegível" (2026-10, Charlene na PTC26047).** O LibreOffice abre, o Word
+não: `w:rPr`/`w:pPr`/`w:tcPr` têm ORDEM fixa no schema, e havia três desvios — `bold_run!` punha
+`<w:b/>` no FIM do rPr (depois de color/sz: todo "PAPYRUS" em negrito e as linhas de total), o
+`<w:noProof/>` do campo PAGE do rodapé vinha depois de sz, e o título do anexo do TR tinha `outlineLvl`
+antes de spacing/jc. Corrigidos (modelo por string crua, `bold_run!` insere logo depois de
+rStyle/rFonts). Teste "respeita a ordem do schema" gera o documento com cronograma e anexo e confere
+corpo, cabeçalhos e rodapés — **todo XML novo que o sistema escrever tem que passar nele**.
+
+**Sumário de Revisões curto (mesmo dia, áudio da Charlene).** `Proposal.short_revision_description`:
+1ª oração, sem parênteses nem "Revisão 01 —", até 70 caracteres sem cortar palavra; o
+`param :descricao_revisao` pede até 8 palavras.
 
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,

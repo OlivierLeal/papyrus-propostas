@@ -17,6 +17,15 @@ export default class extends Controller {
     if (hashTab) this.store(hashTab)
     this.reapply = () => this.show(this.stored() || this.defaultValue)
     this.revealInvalid = (event) => this.reveal(event.target)
+    // Link interno (ex.: "+ logística" da aba Equipe → #item-12) só muda a âncora: abre a aba dela.
+    this.followHash = () => {
+      const tab = this.fromHash()
+      if (!tab) return
+      this.store(tab)
+      this.hashTarget()?.querySelectorAll("details").forEach((details) => { details.open = true })
+      this.scrollToHash()
+    }
+    window.addEventListener("hashchange", this.followHash)
     document.addEventListener("turbo:morph", this.reapply)
     this.element.addEventListener("invalid", this.revealInvalid, true)
     this.reapply()
@@ -24,6 +33,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    window.removeEventListener("hashchange", this.followHash)
     document.removeEventListener("turbo:morph", this.reapply)
     this.element.removeEventListener("invalid", this.revealInvalid, true)
   }

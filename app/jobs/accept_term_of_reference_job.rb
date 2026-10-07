@@ -18,6 +18,9 @@ class AcceptTermOfReferenceJob < ApplicationJob
     fail!(candidate, "Não consegui buscar o arquivo agora.")
   ensure
     candidate&.conversation&.broadcast_refresh
+    # Geração que esperava o TR (pedido "inclua o TR" seguido de "gere") sai agora — com ou sem ele.
+    proposal = candidate&.conversation&.proposal
+    GenerateProposalDocumentTool.background_task_finished!(proposal, "term_of_reference") if proposal
   end
 
   private

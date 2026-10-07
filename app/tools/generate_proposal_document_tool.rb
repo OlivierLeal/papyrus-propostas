@@ -79,6 +79,16 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     entregável como se fosse executado pela própria Papyrus — nunca use "terceirizado",
     "subcontratado", "quarteirizado", "parceiro externo" nem equivalente em nenhum parâmetro
     desta ferramenta.
+
+    Revisão da Charlene (2026-10):
+    - Tempo de escritório (dias/horas de processamento, de elaboração, de análise em escritório)
+      é dado de ORÇAMENTO: nunca aparece no texto. Duração de CAMPANHA de campo pode aparecer.
+    - Mapas, geoprocessamento e cartografia ficam SÓ no tópico próprio deles. Não repita "os
+      mapas serão elaborados pela equipe de geoprocessamento" em cada meio (físico, flora…).
+    - NOVA REVISÃO de uma proposta que já foi gerada: parta do conteúdo da versão anterior
+      (bloco [ÚLTIMA VERSÃO GERADA] do estado da proposta) e ACRESCENTE/AJUSTE o que o consultor
+      pediu. Nunca reescreva do zero nem tire escopo, produto ou estudo que já estava lá sem o
+      consultor pedir — ex.: se a anterior era RLP e agora entra o EMI, a nova tem os dois.
     Se a resposta vier com "pending": true, a equipe e/ou o cronograma ainda estão sendo
     preparados: o sistema gera o documento sozinho assim que terminarem e posta no chat. Avise o
     consultor com a mensagem da resposta e NÃO chame esta ferramenta de novo por isso.
@@ -159,6 +169,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "\"Assessoria Ambiental Estratégica\", \"Meio Biótico – Fauna\", \"Meio Físico\", \"Geoprocessamento\", " \
           "\"Socioeconomia\", \"Arqueologia\". Nunca o entregável detalhado, nunca nome de órgão ou sistema. " \
           "Diretoria e Coordenação saem com o cargo (o sistema cuida); quem é só apoio administrativo/revisão não aparece no quadro."
+  param :registros_equipe, type: "boolean", required: false,
+    desc: "true SÓ quando o ET/TR (ou o consultor) pede o registro profissional (CREA/CRBio) de TODA a equipe. " \
+          "Sem isso, o Quadro de Equipe mostra o registro só da Diretoria (Charlene, 2026-10)."
   param :produtos, type: "array",
     desc: "Lista dos produtos/entregáveis — tem que bater com o que topicos_escopo descreve: cada etapa que gera " \
           "um documento próprio (o estudo/diagnóstico principal, mas também fichas, relatórios e certidões " \
@@ -233,7 +246,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
           "do próprio .docx sai sempre, com ou sem isto. Não repita a exportação sozinha nas gerações seguintes " \
           "só porque saiu uma vez — cada geração decide de novo com base no que está acontecendo nesta."
 
-  param :descricao_revisao, desc: "Resumo curto do que mudou desde a última geração (ex.: \"Ajuste de escopo conforme pedido do consultor\"). " \
+  param :descricao_revisao, desc: "Frase CURTA, de até 8 palavras, dizendo o que mudou desde a última geração (ex.: " \
+    "\"Inclusão de campanhas de campo e do Anexo I\", \"Ajuste de escopo e preço\"). Sem detalhar dias, equipe ou valores: " \
+    "o Sumário de Revisões só identifica a revisão — o sistema corta o que passar de ~70 caracteres. " \
     "Ignorado na 1ª geração da proposta — o sistema sempre usa \"Emissão Inicial\" nesse caso — mas o parâmetro deve ser enviado mesmo assim."
 
   param :somente_tecnica, type: "boolean", required: false,
@@ -282,7 +297,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   # `pending_generation` com o que está faltando e responde que vai gerar sozinho. Cada job chama
   # isto ao terminar — com sucesso OU falha (senão a proposta esperaria pra sempre); quem tira o
   # último item da lista gera o documento, uma vez só, com o que estiver pronto.
-  PENDING_TASKS = { team: "team", schedule: "schedule", schedule_update: "schedule", key_points: "key_points" }.freeze
+  PENDING_TASKS = { team: "team", schedule: "schedule", schedule_update: "schedule", key_points: "key_points",
+                    term_of_reference: "term_of_reference" }.freeze
   # Job que morreu sem avisar (worker reiniciado): pedir de novo depois disto gera com o que houver.
   PENDING_TIMEOUT = 10.minutes
 
@@ -575,12 +591,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       items = pricing.schedule_items.select { |item| item.schedule_type == type }
       return nil if items.empty? || start_date.blank?
 
-      payload = { start_date: start_date, items: items }
+      payload = { start_date: start_date, items: ScheduleItem.genericized(items) }
       # Só o cronograma do serviço tem os ≤6 marcos que a IA elegeu pro infográfico — o de
       # implantação segue com um círculo por fase. Se a IA ainda não elegeu (ou job pendente),
       # usa seleção determinística de até 6 marcos padrão para nunca exceder 6 círculos.
       if type == "servico"
-        payload[:key_points] = pricing.schedule_key_points.presence || @proposal.default_schedule_key_points
+        key_points = pricing.schedule_key_points.presence || @proposal.default_schedule_key_points
+        payload[:key_points] = Array(key_points).map { |point| point.merge("nome" => OrganNames.genericize(point["nome"])) }
       end
       payload
     end
@@ -715,9 +732,15 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     ORGAN_SYSTEMS = /\b(?:SEI[\s-]?(?:BAHIA|Bahia)|SEIA|SEI|[eE]-?(?:Protocolo|PROTOCOLO))\b/
     FILE_REFERENCE = /\s*,?\s*(?:através|por meio|a partir|conforme)\s+d[oa]s?\s+(?:documentos?|arquivos?|e-?mails?)\s+[“"][^”"]*[”"]/i
 
+    # Tempo de escritório é dado de orçamento, não do texto técnico (Charlene, 2026-10: "O
+    # processamento e elaboração do diagnóstico serão realizados em 08 (oito) dias de escritório").
+    OFFICE_TIME_SENTENCE = /[^.!?\n]*\b(?:dias?|horas?)\s+(?:úteis\s+)?de\s+escrit[óo]rio\b[^.!?\n]*[.!?]?\s*/i
+
     def clean_client_text(value)
       case value
-      when String then value.gsub(FILE_REFERENCE, "").gsub(ORGAN_SYSTEMS, "sistema do órgão ambiental")
+      when String
+        OrganNames.genericize(value.gsub(FILE_REFERENCE, "").gsub(ORGAN_SYSTEMS, "sistema do órgão ambiental")
+          .gsub(OFFICE_TIME_SENTENCE, "").gsub(/ +\n/, "\n").rstrip)
       when Array then value.map { |item| clean_client_text(item) }
       else value
       end
@@ -818,7 +841,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         # merge_first_column: junta "Diretoria"/"Gestão"/"Execução" numa célula só quando mais de
         # um profissional cai no mesmo setor em linhas consecutivas (2026-09, pedido do consultor
         # — ver ProposalDocxFiller#merge_first_column!).
-        2 => { rows: @proposal.team_rows_for_docx(functions: team_functions(args)), merge_first_column: true },
+        2 => { rows: @proposal.team_rows_for_docx(functions: team_functions(args), registrations: ActiveModel::Type::Boolean.new.cast(args[:registros_equipe]) || false),
+              merge_first_column: true },
         3 => { rows: @proposal.docx_price_rows(descricao_fallback: args[:descricao_servico]), auto_number: false, bold_unnumbered: true },
         4 => { rows: @proposal.docx_payment_schedule_rows, auto_number: true }
       }
@@ -1007,7 +1031,8 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         return nil
       end
 
-      tasks = [ ensure_team_background_work!, ensure_schedule_background_work!(args) ].compact.map { |task| PENDING_TASKS.fetch(task) }.uniq
+      tasks = [ ensure_team_background_work!, ensure_schedule_background_work!(args), term_of_reference_download ]
+        .compact.map { |task| PENDING_TASKS.fetch(task) }.uniq
       return nil if tasks.empty?
 
       @proposal.update!(pending_generation: { "waiting" => tasks, "requested_at" => Time.current.iso8601 })
@@ -1015,12 +1040,19 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     end
 
     def pending_response(tasks, again: false)
-      names = { "team" => "a equipe técnica", "schedule" => "o cronograma", "key_points" => "os marcos do infográfico do cronograma" }
+      names = { "team" => "a equipe técnica", "schedule" => "o cronograma", "key_points" => "os marcos do infográfico do cronograma",
+                "term_of_reference" => "o Termo de Referência (Anexo I)" }
       what = Array(tasks).map { |task| names.fetch(task, task) }.to_sentence(two_words_connector: " e ", last_word_connector: " e ")
       { success: true, pending: true, version: nil, filenames: [],
         message: "#{again ? 'Ainda estou' : 'Estou'} preparando #{what} desta proposta. Assim que terminar (em geral " \
           "menos de um minuto), gero o documento completo e aviso aqui no chat — não precisa pedir de novo. " \
           "Os ajustes que você pediu já estão guardados e entram nessa geração." }.to_json
+    end
+
+    # TR aceito que ainda está sendo baixado (AcceptTermOfReferenceJob): gerar agora sairia sem o
+    # Anexo I que o consultor acabou de pedir.
+    def term_of_reference_download
+      :term_of_reference if @conversation.term_of_reference_candidates.where(status: "accepting").exists?
     end
 
     def ensure_team_background_work!

@@ -125,14 +125,15 @@ module Spreadsheets
         add("#{k}.cargo", "Cargo", pro.role, :text)
         add("#{k}.entregavel", "Entregável/função nesta proposta", line.deliverable_name, :text)
         add("#{k}.hh", "Horas-homem", line.man_hours.to_d, :number)
-        add("#{k}.valor_hh", "Valor da hora-homem (cheio, sem BDI)", pro.rate_man_hour.to_d, :money)
+        add("#{k}.valor_fechado", "Valor fechado do produto (terceirizado, sem BDI)", line.fixed_amount.to_d, :money) if line.fixed_amount.positive?
+        add("#{k}.valor_hh", "Valor da hora-homem (cheio, sem BDI)", line.hour_rate.to_d, :money)
         add("#{k}.diarias", "Diárias de campo (com acréscimo de deslocamento)", days, :number)
-        add("#{k}.valor_diaria", "Valor da diária (cheio, sem BDI)", pro.rate_daily.to_d, :money)
+        add("#{k}.valor_diaria", "Valor da diária (cheio, sem BDI)", line.day_rate.to_d, :money)
         add("#{k}.horas_diarias", "Diárias convertidas em horas (× 8)", days * 8, :number)
-        add("#{k}.valor_hora_diaria", "Valor da diária por hora (÷ 8)", pro.rate_daily.to_d / 8, :money)
+        add("#{k}.valor_hora_diaria", "Valor da diária por hora (÷ 8)", line.day_rate.to_d / 8, :money)
         add("#{k}.encargos_pct", "Encargos sociais (fração do salário)#{' — não informado, valor cheio' unless charges}", charges || 0, :percent)
-        add("#{k}.salario_hh", "Salário por hora-homem, sem encargos", pro.rate_man_hour.to_d / (1 + (charges || 0)), :money)
-        add("#{k}.salario_hora_diaria", "Salário por hora de diária, sem encargos", pro.rate_daily.to_d / 8 / (1 + (charges || 0)), :money)
+        add("#{k}.salario_hh", "Salário por hora-homem, sem encargos", line.hour_rate.to_d / (1 + (charges || 0)), :money)
+        add("#{k}.salario_hora_diaria", "Salário por hora de diária, sem encargos", line.day_rate.to_d / 8 / (1 + (charges || 0)), :money)
       end
     end
 

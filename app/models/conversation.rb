@@ -1067,9 +1067,26 @@ class Conversation < ApplicationRecord
         - Documentos gerados: #{generated_documents_state_text} (arquivo só existe depois que
           generate_proposal_document devolve success — nunca anuncie arquivo ou revisão fora desta lista)
         - Planilhas do cliente: #{spreadsheet_fills_state_text}
+        #{last_generation_state_text}
         - Termo de Referência (TR do estudo): #{term_of_reference_state_text}
         #{team_all_zero || !logistics_filled ? proposal_state_zero_warning : ""}
       TEXT
+    end
+
+    # O que a última versão gerada continha (Charlene, 2026-10: pediram o EMI e a IA gerou SÓ o EMI,
+    # sem a RLP da versão anterior). Numa nova revisão a IA parte daqui e acrescenta o pedido.
+    def last_generation_state_text
+      content = proposal.content_json.presence
+      return "- [ÚLTIMA VERSÃO GERADA]: nenhuma ainda" unless content.is_a?(Hash)
+
+      topics = Array(content["topicos_escopo"]).map { |topic| topic.to_s.split("|").first.to_s.strip }.compact_blank
+      products = Array(content["produtos"]).map { |product| product.to_s.split("|").first.to_s.strip }.compact_blank
+      [
+        "- [ÚLTIMA VERSÃO GERADA] (numa nova revisão, parta dela e acrescente o pedido — não tire nada sem o consultor pedir):",
+        "  serviço: #{content['descricao_servico'].to_s.truncate(200)}",
+        ("  tópicos do escopo: #{topics.join('; ').truncate(600)}" if topics.any?),
+        ("  produtos: #{products.join('; ').truncate(600)}" if products.any?)
+      ].compact.join("\n")
     end
 
     # Versão atual do documento e planilhas preenchidas, como ESTADO (não como lembrança de uma
@@ -1098,7 +1115,9 @@ class Conversation < ApplicationRecord
         "o arquivo do campo TR (#{files.map { |f| f.filename.to_s }.join(', ')}) não é documento do órgão " \
           "(#{plan.skipped.map(&:last).join(', ').downcase}) e não vai como anexo. Escreva o escopo normalmente, sem citar Anexo."
       elsif (open = term_of_reference_candidates.open.order(:id).last)
-        "o sistema encontrou um TR (#{open.title}) e está esperando o consultor decidir no card do chat se ele vira o Anexo I"
+        "o sistema encontrou um TR (#{open.title}) e está esperando decisão no card do chat. ENQUANTO NÃO FOR ACEITO, " \
+          "ELE NÃO VAI NO DOCUMENTO — não escreva que há Anexo I. Se o consultor pedir pra incluir/anexar esse TR, " \
+          "chame set_term_of_reference com usar_encontrado: true (e só gere o documento depois de aceito)"
       else
         "nenhum — o cliente não enviou e nenhum foi aceito. Escreva o escopo normalmente, sem citar Anexo. " \
           "Se o consultor pedir pra procurar o TR do órgão, use find_term_of_reference; se ele disser que um " \

@@ -13,7 +13,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       municipios: "Vitória da Conquista",
       estado: "BA",
       cnpj_cliente: "12.345.678/0001-90",
-      objetivo_dos_servicos: "Obter a Licença Prévia junto ao INEMA.",
+      objetivo_dos_servicos: "Obter a Licença Prévia junto ao órgão ambiental.",
       caracterizacao_do_empreendimento: "Parque eólico com 24 aerogeradores.",
       nome_documento_tr: "Termo de Referência EIA-RIMA",
       escopo_e_metodologia: "Diagnósticos dos meios físico, biótico e socioeconômico.",
@@ -78,7 +78,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_includes result["message"], "preço ainda não foi revisado"
 
     xml = document_xml(document)
-    assert_includes xml, "Obter a Licença Prévia junto ao INEMA." # texto técnico preenchido normalmente
+    assert_includes xml, "Obter a Licença Prévia junto ao órgão ambiental." # texto técnico preenchido normalmente
     assert_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO" # seção comercial sai igual, mesmo em draft
   end
 
@@ -155,7 +155,7 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     xml = document_xml(document)
     assert_includes xml, "PREÇO E CONDIÇÕES DE PAGAMENTO"
-    assert_not_includes xml, "Obter a Licença Prévia junto ao INEMA." # texto técnico não entra
+    assert_not_includes xml, "Obter a Licença Prévia junto ao órgão ambiental." # texto técnico não entra
   end
 
   test "somente_tecnica and somente_comercial together return an error instead of a document" do
@@ -968,7 +968,37 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_not_includes xml, "F1152"
     assert_not_includes xml, "F1237"
     assert_includes document_texts(@proposal.generated_documents.first).join(" "),
-      "Área de 464,79 hectares , com licença emitida pela SEMACE ."
+      "Área de 464,79 hectares , com licença emitida pelo órgão ambiental ."
+  end
+
+  # Charlene (2026-10, PTC26047): tempo de escritório é dado de orçamento; o nome do órgão nunca
+  # aparece no texto — nem no infográfico do cronograma.
+  test "tira do texto o tempo de escritório e troca o nome do órgão por órgão ambiental" do
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    tool.execute(**@args.merge(
+      escopo_e_metodologia: "A campanha de campo terá duração de 05 (cinco) dias. O processamento e elaboração do " \
+        "diagnóstico serão realizados em 08 (oito) dias de escritório. O estudo será protocolado no INEMA."
+    ))
+
+    text = document_texts(@proposal.generated_documents.first).join(" ")
+    assert_includes text, "A campanha de campo terá duração de 05 (cinco) dias."
+    assert_not_includes text, "dias de escritório"
+    assert_includes text, "O estudo será protocolado no órgão ambiental."
+    assert_not_includes text, "INEMA"
+  end
+
+  test "cronograma no documento não leva nome de órgão, nem gravado antes da regra" do
+    item = @proposal.project_pricing.schedule_items.create!(schedule_type: "servico", phase_name: "Protocolo",
+      activity_name: "Protocolo no órgão", start_period: 1, duration_periods: 1, position: 0)
+    item.update_column(:activity_name, "Protocolo da 2ª RLP no INEMA")
+    @proposal.project_pricing.update!(schedule_key_points: [ { "nome" => "Protocolo no INEMA", "periodo" => 1 } ])
+    tool = GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+
+    payload = tool.send(:schedule_payload, @proposal.project_pricing.reload, "servico", Date.current)
+
+    assert_equal [ "Protocolo da 2ª RLP no órgão ambiental" ], payload[:items].map(&:activity_name)
+    assert_equal "Protocolo no órgão ambiental", payload[:key_points].first["nome"]
   end
 
   test "strips citation codes from array params too (topicos_escopo, produtos, itens_nao_previstos)" do

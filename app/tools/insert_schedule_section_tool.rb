@@ -111,9 +111,10 @@ class InsertScheduleSectionTool < RubyLLM::Tool
       items = pricing.schedule_items.select { |item| item.schedule_type == type }
       return nil if items.empty? || start_date.blank?
 
-      payload = { start_date: start_date, items: items }
+      payload = { start_date: start_date, items: ScheduleItem.genericized(items) }
       if type == "servico"
-        payload[:key_points] = pricing.schedule_key_points.presence || @proposal.default_schedule_key_points
+        key_points = pricing.schedule_key_points.presence || @proposal.default_schedule_key_points
+        payload[:key_points] = Array(key_points).map { |point| point.merge("nome" => OrganNames.genericize(point["nome"])) }
       end
       payload
     end

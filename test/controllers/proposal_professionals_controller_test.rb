@@ -63,6 +63,24 @@ class ProposalProfessionalsControllerTest < ActionDispatch::IntegrationTest
     assert_not_includes @pricing.reload.proposal_professionals, line
   end
 
+  # Charlene (2026-10): "qd excluimos alguém, não conseguimos desfazer".
+  test "depois de remover, a aba Equipe oferece Desfazer, que recria a linha igual" do
+    line = proposal_professionals(:coordenacao_line)
+    line.update!(fixed_amount: 500, rate_daily_override: 350)
+    attrs = line.attributes.slice("professional_id", "deliverable_name", "man_hours", "field_days", "fixed_amount", "rate_daily_override")
+
+    delete conversation_proposal_proposal_professional_path(@conversation, line)
+    follow_redirect!
+    assert_select "#removed-line a", text: "Desfazer"
+    undo_url = css_select("#removed-line a").first["href"]
+
+    assert_difference "@pricing.proposal_professionals.count", 1 do
+      post undo_url
+    end
+    restored = @pricing.proposal_professionals.order(:id).last
+    assert_equal attrs, restored.attributes.slice(*attrs.keys)
+  end
+
   test "destroy recusa remover a única linha de um profissional fixo" do
     line = @pricing.proposal_professionals.create!(professional: professionals(:diretora), deliverable_name: "Direção", man_hours: 0, field_days: 0)
 

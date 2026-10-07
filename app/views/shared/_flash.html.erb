@@ -1,6 +1,7 @@
 <% if flash.any? %>
   <div class="fixed z-[100] flex flex-col gap-3 bottom-20 md:bottom-6 right-6 items-end">
     <% flash.each do |type, message| %>
+      <% next unless message.is_a?(String) %>
       <% config = flash_config(type) %>
       <div class="relative flex w-96 max-w-[90vw] items-start gap-3 overflow-hidden rounded-box border border-base-300
                   bg-base-100 p-4 pr-9 shadow-lg transition-all duration-300 ease-in animate-[flash-slide-in_0.3s_ease-out]"

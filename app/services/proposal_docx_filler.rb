@@ -683,7 +683,13 @@ class ProposalDocxFiller
         run_pr = Nokogiri::XML::Node.new("w:rPr", run.document)
         run.prepend_child(run_pr)
       end
-      run_pr.add_child(Nokogiri::XML::Node.new("w:b", run.document)) unless run_pr.at_xpath("w:b", NS)
+      return if run_pr.at_xpath("w:b", NS)
+
+      # O w:rPr tem ORDEM fixa no schema (rStyle, rFonts, b, …, color, …, sz): <w:b/> no fim, depois
+      # de color/sz, faz o Word abrir o arquivo com "conteúdo ilegível" (PTC26047, 2026-10).
+      bold = Nokogiri::XML::Node.new("w:b", run.document)
+      after = run_pr.element_children.find { |child| !%w[rStyle rFonts].include?(child.name) }
+      after ? after.add_previous_sibling(bold) : run_pr.add_child(bold)
     end
 
     # "Papyrus" (qualquer capitalização) vira MAIÚSCULO e negrito em TODO o corpo do documento

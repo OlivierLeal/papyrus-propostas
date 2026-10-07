@@ -61,6 +61,19 @@ class PricingTabsTest < ApplicationSystemTestCase
     assert_equal "Relatórios", @pricing.reload.proposal_professionals.find_by!(deliverable_name: "Relatório de fauna").pricing_item.name
   end
 
+  # Charlene (2026-10): "não consigo visualizar o que ele precificou de logística".
+  test "na aba Equipe, o link da logística do item abre o item na aba Itens e campo" do
+    sign_in
+    item = @pricing.pricing_items.first
+    @pricing.pricing_items.create!(name: "Outro item", position: 9) # com 2+ itens a equipe agrupa por item
+    visit conversation_proposal_path(@proposal.conversation)
+
+    within("#equipe-item-#{item.id}") { find("a", text: /logística/).click }
+
+    assert_selector "[role='tab'][data-tab='itens'][aria-selected='true']"
+    assert_selector "#item-#{item.id} details[open]"
+  end
+
   private
 
   def sign_in

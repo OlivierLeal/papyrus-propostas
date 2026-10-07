@@ -17,6 +17,13 @@
 <% item_options = items.map { |item| [ item.name, item.id ] } %>
 
 <section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+  <% if editable && (removed = flash[:removed_line]).is_a?(Hash) %>
+    <div class="flex items-center justify-between gap-3 px-6 py-2.5 bg-warning/10 border-b border-warning/30 rounded-t-box text-sm" id="removed-line">
+      <span><strong><%= removed["name"] %></strong> saiu da equipe<%= " (#{removed.dig('attributes', 'deliverable_name')})" if removed.dig("attributes", "deliverable_name").present? %>.</span>
+      <%= link_to "Desfazer", conversation_proposal_proposal_professionals_path(conversation, proposal_professional: removed["attributes"], restored: 1),
+            class: "btn btn-warning btn-xs", data: { turbo_method: :post } %>
+    </div>
+  <% end %>
   <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5 pb-4">
     <div>
       <h2 class="font-semibold text-base-content">Equipe</h2>
@@ -78,6 +85,14 @@
                   <span class="ml-auto text-xs text-base-content/60 tabular-nums">
                     <%= pluralize(group_lines.map(&:professional_id).uniq.size, "pessoa", plural: "pessoas") %> ·
                     <strong class="text-base-content" data-item-team-total="<%= item.id %>"><%= brl(group_lines.sum { |line| line.direct_cost(days_factors[line.pricing_item_id]) }.round(2)) %></strong>
+                    <%# Logística à vista na aba Equipe (Charlene, 2026-10: "não consigo visualizar o que ele
+                        precificou de logística"); o link abre o item na aba Itens e campo. %>
+                    <% if item.field_campaigns.any? %>
+                      · <a href="#item-<%= item.id %>" class="link link-hover text-info" data-turbo="false"
+                           title="Ver os campos deste item (pessoas, dias, veículo, hospedagem, custo)">
+                          + logística <%= brl(item.campaigns_cost.round(2)) %> (<%= pluralize(item.field_campaigns.size, "campo", plural: "campos") %>)
+                        </a>
+                    <% end %>
                   </span>
                 </div>
               </td>
@@ -120,6 +135,25 @@
                 <% else %>
                   <%= pp_form.hidden_field :pricing_item_id, data: { role: "line-item" } %>
                 <% end %>
+                <%# Terceirizado com preço próprio (2026-10): valor fechado do produto + hora/diária desta
+                    proposta. Em branco vale o cadastro. %>
+                <%= tag.details class: "mt-1", open: line.own_values? do %>
+                  <summary class="text-xs text-base-content/50 cursor-pointer select-none">Valores desta proposta (terceirizado)</summary>
+                  <div class="grid grid-cols-3 gap-2 mt-1.5">
+                    <label class="text-[11px] text-base-content/60">Valor fechado (R$)
+                      <%= pp_form.number_field :fixed_amount, value: decimal_input(line.fixed_amount), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                            class: "input input-xs w-full text-right tabular-nums", data: { role: "fixed-amount" } %>
+                    </label>
+                    <label class="text-[11px] text-base-content/60">Hora (R$)
+                      <%= pp_form.number_field :rate_man_hour_override, value: decimal_input(line.rate_man_hour_override), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                            placeholder: decimal_input(professional.rate_man_hour), class: "input input-xs w-full text-right tabular-nums", data: { role: "rate-hour" } %>
+                    </label>
+                    <label class="text-[11px] text-base-content/60">Diária (R$)
+                      <%= pp_form.number_field :rate_daily_override, value: decimal_input(line.rate_daily_override), step: "any", min: 0, disabled: !editable, autocomplete: "off",
+                            placeholder: decimal_input(professional.rate_daily), class: "input input-xs w-full text-right tabular-nums", data: { role: "rate-day" } %>
+                    </label>
+                  </div>
+                <% end %>
               </td>
               <td class="text-right">
                 <% if per_unit %>
@@ -130,10 +164,10 @@
                   <%= pp_form.number_field :man_hours, step: "any", min: 0, disabled: !editable, autocomplete: "off",
                         class: "input input-sm w-20 text-right tabular-nums" %>
                 <% end %>
-                <% if professional.cost_in_bdi? %>
-                  <div class="text-xs mt-1 whitespace-nowrap text-base-content/50" title="Custo incluso no BDI — sem valor de hora-homem/diária">custo no BDI</div>
+                <% if professional.cost_in_bdi? && line.man_hours.zero? && line.field_days.zero? %>
+                  <div class="text-xs mt-1 whitespace-nowrap text-base-content/50" title="Apoio no BDI — só cobra hora quando elabora um produto desta proposta">custo no BDI</div>
                 <% else %>
-                  <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_man_hour.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_man_hour) %>/h</div>
+                  <div class="text-xs mt-1 whitespace-nowrap <%= line.hour_rate.zero? ? "text-warning" : "text-base-content/50" %>" data-role="hour-rate-label">× <%= brl(line.hour_rate) %>/h</div>
                 <% end %>
               </td>
               <td class="text-right">
@@ -145,8 +179,8 @@
                   <%= pp_form.number_field :field_days, step: "any", min: 0, disabled: !editable, autocomplete: "off",
                         class: "input input-sm w-20 text-right tabular-nums" %>
                 <% end %>
-                <% unless professional.cost_in_bdi? %>
-                  <div class="text-xs mt-1 whitespace-nowrap <%= professional.rate_daily.zero? ? "text-warning" : "text-base-content/50" %>">× <%= brl(professional.rate_daily) %>/dia</div>
+                <% unless professional.cost_in_bdi? && line.man_hours.zero? && line.field_days.zero? %>
+                  <div class="text-xs mt-1 whitespace-nowrap <%= line.day_rate.zero? ? "text-warning" : "text-base-content/50" %>" data-role="day-rate-label">× <%= brl(line.day_rate) %>/dia</div>
                 <% end %>
                 <% extra = line.commute_extra_days(days_factors[line.pricing_item_id]) %>
                 <%= tag.div("+#{decimal_label(extra)} desloc.", class: "text-xs mt-0.5 whitespace-nowrap text-info", hidden: !extra.positive?,

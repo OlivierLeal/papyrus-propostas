@@ -555,7 +555,22 @@ class ProposalTest < ActiveSupport::TestCase
     coordenador_row = rows.find { |r| r[2] == "Pedro Almeida" }
     assert_equal "Execução", coordenador_row[0]
     assert_equal "Coordenação geral", coordenador_row[1] # FUNÇÃO é o entregável desta proposta, não o cargo
-    assert_includes coordenador_row[3], "CREA 12345"
+    assert_not_includes coordenador_row[3], "CREA 12345" # registro só da Diretoria (Charlene, 2026-10)
+    assert_includes proposal.team_rows_for_docx(registrations: true).find { |r| r[2] == "Pedro Almeida" }[3], "CREA 12345"
+  end
+
+  test "team_rows_for_docx: apoio de campo fica fora do quadro e a função curta perde o detalhe depois do travessão" do
+    proposal = proposals(:priced_proposal)
+    pricing = proposal.project_pricing
+    mateiro = Professional.create!(name: "Mateiro Teste", role: "Biólogo", rate_man_hour: 0, rate_daily: 200)
+    pricing.proposal_professionals.create!(professional: mateiro, deliverable_name: "Apoio de Campo — Fauna (mateiro/auxiliar)",
+      man_hours: 0, field_days: 5)
+    proposal_professionals(:fauna_flora_line).update!(deliverable_name: "Apoio Técnico — Flora e Geoprocessamento")
+
+    rows = proposal.team_rows_for_docx
+
+    assert_nil rows.find { |row| row[2] == "Mateiro Teste" }
+    assert_equal "Apoio Técnico", rows.find { |row| row[2] == professionals(:biologa).name }[1]
   end
 
   # O modelo da Papyrus (revisão de 2026-08) deixou de trazer o quadro de preço aberto por linha:
@@ -651,6 +666,18 @@ class ProposalTest < ActiveSupport::TestCase
     proposal = proposals(:priced_proposal)
 
     assert_equal "Serviço", proposal.docx_servico_label(fallback: "  ")
+  end
+
+  # Charlene (2026-10, áudio sobre a PTC26047): o Sumário de Revisões só identifica a revisão — a
+  # Rev.01 tinha saído com um parágrafo inteiro de mudanças.
+  test "descrição da revisão fica curta: 1ª oração, sem parênteses, até ~70 caracteres sem cortar palavra" do
+    long = "Revisão 01 — Inclusão de campanhas de campo para todos os meios (fauna: 5 dias por grupo; flora: 5 dias); " \
+           "inclusão do Relatório de Prospecção Espeleológica; TR incluído como Anexo I."
+    assert_equal "Inclusão de campanhas de campo para todos os meios", Proposal.short_revision_description(long)
+    assert_equal "Ajuste de escopo e preço", Proposal.short_revision_description("Ajuste de escopo e preço.")
+    short = Proposal.short_revision_description("Inclusão de campanhas de campo para todos os meios e do Relatório de Prospecção Espeleológica")
+    assert_operator short.length, :<=, Proposal::REVISION_DESCRIPTION_MAX
+    assert_no_match(/\s(de|do|e)\z/, short)
   end
 
   test "docx_revision_rows has only the current row when nothing was generated before" do

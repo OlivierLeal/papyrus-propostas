@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_06_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -523,11 +523,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_190000) do
     t.string "deliverable_name", null: false
     t.decimal "field_days", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "field_days_per_unit", precision: 12, scale: 4
+    t.decimal "fixed_amount", precision: 12, scale: 2, default: "0.0", null: false
     t.decimal "man_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "man_hours_per_unit", precision: 12, scale: 4
     t.bigint "pricing_item_id"
     t.bigint "professional_id", null: false
     t.bigint "project_pricing_id", null: false
+    t.decimal "rate_daily_override", precision: 10, scale: 2
+    t.decimal "rate_man_hour_override", precision: 10, scale: 2
     t.string "stage"
     t.decimal "subtotal", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
