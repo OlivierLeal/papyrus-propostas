@@ -1,7 +1,23 @@
 <%# Aba "Pendências": o que trava a geração da proposta (Conversation#generation_blockers). Os cards
     ficam no chat e rolam pra cima; aqui fica a lista, e cada item leva ao card dele. %>
 <% blockers = conversation.generation_blockers %>
+<%# Enquadramento sem confirmar também trava (2026-10, conversa 70: a aba dizia "Nada travando" e a
+    Sara não achava onde confirmar). %>
+<% framing = conversation.status != "processing" && conversation.framing_confirmation_required? %>
 <div id="generation_blockers" class="flex flex-col gap-3">
+  <% if framing %>
+    <% legal = conversation.open_legal_framing_conflicts %>
+    <div class="rounded-field border border-warning/40 bg-warning/10 px-3 py-3 flex flex-col gap-2">
+      <p class="text-sm font-semibold text-base-content">Falta confirmar o enquadramento</p>
+      <p class="text-xs text-base-content/70">Confira a licença e os estudos na aba Visão geral. Sem a confirmação, a proposta não é gerada.</p>
+      <% if legal.any? %>
+        <p class="text-xs text-base-content/70">Antes, decida a divergência entre a legislação e o pedido, listada abaixo.</p>
+      <% else %>
+        <%= button_to "Confirmar enquadramento", confirm_framing_conversation_path(conversation), method: :post,
+              class: "btn btn-sm border-0 bg-gradient-to-br from-secondary to-[#ffd36b] text-secondary-content self-start" %>
+      <% end %>
+    </div>
+  <% end %>
   <% if blockers.any? %>
     <h2 class="font-display text-base font-semibold text-base-content">Antes de gerar a proposta</h2>
     <p class="text-xs text-base-content/60">
@@ -22,7 +38,7 @@
         </li>
       <% end %>
     </ul>
-  <% else %>
+  <% elsif !framing %>
     <div class="flex flex-col items-center text-center gap-2 py-8">
       <span class="size-10 rounded-full bg-success/15 text-success grid place-items-center">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" /></svg>

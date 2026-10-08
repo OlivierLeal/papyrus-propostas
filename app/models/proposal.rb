@@ -131,6 +131,22 @@ class Proposal < ApplicationRecord
       end
   end
 
+  # Mesmas pessoas e funções do Quadro de Equipe, com o esforço somado de cada uma — base do
+  # organograma e do histograma (TeamOrganogramRenderer/TeamHistogramRenderer), que só entram no
+  # .docx quando o cliente pede (2026-10).
+  TeamMember = Data.define(:name, :sector, :function, :man_hours, :field_days)
+
+  def team_members_for_charts(functions: {})
+    lines = project_pricing&.proposal_professionals&.includes(:professional)&.to_a || []
+    rows = team_rows_for_docx(functions: functions).to_h { |_, function, name, _| [ name, function ] }
+    lines.group_by(&:professional).filter_map do |professional, own|
+      next unless rows.key?(professional.name.to_s)
+
+      TeamMember.new(name: professional.name.to_s, sector: docx_team_sector(professional), function: rows[professional.name.to_s],
+        man_hours: own.sum { |line| line.man_hours.to_f }, field_days: own.sum { |line| line.field_days.to_f })
+    end.sort_by { |member| [ DOCX_TEAM_SECTORS.fetch(member.sector), member.name ] }
+  end
+
   # "Apoio Técnico — Flora e Geoprocessamento" → "Apoio Técnico".
   def self.short_team_function(text)
     text.to_s.split(/\s+[—–]\s+/).first.to_s.sub(/\s*\([^)]*\)\z/, "").strip

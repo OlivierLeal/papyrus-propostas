@@ -1,6 +1,6 @@
 <%# Depois de decidir/responder um card (divergência, pendência): atualiza o que depende disso fora
     do card — o botão principal e as etapas, a aba Pendências e o contador, e o enquadramento. %>
-<% blockers_count = conversation.generation_blockers.size %>
+<% blockers_count = conversation.generation_blockers.size + (conversation.status != "processing" && conversation.framing_confirmation_required? ? 1 : 0) %>
 <%= turbo_stream.replace "proposal_header" do %>
   <%= render "conversations/header", conversation: conversation %>
 <% end %>

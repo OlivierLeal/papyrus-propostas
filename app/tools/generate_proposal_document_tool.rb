@@ -100,8 +100,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :contato_cliente, desc: "Nome da pessoa de contato no cliente, SEM tratamento (ex.: \"Lincoln Juvenal\"), " \
     "ou \"A confirmar\" se não souber"
   param :tratamento_contato,
-    desc: "\"Sr.\" ou \"Sra.\" para a pessoa de contato — deduza pelo nome ou por como o ET/e-mail se refere a " \
-          "ela. Define \"Att.: Sr./Sra. Nome\" e a saudação \"Prezado Sr.\"/\"Prezada Sra.\". Deixe de fora se " \
+    desc: "OBRIGATÓRIO sempre que houver contato: \"Sr.\" (homem) ou \"Sra.\" (mulher) — deduza pelo nome ou por como " \
+          "o ET/e-mail se refere a ela (assinatura, \"Prezada\", pronomes). Define \"Att.: Sr./Sra. Nome\" e a saudação " \
+          "\"Prezado Sr.\"/\"Prezada Sra.\". Se o consultor corrigir no chat, use o que ele disser. Deixe de fora só se " \
           "não houver contato definido.",
     required: false
   param :descricao_servico, desc: "Descrição curta do serviço (ex.: \"elaboração de EIA/RIMA do Parque Eólico X\")"
@@ -124,7 +125,9 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     "empreendimento: o que é, onde fica, composição (sub-parques, aerogeradores, potência), e o histórico da licença " \
     "quando houver (processo nº, data de publicação, validade). NÃO escreva aqui o que a proposta/serviço vai fazer " \
     "(\"a presente proposta refere-se a…\", \"com foco na atualização de…\") — isso é escopo. Quebre em 2+ parágrafos; " \
-    "nunca um único parágrafo longo."
+    "nunca um único parágrafo longo. NOME do empreendimento: exatamente como o ET/achado \"empreendimento\" o chama " \
+    "(ex.: \"Complexo Eólico Ventos do Horizonte\") — nunca invente um nome juntando o tipo com o município (\"Complexo " \
+    "Eólico Xique-Xique\" estava errado: Xique-Xique é o município). Use o MESMO nome em todas as seções."
   param :nome_documento_tr, desc: "Nome do documento de ET (Pedido Técnico do Estudo) usado como base do escopo — " \
     "o nome do parâmetro ficou de antes da separação ET/TR, mas o valor esperado é o do ET, o documento principal"
   param :escopo_e_metodologia, desc: "Parágrafo(s) INTRODUTÓRIOS da seção 'Escopo e Metodologia' — contexto geral de " \
@@ -172,6 +175,18 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
   param :registros_equipe, type: "boolean", required: false,
     desc: "true SÓ quando o ET/TR (ou o consultor) pede o registro profissional (CREA/CRBio) de TODA a equipe. " \
           "Sem isso, o Quadro de Equipe mostra o registro só da Diretoria (Charlene, 2026-10)."
+  param :incluir_organograma, type: "boolean", required: false,
+    desc: "true SÓ quando o ET/TR (ou o consultor) pede organograma da equipe — veja o achado conteudo_exigido. Sem pedido, não envie — a maioria " \
+          "das propostas não leva. O sistema desenha a partir do Quadro de Equipe (mesmas pessoas e funções)."
+  param :incluir_histograma, type: "boolean", required: false,
+    desc: "true SÓ quando o ET/TR (ou o consultor) pede histograma de mão de obra/mobilização da equipe — veja o " \
+          "achado conteudo_exigido. Sem " \
+          "pedido, não envie. O sistema desenha a partir do cronograma do serviço (meses) e da equipe."
+  param :histograma_equipe, type: "array", required: false,
+    desc: "Opcional, só com incluir_histograma: em quais meses do cronograma do serviço cada profissional atua, " \
+          "uma linha por pessoa no formato \"Nome | 1-3, 6\" (mês 1 = primeiro mês do cronograma). Quem ficar de " \
+          "fora segue a regra do sistema (Diretoria e Gestão no projeto todo, campo nos meses de campo, " \
+          "elaboração nos meses de elaboração)."
   param :produtos, type: "array",
     desc: "Lista dos produtos/entregáveis — tem que bater com o que topicos_escopo descreve: cada etapa que gera " \
           "um documento próprio (o estudo/diagnóstico principal, mas também fichas, relatórios e certidões " \
@@ -330,10 +345,13 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
 
   # Trava de confirmação do enquadramento (Conversation#framing_confirmation_required?). A mensagem
   # diz ONDE se resolve — erro de ferramenta que não diz isso faz a IA tentar de novo em loop.
+  # Onde se resolve (2026-10, conversa 70: o texto mandava pro "painel à esquerda" e pro "card de
+  # divergência", que não existiam — desde a repaginação o botão fica no topo, à direita).
   FRAMING_NOT_CONFIRMED = "Não gerei: o enquadramento (licença e estudo) ainda não foi confirmado. " \
-    "Peça ao consultor pra conferir e clicar em \"Confirmar enquadramento\" no painel da proposta " \
-    "(à esquerda do chat) — se houver divergência entre a legislação e o pedido do cliente, ele decide " \
-    "no card antes. Não chame esta ferramenta de novo até ele confirmar.".freeze
+    "Peça ao consultor pra conferir e clicar no botão dourado \"Confirmar enquadramento\", no TOPO da tela da " \
+    "proposta, à direita (o mesmo botão está na aba \"Pendências\" do painel à direita do chat). Só se a aba " \
+    "Pendências mostrar uma divergência de enquadramento é que ele decide nela antes. Não chame esta ferramenta " \
+    "de novo até ele confirmar.".freeze
 
   def initialize(conversation:, background_ready: false)
     super()
@@ -396,6 +414,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     annex_note = annexes ? annex_message(annexes) : ""
     images = build_images
     schedules = build_schedules
+    team_charts, team_charts_note = somente_comercial?(args) ? [ [], "" ] : build_team_charts(args, schedules)
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
     remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS]
@@ -414,7 +433,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     if somente_tecnica?(args)
       technical_filename = @proposal.docx_filename("tecnica")
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
+        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, team_charts: team_charts,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") },
         annex: annex
       )
@@ -423,7 +442,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, *schedule_filenames ],
         message: "Gerado o arquivo #{technical_filename} — só a parte técnica, a pedido do consultor. " \
-          "Peça \"gerar completo\"/\"com a comercial\" quando quiser o documento inteiro.#{annex_note}" \
+          "Peça \"gerar completo\"/\"com a comercial\" quando quiser o documento inteiro.#{annex_note}#{team_charts_note}" \
           "#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}" }.to_json
     elsif somente_comercial?(args)
       commercial_filename = @proposal.docx_filename("comercial")
@@ -442,7 +461,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       technical_filename = @proposal.docx_filename("tecnica")
       commercial_filename = @proposal.docx_filename("comercial")
       files = filler.fill_split(
-        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank,
+        placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, team_charts: team_charts,
         technical_overrides: { "TITULO_LINHA2" => "TÉCNICA", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("tecnica") },
         commercial_overrides: { "TITULO_LINHA2" => "COMERCIAL", "TITULO_LINHA3" => "", "NUMERO_PROPOSTA" => @proposal.docx_numero_capa("comercial") },
         annex: annex
@@ -453,15 +472,15 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ technical_filename, commercial_filename, *schedule_filenames ],
         message: "Gerados 2 arquivos: #{technical_filename} e #{commercial_filename} (versão #{@proposal.version}), " \
-          "disponíveis na Tela de Precificação.#{annex_note}#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
+          "disponíveis na Tela de Precificação.#{annex_note}#{team_charts_note}#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     else
       combined_filename = @proposal.docx_filename("combined")
-      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex)
+      bytes = filler.fill(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex, team_charts: team_charts)
       attach!(bytes, combined_filename, "combined", description)
       failed_schedule_types = []
       schedule_filenames = export_ms_project ? attach_schedule_mspdi_files!(schedules, args, description, failed_schedule_types) : []
       { success: true, version: @proposal.version, filenames: [ combined_filename, *schedule_filenames ],
-        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{annex_note}#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
+        message: "Gerado o arquivo #{combined_filename}, disponível na Tela de Precificação.#{annex_note}#{team_charts_note}#{price_review_warning}#{schedule_message(schedule_filenames, defaulted_schedule_types, failed_schedule_types)}#{spreadsheet_note}" }.to_json
     end
   rescue StandardError => e
     Rails.logger.error("GenerateProposalDocumentTool falhou para proposal #{@proposal.id}: #{e.class} #{e.message}")
@@ -509,8 +528,24 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
       name = raw.sub(CONTACT_TITLE, "").strip
       return [ "A confirmar", "Prezados Senhores" ] if name.blank? || name.match?(/\Aa confirmar\z/i)
 
-      title = normalize_title(args[:tratamento_contato]) || normalize_title(raw[CONTACT_TITLE, 1]) || "Sr."
+      title = normalize_title(args[:tratamento_contato]) || normalize_title(raw[CONTACT_TITLE, 1]) || title_from_first_name(name)
       [ "#{title} #{name}", GREETINGS.fetch(title) ]
+    end
+
+    # Sem tratamento informado pela IA, deduz pelo primeiro nome (Sara, 2026-10: "editar o Sr./Sra.
+    # do início da proposta conforme for homem ou mulher" — saía sempre "Sr."). Nome em -a é feminino
+    # salvo as exceções; as terminações femininas mais comuns fora disso estão listadas; o resto, "Sr.".
+    MASCULINE_IN_A = %w[luca lucca nicola joshua elias jonas tomas tomás garcia costa batista iuri].freeze
+    FEMININE_ENDINGS = /(?:ane|ene|ine|iele|ielle|elle|ete|ette|ice|ise|ilde|eth|uth|ah|ly|lly|riam|liam|nny|ary|ery)\z/
+    FEMININE_NAMES = %w[isabel raquel ester ingrid beatriz lourdes carmen miriam ruth rute iris ines inês
+                        alice clarice berenice denise gisele cristiane jaqueline caroline carolene].freeze
+
+    def title_from_first_name(name)
+      first = I18n.transliterate(name.to_s.split.first.to_s).downcase
+      return "Sr." if first.blank? || MASCULINE_IN_A.include?(first)
+      return "Sra." if first.end_with?("a") || FEMININE_NAMES.include?(first) || first.match?(FEMININE_ENDINGS)
+
+      "Sr."
     end
 
     def normalize_title(value)
@@ -577,6 +612,33 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     # gerador, é lido direto daqui, igual equipe e desembolso. Um tipo sem data de início setada
     # (ou sem nenhum item) fica de fora silenciosamente — a página só existe quando os dois estão
     # presentes.
+    # Organograma e histograma da equipe — só quando a IA marcou que o cliente pediu. Falha ao desenhar
+    # (rsvg-convert ausente) ou histograma sem cronograma do serviço não derrubam a geração: viram aviso.
+    def build_team_charts(args, schedules)
+      boolean = ActiveModel::Type::Boolean.new
+      wants_organogram = boolean.cast(args[:incluir_organograma])
+      wants_histogram = boolean.cast(args[:incluir_histograma])
+      return [ [], "" ] unless wants_organogram || wants_histogram
+
+      members = @proposal.team_members_for_charts(functions: team_functions(args))
+      charts = []
+      notes = []
+      if wants_organogram
+        result = TeamOrganogramRenderer.new(members: members).call
+        result ? charts << result.to_h.merge(caption: "Organograma da equipe técnica.") : notes << "o organograma (equipe vazia)"
+      end
+      if wants_histogram
+        servico = schedules["servico"]
+        histogram = servico && TeamHistogramRenderer.from_schedule(members: members, items: servico[:items],
+          start_date: servico[:start_date], allocations: args[:histograma_equipe])&.call
+        histogram ? charts << histogram.to_h.merge(caption: "Histograma de mobilização da equipe técnica.") : notes << "o histograma (precisa do cronograma do serviço)"
+      end
+      [ charts, notes.any? ? " Ficou de fora: #{notes.join(' e ')}." : "" ]
+    rescue SvgRasterizer::Error => e
+      Rails.logger.warn("[GenerateProposalDocumentTool] organograma/histograma: #{e.message}")
+      [ [], " O organograma/histograma não saiu (#{e.message})." ]
+    end
+
     def build_schedules
       pricing = @proposal.project_pricing
       return {} unless pricing

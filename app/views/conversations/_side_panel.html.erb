@@ -1,7 +1,7 @@
 <%# Painel lateral da proposta, em abas (repaginação de 2026-09-30): antes eram seis blocos empilhados
     numa coluna estreita. A aba aberta por padrão é a que pede atenção; a escolha do consultor é
     lembrada (tabs_controller.js) e sobrevive ao refresh por morph. %>
-<% blockers_count = conversation.generation_blockers.size %>
+<% blockers_count = conversation.generation_blockers.size + (conversation.status != "processing" && conversation.framing_confirmation_required? ? 1 : 0) %>
 <% files_count = conversation.messages.where(internal: false).joins(:attachments_attachments).count + (conversation.proposal&.generated_documents&.count || 0) %>
 <% default_tab = conversation.framing_confirmation_required? || blockers_count.zero? ? "overview" : "blockers" %>
 <% tabs = [

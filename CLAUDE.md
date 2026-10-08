@@ -1035,6 +1035,27 @@ corpo, cabeçalhos e rodapés — **todo XML novo que o sistema escrever tem que
 1ª oração, sem parênteses nem "Revisão 01 —", até 70 caracteres sem cortar palavra; o
 `param :descricao_revisao` pede até 8 palavras.
 
+**Organograma e histograma da equipe, só quando o cliente pede (2026-10).** Parâmetros
+`incluir_organograma`/`incluir_histograma` da ferramenta (a IA só marca com pedido no ET/TR ou do
+consultor; a leitura do ET/TR grava o pedido no achado `conteudo_exigido`, porque a geração não relê o
+PDF). Entram logo depois do Quadro de Equipe, com "Figura 9-N" embaixo
+(`ProposalDocxFiller#insert_team_charts!`). Mesmas pessoas e funções do quadro
+(`Proposal#team_members_for_charts`). Cores do Manual de Identidade Visual
+(`../Identidade Visual/`, pp. 27-28 e 72; constantes em `SvgRasterizer`).
+- `TeamOrganogramRenderer`: Diretoria → Gestão → Execução agrupada pela função (macrogrupo).
+- `TeamHistogramRenderer`: profissionais por mês do cronograma do serviço, empilhado por setor. Quem
+  está em qual mês: `histograma_equipe` ("Nome | 1-3, 6") quando a IA passa; senão Diretoria/Gestão o
+  projeto todo, quem tem diária nos meses de atividade de campo, quem tem HH nos de elaboração (sem
+  protocolo/análise do órgão). Sem cronograma do serviço, não sai (a mensagem avisa).
+
+**Ajustes de 2026-10-08 (Sara e conversa 70).**
+- Contato sem tratamento: o Sr./Sra. é deduzido do 1º nome (`title_from_first_name`); o informado vence.
+- Enquadramento por confirmar aparece na aba Pendências (com o botão e no contador), e o texto de
+  bloqueio aponta pro botão dourado do topo — antes a aba dizia "Nada travando".
+- Caracterização usa o NOME do empreendimento do ET, não o município.
+- Tela de Precificação: "+ Pessoa" em cada item (OS/capítulo) já escolhe o item no "Adicionar à
+  equipe" (`add_to_item_controller.js`), e depois de adicionar a tela volta pro grupo daquele item.
+
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
 1 = produtos, 2 = equipe, 3 = desembolso) e têm que ser remapeados se alguma tabela for

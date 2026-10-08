@@ -103,7 +103,12 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       { contato_cliente: "Maria Souza", tratamento_contato: "Sra." } => [ "Att.: Sra. Maria Souza", "Prezada Sra.," ],
       { contato_cliente: "Sra. Maria Souza" } => [ "Att.: Sra. Maria Souza", "Prezada Sra.," ],
       { contato_cliente: "Sr. Lincoln Juvenal", tratamento_contato: "Sr." } => [ "Att.: Sr. Lincoln Juvenal", "Prezado Sr.," ],
-      { contato_cliente: "A confirmar" } => [ "Att.: A confirmar", "Prezados Senhores," ]
+      { contato_cliente: "A confirmar" } => [ "Att.: A confirmar", "Prezados Senhores," ],
+      # 2026-10-08, Sara: sem tratamento, o sistema deduz pelo 1º nome (antes saía sempre "Sr.").
+      { contato_cliente: "Sara Marçal" } => [ "Att.: Sra. Sara Marçal", "Prezada Sra.," ],
+      { contato_cliente: "Luca Ferreira" } => [ "Att.: Sr. Luca Ferreira", "Prezado Sr.," ],
+      # Tratamento explícito vence a dedução.
+      { contato_cliente: "Andrea Costa", tratamento_contato: "Sr." } => [ "Att.: Sr. Andrea Costa", "Prezado Sr.," ]
     }.each do |contact_args, (att, greeting)|
       @proposal.generated_documents.purge
       GenerateProposalDocumentTool.new(conversation: @proposal.conversation).execute(**@args.except(:tratamento_contato).merge(contact_args))
@@ -113,6 +118,22 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
       assert_includes texts, greeting, contact_args.inspect
       assert_not texts.join(" ").include?("Sr. Sr."), contact_args.inspect
     end
+  end
+
+  # 2026-10: organograma e histograma só quando o cliente pede (a IA marca o parâmetro).
+  test "organograma só entra com incluir_organograma; histograma sem cronograma vira aviso" do
+    GenerateProposalDocumentTool.new(conversation: @proposal.conversation).execute(**@args)
+    assert_not document_texts(@proposal.reload.generated_documents.first).join(" ").include?("Organograma")
+
+    @proposal.generated_documents.purge
+    @proposal.project_pricing.schedule_items.destroy_all
+    result = JSON.parse(GenerateProposalDocumentTool.new(conversation: @proposal.conversation)
+      .execute(**@args.merge(incluir_organograma: true, incluir_histograma: true)))
+
+    texts = document_texts(@proposal.reload.generated_documents.first).join(" ")
+    assert_includes texts, "Organograma da equipe técnica."
+    assert_not_includes texts, "Histograma"
+    assert_includes result["message"], "o histograma (precisa do cronograma do serviço)"
   end
 
   test "does not warn about price review once the proposal is priced/approved" do

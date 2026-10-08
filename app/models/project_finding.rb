@@ -41,6 +41,9 @@ class ProjectFinding < ApplicationRecord
     # o estudo que a norma exige entram como tipo_licenca/tipo_estudo com source_kind "cal", e aí
     # a comparação com o que o cliente pediu sai de graça no ConflictDetector.
     "enquadramento_legal" => { label: "Enquadramento legal (classe, porte, potencial poluidor e a norma que o define)", comparable: false },
+    # 2026-10: organograma e histograma só entram no .docx quando o cliente pede — a geração não
+    # relê o PDF, então o pedido tem que virar achado na leitura do ET/TR.
+    "conteudo_exigido" => { label: "Conteúdo que o documento exige na proposta (organograma, histograma de mão de obra, currículos, ARTs, atestados…)", comparable: false },
     "outro" => { label: "Outra informação", comparable: false }
   }.freeze
 

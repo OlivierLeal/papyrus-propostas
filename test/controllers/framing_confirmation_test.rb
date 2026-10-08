@@ -45,6 +45,14 @@ class FramingConfirmationTest < ActionDispatch::IntegrationTest
     assert_select "form[action=?]", conversation_proposal_path(@conversation), count: 0
   end
 
+  # 2026-10-08, conversa 70: a aba Pendências dizia "Nada travando" com o enquadramento por confirmar.
+  test "a aba Pendências mostra o enquadramento por confirmar, com o botão e no contador" do
+    get conversation_path(@conversation)
+
+    assert_select "#generation_blockers form[action=?]", confirm_framing_conversation_path(@conversation)
+    assert_select "#generation_blockers", text: /Nada travando/, count: 0
+  end
+
   test "confirmar registra quem e quando, e libera" do
     post confirm_framing_conversation_path(@conversation)
 

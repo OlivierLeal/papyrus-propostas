@@ -169,7 +169,8 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     annex = TermOfReferenceAnnex::Annex.new(number: "I", profile: profile, filename: "TR.docx", pages: [], page_count: nil,
       blocks: [ block.of(:heading, "1. OBJETIVO"), block.of(:paragraph, "Texto."), block.of(:list, "Item."), block.of(:table, rows: [ %w[A B], %w[1 2] ]) ])
     bytes = @filler.fill(placeholders: @placeholders.merge("OBJETIVO_SERVICOS" => "A Papyrus vai elaborar o EIA."), tables: tables,
-      schedules: { "servico" => schedule_payload("servico") }, annex: annex)
+      schedules: { "servico" => schedule_payload("servico") }, annex: annex,
+      team_charts: [ { png_bytes: PNG_1X1, width_emu: 100, height_emu: 100, caption: "Organograma da equipe técnica." } ])
 
     Zip::File.open_buffer(StringIO.new(bytes)) do |zip|
       zip.glob("word/{document,header*,footer*}.xml").each do |entry|
@@ -182,6 +183,31 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
         end
       end
     end
+  end
+
+  # 2026-10: organograma/histograma (só quando o cliente pede) logo depois do Quadro de Equipe.
+  test "figuras da equipe entram logo depois do Quadro de Equipe, com legenda Figura 9-N embaixo" do
+    charts = [ { png_bytes: PNG_1X1, width_emu: 100, height_emu: 100, caption: "Organograma da equipe técnica." },
+               { png_bytes: PNG_1X1, width_emu: 100, height_emu: 100, caption: "Histograma de mobilização da equipe técnica." } ]
+    bytes = @filler.fill(placeholders: @placeholders, tables: @tables, team_charts: charts)
+    doc = parsed_document(bytes)
+
+    team_table = doc.xpath("//w:tbl", NS)[2]
+    following = team_table.xpath("following-sibling::w:p", NS).first(6).map { |p| p.xpath(".//w:t", NS).map(&:text).join }
+    assert_includes following, "Figura 9-1: Organograma da equipe técnica."
+    assert_includes following, "Figura 9-2: Histograma de mobilização da equipe técnica."
+    assert_equal 2, team_table.xpath("following-sibling::w:p[1]/following-sibling::w:p[position() <= 5]//w:drawing", NS).size
+
+    Zip::File.open_buffer(StringIO.new(bytes)) do |zip|
+      assert zip.find_entry("word/media/equipe_1.png")
+      assert_includes zip.read("word/_rels/document.xml.rels"), "rId_EQUIPE_2"
+    end
+  end
+
+  test "sem figuras da equipe, nada muda depois do Quadro de Equipe" do
+    doc = parsed_document(@filler.fill(placeholders: @placeholders, tables: @tables))
+
+    assert_not_includes doc.xpath("//w:t", NS).map(&:text).join, "Figura 9-"
   end
 
   test "fill does not touch 'papyrus' embedded inside another word (e.g. the model's e-mail addresses)" do

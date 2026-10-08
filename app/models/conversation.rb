@@ -895,9 +895,11 @@ class Conversation < ApplicationRecord
       <<~TEXT
         [BLOQUEIO: ENQUADRAMENTO NÃO CONFIRMADO] Nenhum consultor confirmou ainda a licença e o(s)
         estudo(s) desta proposta. Enquanto isso, NÃO chame generate_proposal_document e não diga que
-        vai gerar: peça ao consultor que confira o enquadramento e clique em "Confirmar enquadramento"
-        no painel à esquerda do chat (se houver divergência legislação × pedido, ele decide no card
-        antes). Tirar dúvida, ajustar escopo e conversar continuam liberados.
+        vai gerar: peça ao consultor que confira o enquadramento e clique no botão dourado "Confirmar
+        enquadramento", no TOPO da tela da proposta, à direita (o mesmo botão aparece na aba
+        "Pendências" do painel à direita do chat). Só se houver divergência legislação × pedido listada
+        em Pendências ele decide nela antes — não fale em "card" se não houver. Tirar dúvida, ajustar
+        escopo e conversar continuam liberados.
       TEXT
     end
 

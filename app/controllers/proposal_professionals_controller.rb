@@ -13,7 +13,9 @@ class ProposalProfessionalsController < ApplicationController
     if saved
       @pricing.recalculate!
       verb = params[:restored].present? ? "de volta à" : "adicionado(a) à"
-      redirect_to conversation_proposal_path(@conversation), notice: "#{line.professional.name} #{verb} equipe."
+      # Volta pro item onde a pessoa entrou (proposta 69: com muitas OS, a tela voltava pro topo).
+      redirect_to conversation_proposal_path(@conversation, anchor: "equipe-item-#{line.pricing_item_id}"),
+        notice: "#{line.professional.name} #{verb} equipe#{" (#{line.pricing_item.name})" if line.pricing_item}."
     else
       redirect_to conversation_proposal_path(@conversation), alert: line.errors.full_messages.to_sentence
     end

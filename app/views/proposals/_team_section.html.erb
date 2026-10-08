@@ -16,7 +16,7 @@
 <% sem_valor = lines.map(&:professional).uniq.select { |pro| !pro.cost_in_bdi? && pro.rate_man_hour.zero? && pro.rate_daily.zero? } %>
 <% item_options = items.map { |item| [ item.name, item.id ] } %>
 
-<section class="bg-base-100 rounded-box border border-base-300 shadow-sm">
+<section class="bg-base-100 rounded-box border border-base-300 shadow-sm" data-controller="add-to-item">
   <% if editable && (removed = flash[:removed_line]).is_a?(Hash) %>
     <div class="flex items-center justify-between gap-3 px-6 py-2.5 bg-warning/10 border-b border-warning/30 rounded-t-box text-sm" id="removed-line">
       <span><strong><%= removed["name"] %></strong> saiu da equipe<%= " (#{removed.dig('attributes', 'deliverable_name')})" if removed.dig("attributes", "deliverable_name").present? %>.</span>
@@ -87,6 +87,11 @@
                     <strong class="text-base-content" data-item-team-total="<%= item.id %>"><%= brl(group_lines.sum { |line| line.direct_cost(days_factors[line.pricing_item_id]) }.round(2)) %></strong>
                     <%# Logística à vista na aba Equipe (Charlene, 2026-10: "não consigo visualizar o que ele
                         precificou de logística"); o link abre o item na aba Itens e campo. %>
+                    <% if editable %>
+                      · <button type="button" class="link link-hover text-primary font-medium"
+                                data-action="add-to-item#pick" data-add-to-item-item-param="<%= item.id %>"
+                                data-add-to-item-name-param="<%= item.name %>">+ Pessoa</button>
+                    <% end %>
                     <% if item.field_campaigns.any? %>
                       · <a href="#item-<%= item.id %>" class="link link-hover text-info" data-turbo="false"
                            title="Ver os campos deste item (pessoas, dias, veículo, hospedagem, custo)">
@@ -99,7 +104,7 @@
             </tr>
           <% end %>
           <% if group_lines.empty? %>
-            <tr><td colspan="6" class="text-sm text-base-content/50 py-3">Ninguém neste item ainda — escolha-o em "Adicionar à equipe", logo abaixo.</td></tr>
+            <tr><td colspan="6" class="text-sm text-base-content/50 py-3">Ninguém neste item ainda — use "+ Pessoa", ao lado do nome do item.</td></tr>
           <% end %>
           <%= form.fields_for :proposal_professionals, group_lines do |pp_form| %>
             <% line = pp_form.object %>
@@ -225,10 +230,10 @@
 
   <% if editable %>
     <%# Campos ligados ao #add-member-form (fora do form principal) pelo atributo `form=`. %>
-    <div class="border-t border-base-300 bg-base-200/30 px-6 py-4 rounded-b-box"
+    <div class="border-t border-base-300 bg-base-200/30 px-6 py-4 rounded-b-box scroll-mt-40" id="add-member-panel"
          data-controller="professional-picker"
          data-professional-picker-professionals-value="<%= professionals.map { |p| { id: p.id, name: p.name, role: p.role, specialties: p.specialties, fixed: p.always_included, rate: (p.rate_man_hour.positive? ? "#{brl(p.rate_man_hour)}/h" : nil) } }.to_json %>">
-      <h3 class="text-sm font-semibold text-base-content mb-3">Adicionar à equipe</h3>
+      <h3 class="text-sm font-semibold text-base-content mb-3">Adicionar à equipe <span class="font-normal text-primary" data-role="add-to-item-label"></span></h3>
       <div class="grid gap-3 sm:grid-cols-6 items-end">
         <fieldset class="fieldset p-0 relative sm:col-span-3">
           <legend class="fieldset-legend pt-0">Profissional</legend>

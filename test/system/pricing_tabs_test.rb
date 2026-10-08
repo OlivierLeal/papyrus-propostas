@@ -74,6 +74,24 @@ class PricingTabsTest < ApplicationSystemTestCase
     assert_selector "#item-#{item.id} details[open]"
   end
 
+  # Proposta 69 (2026-10): ao incluir alguém numa OS, a pessoa ia pro 1º item ("lá pra cima").
+  test "+ Pessoa no cabeçalho do item escolhe o item no formulário e a pessoa entra nele" do
+    sign_in
+    outro = @pricing.pricing_items.create!(name: "OS-08 Horas técnicas", position: 9)
+    visit conversation_proposal_path(@proposal.conversation)
+
+    within("#equipe-item-#{outro.id}") { click_button "+ Pessoa" }
+    assert_text "Adicionar à equipe em OS-08 Horas técnicas"
+    fill_in "Buscar por nome, cargo ou especialidade...", with: professionals(:biologa).name
+    click_button professionals(:biologa).name
+    fill_in "proposal_professional[deliverable_name]", with: "Horas técnicas de fauna"
+    click_button "Adicionar à equipe"
+
+    assert_text "adicionado(a) à equipe (OS-08 Horas técnicas)"
+    assert_equal outro, @pricing.reload.proposal_professionals.find_by!(deliverable_name: "Horas técnicas de fauna").pricing_item
+    within("#equipe-item-#{outro.id}") { assert_field with: "Horas técnicas de fauna" }
+  end
+
   private
 
   def sign_in

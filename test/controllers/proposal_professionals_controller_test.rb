@@ -16,8 +16,8 @@ class ProposalProfessionalsControllerTest < ActionDispatch::IntegrationTest
       }
     end
 
-    assert_redirected_to conversation_proposal_path(@conversation)
     line = @pricing.proposal_professionals.order(:created_at).last
+    assert_redirected_to conversation_proposal_path(@conversation, anchor: "equipe-item-#{line.pricing_item_id}")
     assert_equal 10 * professionals(:inativo).rate_man_hour * @pricing.bdi * @pricing.tax_multiplier, line.subtotal
   end
 

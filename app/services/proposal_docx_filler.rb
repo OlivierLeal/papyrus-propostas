@@ -67,17 +67,20 @@ class ProposalDocxFiller
   #
   # annex: TermOfReferenceAnnex::Annex ou lista deles (documentos do órgão como Anexo I, II…) —
   # entram no fim do documento, depois das assinaturas. Em #fill_split só a técnica recebe.
-  def fill(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil)
-    build(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex)
+  #
+  # team_charts: figuras logo depois do Quadro de Equipe (organograma, histograma — só quando o
+  # cliente pede), lista de { png_bytes:, width_emu:, height_emu:, caption: }.
+  def fill(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil, team_charts: [])
+    build(placeholders: placeholders, tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex, team_charts: team_charts)
   end
 
   # technical_overrides/commercial_overrides: placeholders que diferem entre os dois arquivos
   # (ex.: título da capa) — mesclados por cima de `placeholders` só na respectiva variante. Quem
   # decide os valores é quem chama (ver GenerateProposalDocumentTool); este serviço não sabe o
   # que é "técnica" ou "comercial" no domínio, só que existem dois conjuntos de texto diferentes.
-  def fill_split(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {}, annex: nil)
+  def fill_split(placeholders:, tables: {}, images: {}, schedules: {}, remove_paragraph_if_blank: [], technical_overrides: {}, commercial_overrides: {}, annex: nil, team_charts: [])
     {
-      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex) { |doc| trim_body!(doc, keep: :technical) },
+      technical: build(placeholders: placeholders.merge(technical_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank, annex: annex, team_charts: team_charts) { |doc| trim_body!(doc, keep: :technical) },
       commercial: build(placeholders: placeholders.merge(commercial_overrides), tables: tables, images: images, schedules: schedules, remove_paragraph_if_blank: remove_paragraph_if_blank) { |doc| trim_body!(doc, keep: :commercial) }
     }
   end
@@ -111,7 +114,7 @@ class ProposalDocxFiller
   private
     # Sempre opera numa cópia descartável — Zip::File#open com bloco reescreve o arquivo no
     # próprio caminho ao sair do bloco, então nunca toca no modelo original.
-    def build(placeholders:, tables:, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil)
+    def build(placeholders:, tables:, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil, team_charts: [])
       Tempfile.create([ "proposal", ".docx" ], binmode: true) do |tmp|
         FileUtils.cp(@template_path, tmp.path)
 
@@ -140,6 +143,7 @@ class ProposalDocxFiller
                 bold_unnumbered: config.fetch(:bold_unnumbered, false), bold_groups: config.fetch(:bold_groups, false))
             end
           end
+          insert_team_charts!(doc, team_charts, zip)
           insert_schedule_tables!(doc, schedules, zip)
           fill_simple_placeholders!(doc, placeholders, remove_paragraph_if_blank: remove_paragraph_if_blank)
           # Por ÚLTIMO, depois de todo texto (placeholders, tabelas, cronograma) já estar resolvido
@@ -606,6 +610,28 @@ class ProposalDocxFiller
 
         centered_paragraph_xml(drawing_run_xml(rel_id, filename, result.width_emu, result.height_emu))
       end.join
+    end
+
+    # Organograma/histograma logo depois do Quadro de Equipe (3ª tabela do modelo, já preenchida),
+    # cada um com a legenda "Figura 9-N:" embaixo — mesma convenção da figura do cronograma.
+    # EQUIPE TÉCNICA é sempre a 9ª seção de nível 1 (o "Quadro 9-1" do modelo é literal também).
+    SECAO_EQUIPE_NUMERO = 9
+
+    def insert_team_charts!(doc, charts, zip)
+      charts = Array(charts)
+      table = doc.xpath("//w:tbl", NS)[2]
+      return if charts.empty? || table.nil?
+
+      ensure_png_content_type!(zip)
+      xml = charts.each_with_index.map do |chart, index|
+        filename = "equipe_#{index + 1}.png"
+        rel_id = "rId_EQUIPE_#{index + 1}"
+        write_image!(zip, rel_id, filename, chart.fetch(:png_bytes))
+        "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>" +
+          centered_paragraph_xml(drawing_run_xml(rel_id, filename, chart.fetch(:width_emu), chart.fetch(:height_emu), docpr_id: 9300 + index)) +
+          schedule_caption_xml("Figura #{SECAO_EQUIPE_NUMERO}-#{index + 1}:", chart.fetch(:caption))
+      end.join
+      table.add_next_sibling(Nokogiri::XML::DocumentFragment.parse(xml))
     end
 
     def centered_paragraph_xml(run_xml)
