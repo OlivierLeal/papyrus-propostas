@@ -259,6 +259,8 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
     assert_equal [ "", "TOTAL", "44.910,00" ], linhas.last
     assert tabela.xpath(".//w:tr", ns).last.xpath(".//w:r[w:t[normalize-space()!='']]", ns).all? { |run| run.at_xpath("w:rPr/w:b", ns) }
     assert_equal 3, linhas.size
+    # Charlene, 2026-10-09: preço aberto por item leva a ressalva de contratação conjunta.
+    assert_includes document_texts(@proposal.generated_documents.first), Proposal::PRICE_ITEMS_DISCLAIMER
   end
 
   test "apresentacao_preco com um item só sai com o total e avisa o consultor" do
@@ -269,6 +271,9 @@ class GenerateProposalDocumentToolTest < ActiveSupport::TestCase
 
     assert_match "um item só", result["message"]
     assert_equal 1, @proposal.reload.docx_price_rows.size
+    texts = document_texts(@proposal.generated_documents.first)
+    assert_not_includes texts, Proposal::PRICE_ITEMS_DISCLAIMER
+    assert_not texts.join(" ").include?("RESSALVA_PRECO_ITENS")
   end
 
   test "an unrecognized formato_documento value is ignored instead of raising" do

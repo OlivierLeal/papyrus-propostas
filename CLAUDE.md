@@ -1056,6 +1056,13 @@ PDF). Entram logo depois do Quadro de Equipe, com "Figura 9-N" embaixo
 - Tela de Precificação: "+ Pessoa" em cada item (OS/capítulo) já escolhe o item no "Adicionar à
   equipe" (`add_to_item_controller.js`), e depois de adicionar a tela volta pro grupo daquele item.
 
+**Ressalva de contratação conjunta (2026-10-09, Charlene na PTC26122 VESTAS).** Logo depois do
+Desembolso, antes de "Os preços deverão ser corrigidos…", o modelo tem `{{RESSALVA_PRECO_ITENS}}`:
+"O valor é aplicável à contratação conjunta de todos os serviços. Caso haja a necessidade de
+contratação parcial, os valores por item deverão ser revistos." Só entra quando o Quadro de Preço sai
+aberto por item (`Proposal#docx_price_items_disclaimer`: modo `itens`/`empreendimentos`, ou
+`detalhado` com 2+ itens); com preço global o parágrafo some (`remove_paragraph_if_blank`).
+
 **Ao editar o `.docx` do modelo:** os índices das tabelas em
 `GenerateProposalDocumentTool#build_tables` são a POSIÇÃO da tabela no documento (0 = revisões,
 1 = produtos, 2 = equipe, 3 = desembolso) e têm que ser remapeados se alguma tabela for

@@ -417,7 +417,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
     team_charts, team_charts_note = somente_comercial?(args) ? [ [], "" ] : build_team_charts(args, schedules)
     placeholders = build_placeholders(args, images)
     tables = build_tables(args, description)
-    remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS]
+    remove_paragraph_if_blank = OBRIGACOES_ADICIONAIS_TOKENS + %w[ITENS_NAO_PREVISTOS RESSALVA_PRECO_ITENS]
     export_ms_project = export_ms_project?(args)
     # Planilhas do cliente anexadas (PPU, DFP, formulários) vão preenchidas junto da parte comercial,
     # sem depender de a IA lembrar de pedir (SpreadsheetFill.queue_automatic!).
@@ -690,6 +690,7 @@ class GenerateProposalDocumentTool < RubyLLM::Tool
         "ITENS_NAO_PREVISTOS" => build_itens_nao_previstos(args),
         "PRAZO_EXECUCAO" => prazo_execucao_value(args),
         "PRECO_TOTAL" => @proposal.docx_total_price,
+        "RESSALVA_PRECO_ITENS" => @proposal.docx_price_items_disclaimer,
         "OBRIGACOES_CONTRATANTE_ADICIONAIS" => join_lines(Array(args[:obrigacoes_contratante_adicionais]) + lodging_obligations),
         "OBRIGACOES_PAPYRUS_ADICIONAIS" => join_lines(args[:obrigacoes_papyrus_adicionais])
       }.tap { |placeholders| placeholders["MAPA_AREA_ESTUDO"] = "" if images.empty? }

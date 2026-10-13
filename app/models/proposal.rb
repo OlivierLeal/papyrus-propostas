@@ -217,6 +217,17 @@ class Proposal < ApplicationRecord
     mode
   end
 
+  # Frase da Charlene (2026-10-09, PTC26122 VESTAS) logo depois do Desembolso: só quando o Quadro
+  # de Preço abre o valor por item — com preço global ela não tem a que se referir.
+  PRICE_ITEMS_DISCLAIMER = "O valor é aplicável à contratação conjunta de todos os serviços. Caso haja a " \
+                           "necessidade de contratação parcial, os valores por item deverão ser revistos.".freeze
+
+  def docx_price_items_disclaimer
+    mode = price_presentation_mode
+    split = %w[itens empreendimentos].include?(mode) || (mode == "detalhado" && project_pricing.pricing_items.size > 1)
+    split ? PRICE_ITEMS_DISCLAIMER : ""
+  end
+
   CAMPAIGN_COST_LABELS = {
     vehicle: "veículos", fuel: "combustível", meals: "alimentação", lodging: "hospedagem",
     extras: "pedágios, lavagens, deslocamentos locais, mateiro e EPI"
