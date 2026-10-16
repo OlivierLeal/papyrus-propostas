@@ -35,12 +35,21 @@ class FillClientSpreadsheetJob < ApplicationJob
     if sheet_total && (sheet_total - target).abs > TOTAL_TOLERANCE
       revised = ask_plan(conversation, correction_prompt(plan, result, sheet_total, target, catalog))
       revised &&= apply_mirrored_prices(revised, fill, catalog, pricing)
-      plan, result, sheet_total = [ revised, *execute(revised, source_bytes, catalog, fill) ] if revised
+      if revised
+        revised_result, revised_total = execute(revised, source_bytes, catalog, fill)
+        # Conversa 79: a correção veio com chaves que o executor não conhece e escreveu MENOS que a
+        # 1ª tentativa. Só troca se chegou mais perto do total da proposta.
+        if revised_total && (revised_total - target).abs < (sheet_total - target).abs
+          plan, result, sheet_total = revised, revised_result, revised_total
+        else
+          @correction_note = "A rodada de correção não chegou mais perto do total da proposta — mantive o primeiro preenchimento."
+        end
+      end
     end
 
     fill.result.attach(io: StringIO.new(result.bytes), filename: fill.result_filename, content_type: fill.source_blob.content_type)
     totals = sheet_total ? { planilha: sheet_total.to_f, proposta: target.to_f } : result.totals
-    warnings = result.warnings + Array(@mirrored_warnings)
+    warnings = result.warnings + Array(@mirrored_warnings) + Array(@correction_note)
     warnings += [ "Não consegui recalcular a planilha pra conferir o total — confira ao abrir." ] if sheet_total.nil? && plan["celula_total"].present?
     if sheet_total && (sheet_total - target).abs > TOTAL_TOLERANCE && result.missing_keys.any? { |key| key.start_with?("bdi.") }
       warnings += [ "O total da planilha não fecha com o da proposta porque faltam os percentuais de BDI da Papyrus — o custo em si confere." ]

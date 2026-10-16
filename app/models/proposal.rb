@@ -85,6 +85,13 @@ class Proposal < ApplicationRecord
     "#{base}_#{SCHEDULE_FILENAME_LABELS.fetch(type)}.xml"
   end
 
+  # Planilha orçamentária (Spreadsheets::BudgetBuilder): mesma base do nome da proposta, sem a revisão
+  # (a planilha reflete a precificação do momento, não uma revisão do documento).
+  def budget_spreadsheet_filename
+    base = docx_filename_override.presence ? custom_filename_base("combined") : standard_filename_base("combined")
+    "#{base.sub(/[_\s-]*#{REVISION_MARKER.source}/i, '')}_Planilha_Orcamentaria.xlsx"
+  end
+
   # Siglas dos atos de licenciamento (LP, LI, RLP, ASV…) dos achados `tipo_licenca` ativos desta
   # conversa. Usado pelo gerador do .docx pra aplicar a regra de prazo de 12 meses da família
   # Prévia/Instalação (ver GenerateProposalDocumentTool) e, internamente, por #ato_licenciamento.
@@ -954,6 +961,17 @@ class Proposal < ApplicationRecord
           de um deles, informe "empreendimento" com o MESMO nome; itens que valem pra todos ficam
           com "empreendimento": null (o sistema rateia). Um empreendimento só → "empreendimentos": [].
 
+        SERVIÇO TERCEIRIZADO: quando o consultor disser que uma frente (ou o serviço todo) será
+        executada por terceiro, ou anexar a proposta comercial de um fornecedor para ela, essa
+        frente NÃO ganha equipe da Papyrus nem campo de logística — o preço do fornecedor já cobre
+        o pessoal, o deslocamento e a hospedagem dele (lançar campo aqui cobra a logística duas
+        vezes). Da Papyrus entra só o que o consultor pedir (ex.: coordenação, geoprocessamento).
+        Liste cada proposta de fornecedor em "custos_terceirizados", com "descricao" (o serviço, sem
+        o nome do fornecedor no começo — ex.: "Estudo de Dispersão Atmosférica (EDA) – ENGEAR"),
+        "valor" (o PREÇO GLOBAL FINAL exatamente como está escrito na proposta do fornecedor, em
+        número — você transcreve, nunca calcula; se ela tiver opções ou não deixar o total claro,
+        não liste) e "documento" (nome do arquivo). Sem fornecedor, "custos_terceirizados": [].
+
         Diga também se o ET ou o TR exige que a proposta técnica e a comercial sejam apresentadas
         como documentos/envelopes SEPARADOS (comum em licitação) — se nenhum falar nada, considere
         que NÃO (documento único).
@@ -993,6 +1011,7 @@ class Proposal < ApplicationRecord
               "campos": []
             }
           ],
+          "custos_terceirizados": [ { "descricao": "Monitoramento da Qualidade do Ar", "valor": 22000.00, "documento": "Proposta_Fornecedor.pdf" } ],
           "apresentacao_preco": "total",
           "documentos_separados": false,
           "justificativa_documentos_separados": "..."
@@ -1157,9 +1176,35 @@ class Proposal < ApplicationRecord
       end
 
       ensure_always_included_lines!(pricing)
+      apply_outsourced_costs!(pricing, Array(suggestion["custos_terceirizados"]))
       presentation = suggestion["apresentacao_preco"].to_s
       presentation = "itens" if presentation.blank? && suggestion["preco_discriminado"] == true
       pricing.update!(price_presentation: presentation) if ProjectPricing::PRICE_PRESENTATIONS.key?(presentation) && presentation != "total"
+    end
+
+    # Conversa 79 (2026-10-16): "coloquei nos documentos complementares 2 custos de terceirizados
+    # que não foi inserido automaticamente na precificação". O valor é o preço global que a IA
+    # TRANSCREVE da proposta do fornecedor (não calcula nada); entra como "Serviços Terceirizados"
+    # (kind terceirizado, repasse sem BDI, igual ao lançado à mão) e fica um achado dizendo de onde
+    # veio, pro consultor conferir. Descrição já lançada não duplica.
+    def apply_outsourced_costs!(pricing, entries)
+      costs = pricing.external_costs.dup
+      entries.each do |entry|
+        next unless entry.is_a?(Hash)
+
+        description = entry["descricao"].to_s.strip.truncate(200)
+        value = entry["valor"].is_a?(Numeric) ? entry["valor"].to_f : 0
+        next if description.blank? || !value.positive?
+        next if costs.any? { |cost| cost["description"].to_s.casecmp?(description) }
+
+        costs << { "description" => description, "value" => value, "kind" => "terceirizado" }
+        conversation.project_findings.create!(
+          field: "outro", nature: "sugestao", source_kind: "sistema",
+          value: "Custo terceirizado lançado na precificação: #{description} — R$ #{format('%.2f', value)}" \
+                 "#{" (transcrito de #{entry['documento']})" if entry['documento'].present?}. Confira o valor."
+        )
+      end
+      pricing.update!(external_costs: costs) if costs != pricing.external_costs
     end
 
     # Item que espelha uma linha da lista de preços do cliente. A quantidade vem da CÉLULA da

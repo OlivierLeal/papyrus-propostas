@@ -39,7 +39,8 @@ class FillClientSpreadsheetJobTest < ActiveJob::TestCase
     right = wrong.merge("precos_unitarios" => [ { "aba" => "PPU", "celula" => "F3", "quantidade_celula" => "E3",
                                                    "composicao" => @pieces.map { |key| { "peca" => key, "fracao" => 1 } } } ])
     target = Spreadsheets::FactCatalog.new(@proposal)["proposta.total"].value.round(2)
-    recalculated = [ 0, target ].map { |total| fake_recalculated(total) }
+    # Ordem das recalculações: 1º preenchimento, planilha original (verba do cliente), correção.
+    recalculated = [ 0, 0, target ].map { |total| fake_recalculated(total) }
 
     with_recalculator(-> { recalculated.shift }) do
       stub_ai_complete([ wrong.to_json, right.to_json ]) { FillClientSpreadsheetJob.perform_now(@fill.id) }
@@ -48,6 +49,24 @@ class FillClientSpreadsheetJobTest < ActiveJob::TestCase
     @fill.reload
     assert_equal target.to_f, @fill.totals["planilha"]
     assert @conversation.messages.where(internal: true, role: "user").where("content LIKE ?", "CONFERÊNCIA%").exists?
+  end
+
+  test "correção que não chega mais perto do total é descartada" do
+    first = { "precos_unitarios" => [ { "aba" => "PPU", "celula" => "F3", "quantidade_celula" => "E3",
+                                         "composicao" => @pieces.map { |key| { "peca" => key, "fracao" => 1 } } } ],
+              "celula_total" => { "aba" => "PPU", "celula" => "G5" } }
+    worse = first.merge("precos_unitarios" => [])
+    target = Spreadsheets::FactCatalog.new(@proposal)["proposta.total"].value.round(2)
+    recalculated = [ target - 10, 0, 0 ].map { |total| fake_recalculated(total) }
+
+    with_recalculator(-> { recalculated.shift }) do
+      stub_ai_complete([ first.to_json, worse.to_json ]) { FillClientSpreadsheetJob.perform_now(@fill.id) }
+    end
+
+    @fill.reload
+    assert_equal (target - 10).to_f, @fill.totals["planilha"]
+    assert_equal first["precos_unitarios"], @fill.plan["precos_unitarios"]
+    assert @fill.report["warnings"].any? { |warning| warning.include?("mantive o primeiro") }
   end
 
   test "planilha de referência: não preenche; automático fica só no painel, pedido vira card" do

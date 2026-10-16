@@ -216,7 +216,20 @@ module Spreadsheets
 
       ref = spec["quantidade_celula"].presence || quantity_cell_in_row(spec["aba"], spec["celula"].to_s)
       value = ref && guard { @workbook.value(spec["aba"], ref) }
-      value.is_a?(Numeric) ? value.to_d : nil
+      return value.to_d if value.is_a?(Numeric)
+
+      blank_quantity_as_lump_sum(spec["aba"], ref) if value.nil?
+    end
+
+    # Conversa 79 (2026-10-16): planilha montada pelo consultor com a coluna "Qtd" vazia — as quatro
+    # linhas foram recusadas ("quantidade não encontrada") e o arquivo voltou em branco. Quantidade em
+    # branco (sem fórmula) é verba: escreve 1 na célula e o preço unitário vira o valor da linha.
+    def blank_quantity_as_lump_sum(sheet, ref)
+      return unless ref && !guard { @workbook.formula?(sheet, ref) }
+      return unless guard { @workbook.write(sheet, ref, 1) }
+
+      @warnings << "#{sheet}!#{ref}: quantidade em branco — considerei 1 (verba)"
+      1.to_d
     end
 
     # A IA às vezes não diz onde está a quantidade (proposta 69: 53 linhas, nenhuma com quantidade —
@@ -240,6 +253,7 @@ module Spreadsheets
     # vez por construção — na proposta 69 a IA errou as frações de 30 peças e citou "C5" (o campo
     # inteiro, que não é peça). "composicao" explícita continua valendo e não é rateada de novo.
     def expand_item_compositions(specs)
+      specs = specs.map { |spec| external_refs_as_pieces(spec) }
       specs = specs.map { |spec| spec.merge("composicao" => expand_groups(Array(spec["composicao"]))) }
       rows_of_item = Hash.new { |hash, key| hash[key] = [] }
       specs.each_with_index { |spec, index| item_refs(spec).each { |id, weight| rows_of_item[id] << [ index, weight ] } }
@@ -280,6 +294,16 @@ module Spreadsheets
       specs.each_with_index.map do |spec, index|
         spec.merge("composicao" => spec["composicao"] + extra[index], "rateio" => notes[index].join(" + ").presence)
       end
+    end
+
+    # Custo externo citado como item ("itens": [{"item": "E0"}]) é a peça inteira naquela linha.
+    def external_refs_as_pieces(spec)
+      refs = Array(spec["itens"])
+      externals, items = refs.partition { |ref| (ref.is_a?(Hash) ? ref["item"] : ref).to_s.match?(/\AE\d+\z/i) }
+      return spec if externals.empty?
+
+      parts = externals.map { |ref| { "peca" => (ref.is_a?(Hash) ? ref["item"] : ref).to_s.upcase, "fracao" => 1 } }
+      spec.merge("itens" => items, "composicao" => Array(spec["composicao"]) + parts)
     end
 
     def item_refs(spec)

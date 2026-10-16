@@ -7,6 +7,16 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
     @proposal = proposals(:priced_proposal)
   end
 
+  # Conversa 79 (2026-10-16): planilha orçamentária da Papyrus, sem modelo do cliente.
+  test "baixa a planilha orçamentária da precificação atual" do
+    get budget_spreadsheet_conversation_proposal_path(@conversation)
+
+    assert_response :success
+    assert_equal "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response.media_type
+    assert_includes response.headers["Content-Disposition"], "Planilha_Orcamentaria.xlsx"
+    assert Spreadsheets::Workbook.open(response.body).sheets.any?
+  end
+
   test "show renders the pricing screen" do
     get conversation_proposal_path(@conversation)
     assert_response :success

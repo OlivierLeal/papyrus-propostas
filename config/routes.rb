@@ -58,6 +58,7 @@ Rails.application.routes.draw do
       post :rebuild_from_client_sheet
       post :reopen
       post :add_external_cost
+      get :budget_spreadsheet
       delete "external_costs/:index", action: :remove_external_cost, as: :remove_external_cost
       resources :proposal_professionals, only: %i[create destroy]
       resources :schedule_items, only: %i[create destroy]

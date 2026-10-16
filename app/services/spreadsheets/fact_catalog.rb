@@ -61,7 +61,12 @@ module Spreadsheets
           "(#{own.size} peças: #{own.map(&:key).first(12).join(', ')}#{', …' if own.size > 12})"
       end
       common = Array(by_item[nil])
-      lines << "sem item (custos externos, rateados entre todas as linhas): #{common.map(&:key).join(', ')}" if common.any?
+      # Conversa 79: a planilha tinha uma linha para cada serviço terceirizado e a IA, sem ver os
+      # externos um a um, apontou as duas pro item de geoprocessamento.
+      common.each do |piece|
+        lines << "custo externo #{piece.key} = #{display(piece)} — #{piece.label} (sem item: rateado entre todas as linhas; " \
+                 "se uma linha do cliente é exatamente este serviço, cite-o nela com \"composicao\": [{\"peca\": \"#{piece.key}\", \"fracao\": 1}])"
+      end
       "ITENS DA PRECIFICAÇÃO (preço com BDI e impostos)\n#{lines.join("\n")}"
     end
 

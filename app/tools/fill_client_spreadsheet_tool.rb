@@ -11,6 +11,8 @@ class FillClientSpreadsheetTool < RubyLLM::Tool
     as planilhas anexadas — não chame esta ferramenta só por estar gerando a proposta.
     Planilha que é só material de referência é identificada pelo sistema e não é preenchida; se o
     consultor insistir, chame de novo que ela é tratada como formulário.
+    Planilha orçamentária da própria Papyrus, sem modelo do cliente, NÃO é esta ferramenta: use
+    generate_budget_spreadsheet (não precisa de anexo).
 
     Roda em segundo plano: diga ao consultor que o resultado aparece aqui no chat em instantes,
     com o arquivo pronto e o que foi preenchido. Você não escreve valores: o sistema calcula tudo
@@ -30,7 +32,7 @@ class FillClientSpreadsheetTool < RubyLLM::Tool
     return { error: "Esta proposta ainda não tem precificação. Abra a Tela de Precificação antes de preencher a planilha." }.to_json unless pricing
 
     attachment = find_spreadsheet(arquivo)
-    return { error: "Não encontrei planilha .xlsx/.xlsm anexada nesta conversa#{" com o nome \"#{arquivo}\"" if arquivo.present?}. Planilha .xls antiga: peça ao consultor pra salvar como .xlsx." }.to_json unless attachment
+    return { error: "Não encontrei planilha .xlsx/.xlsm anexada nesta conversa#{" com o nome \"#{arquivo}\"" if arquivo.present?}. Planilha .xls antiga: peça ao consultor pra salvar como .xlsx. Se ele quer a planilha orçamentária da Papyrus, sem modelo, use generate_budget_spreadsheet." }.to_json unless attachment
 
     if @conversation.spreadsheet_fills.where(source_blob_id: attachment.blob_id, status: "processing").exists?
       return { aviso: "Essa planilha já está sendo preenchida; o resultado aparece no chat em instantes." }.to_json

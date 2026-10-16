@@ -104,6 +104,7 @@ class ProposalDocxFiller
         ensure_png_content_type!(zip)
         sect_props = sect_props_from_xml(document_xml, zip.read("word/_rels/document.xml.rels"))
         insert_or_replace_schedule_block!(doc, schedules, zip, sect_props)
+        normalize_word_ids!(doc)
         zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
       end
 
@@ -112,6 +113,54 @@ class ProposalDocxFiller
   end
 
   private
+    WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
+
+    # "O Word encontrou conteúdo ilegível" (2026-10-16, conversa 79): o LibreOffice abre, o Word
+    # recusa. Cada imagem inserida pelo sistema nascia com o mesmo <wp:docPr id="9001"> (mapa,
+    # croqui, linha do tempo), e linha/parágrafo clonado (linhas de tabela, listas, tópicos) repetia o
+    # w14:paraId do molde. Os dois têm que ser únicos no documento. Roda por último, sobre o corpo
+    # pronto: mantém o 1º de cada id e renumera as repetições. Também marca xml:space="preserve" em
+    # <w:t> com espaço na ponta (senão o Word come o espaço: "CNPJ:" colado no número).
+    def normalize_word_ids!(doc)
+      doc_prs = doc.xpath("//wp:docPr", "wp" => WP_NS)
+      used = Set.new
+      next_id = doc_prs.map { |node| node["id"].to_i }.max.to_i + 1
+      doc_prs.each do |node|
+        next if used.add?(node["id"])
+
+        node["id"] = next_id.to_s
+        used << node["id"]
+        next_id += 1
+      end
+
+      %w[paraId textId].each do |attr|
+        seen = Set.new
+        doc.xpath("//*[@w14:#{attr}]", "w14" => W14_NS).each do |node|
+          attribute = node.attribute_with_ns(attr, W14_NS)
+          value = attribute.value.upcase
+          next if value == "77777777" # textId "sem texto" do Word — repete por definição
+
+          if value.to_i(16) >= 0x80000000 || !seen.add?(value)
+            value = fresh_word_id(seen)
+            attribute.value = value
+          end
+          seen << value
+        end
+      end
+
+      doc.xpath("//w:t", NS).each do |text|
+        text["xml:space"] = "preserve" if text.content.match?(/\A\s|\s\z/)
+      end
+    end
+
+    def fresh_word_id(seen)
+      loop do
+        candidate = format("%08X", SecureRandom.random_number(0x7FFFFFFF) + 1)
+        return candidate unless seen.include?(candidate)
+      end
+    end
+
     # Sempre opera numa cópia descartável — Zip::File#open com bloco reescreve o arquivo no
     # próprio caminho ao sair do bloco, então nunca toca no modelo original.
     def build(placeholders:, tables:, images: {}, schedules: {}, remove_paragraph_if_blank: [], annex: nil, team_charts: [])
@@ -164,6 +213,7 @@ class ProposalDocxFiller
           # Depois do corte técnico/comercial: o anexo vai no fim do arquivo que sobrou, e o
           # tratamento de "PAPYRUS" acima não mexe no texto do órgão.
           append_annexes!(doc, annex, zip)
+          normalize_word_ids!(doc)
           zip.get_output_stream("word/document.xml") { |f| f.write(doc.to_xml) }
         end
 

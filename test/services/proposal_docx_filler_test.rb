@@ -185,6 +185,35 @@ class ProposalDocxFillerTest < ActiveSupport::TestCase
     end
   end
 
+  # 2026-10-16, conversa 79: "O Word encontrou conteúdo ilegível" — imagens do sistema com o mesmo
+  # docPr id, paraId repetido em linha clonada e o rodapé do modelo com id 195 duas vezes.
+  test "ids de desenho e de parágrafo são únicos no documento inteiro" do
+    tables = @tables.merge(2 => { rows: [ %w[Diretoria A B C], %w[Execução D E F], %w[Execução G H I] ], merge_first_column: true })
+    bytes = @filler.fill(placeholders: @placeholders.merge("OBJETIVO_SERVICOS" => "Texto com CNPJ: "), tables: tables,
+      schedules: { "servico" => schedule_payload("servico") },
+      team_charts: [ { png_bytes: PNG_1X1, width_emu: 100, height_emu: 100, caption: "Organograma." },
+                     { png_bytes: PNG_1X1, width_emu: 100, height_emu: 100, caption: "Histograma." } ])
+
+    doc_pr_ids = []
+    para_ids = []
+    Zip::File.open_buffer(StringIO.new(bytes)) do |zip|
+      zip.glob("word/{document,header*,footer*}.xml").each do |entry|
+        xml = entry.get_input_stream.read
+        doc_pr_ids.concat(xml.scan(/<wp:docPr [^>]*\bid="(\d+)"/).flatten)
+        para_ids.concat(xml.scan(/w14:paraId="([0-9A-Fa-f]+)"/).flatten.map(&:upcase))
+        next unless entry.name == "word/document.xml"
+
+        Nokogiri::XML(xml).xpath("//w:t", NS).each do |text|
+          assert_equal "preserve", text["xml:space"], "w:t com espaço na ponta sem preserve: #{text.content.inspect}" if text.content.match?(/\A\s|\s\z/)
+        end
+      end
+    end
+    assert_equal para_ids.size, para_ids.uniq.size, "w14:paraId repetido: #{para_ids.tally.select { |_, n| n > 1 }.keys.first(5)}"
+    assert para_ids.all? { |id| id.to_i(16) < 0x80000000 }
+    # footer1 e footer2 nunca aparecem na mesma seção, mas o Word confere o documento todo.
+    assert_equal doc_pr_ids.size, doc_pr_ids.uniq.size, "wp:docPr id repetido: #{doc_pr_ids.tally.select { |_, n| n > 1 }.keys}"
+  end
+
   # 2026-10: organograma/histograma (só quando o cliente pede) logo depois do Quadro de Equipe.
   test "figuras da equipe entram logo depois do Quadro de Equipe, com legenda Figura 9-N embaixo" do
     charts = [ { png_bytes: PNG_1X1, width_emu: 100, height_emu: 100, caption: "Organograma da equipe técnica." },

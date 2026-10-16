@@ -616,6 +616,19 @@ humana. Preço não muda (`external_costs_total` soma os dois grupos igual sempr
   como se fosse executado pela própria Papyrus. Só reforço de PROMPT (mesmo caminho do órgão),
   sem filtro de código — o cliente nunca vê esse campo, é só precificação interna.
 
+**Terceirizado entra sozinho e a IA edita a precificação (2026-10-16, conversa 79: serviço "100%
+terceirizado pela ENGEAR", propostas do fornecedor anexadas como complementares).** Revê em parte a
+decisão acima ("100% escolha humana"): o consultor reclamou que os dois custos "não foram inseridos
+automaticamente". `team_suggestion_prompt` pede `custos_terceirizados` (preço global TRANSCRITO da
+proposta do fornecedor, nunca calculado; opção ou total ambíguo não entra) e proíbe equipe e campo para
+a frente terceirizada (a sugestão tinha criado um campo de logística pro técnico do fornecedor, que já
+estava no preço dele). `Proposal#apply_outsourced_costs!` grava com `kind: "terceirizado"`, sem duplicar
+descrição, e deixa um achado dizendo de onde veio. `AddExternalCostTool` continua sem marcar
+terceirizado. **`EditPricingTool`** (chat da proposta): remove campo de logística (`campo #ID`), custo
+externo (`custo #N`) ou linha de equipe (`linha #ID`; fixos não saem) — ids que agora aparecem no
+`[ESTADO ATUAL DA PROPOSTA]`. Antes a IA só sabia adicionar, tentou lançar custo NEGATIVO pra compensar
+a logística duplicada e mandou o consultor fazer na mão.
+
 ---
 
 ## 6. Pipeline de processamento de dados
@@ -1030,6 +1043,16 @@ não: `w:rPr`/`w:pPr`/`w:tcPr` têm ORDEM fixa no schema, e havia três desvios 
 antes de spacing/jc. Corrigidos (modelo por string crua, `bold_run!` insere logo depois de
 rStyle/rFonts). Teste "respeita a ordem do schema" gera o documento com cronograma e anexo e confere
 corpo, cabeçalhos e rodapés — **todo XML novo que o sistema escrever tem que passar nele**.
+
+**Continuava dando erro no Word (2026-10-16, conversa 79, Charlene e Sara: "somente nos arquivos do
+sistema").** Validado com o validador XSD de OOXML: o schema passava, o problema eram ids repetidos.
+Toda imagem inserida pelo sistema nascia com `<wp:docPr id="9001">` (mapa, croqui, linha do tempo),
+linha/parágrafo clonado repetia o `w14:paraId` do molde, e o PRÓPRIO modelo tinha `docPr id="195"` duas
+vezes no rodapé (`footer2.xml`/`header2.xml` copiavam ids e paraIds dos originais, e um paraId passava
+de 0x80000000). `ProposalDocxFiller#normalize_word_ids!` roda por último no corpo (`build` e
+`insert_schedule_section`): mantém o 1º de cada id, renumera os repetidos e marca `xml:space="preserve"`
+em `<w:t>` com espaço na ponta. O modelo foi corrigido por string crua. O teste "ids de desenho e de
+parágrafo são únicos no documento inteiro" confere corpo, cabeçalhos e rodapés.
 
 **Sumário de Revisões curto (mesmo dia, áudio da Charlene).** `Proposal.short_revision_description`:
 1ª oração, sem parênteses nem "Revisão 01 —", até 70 caracteres sem cortar palavra; o
@@ -2857,6 +2880,16 @@ sem mecanismo novo de comparação:
   (Classe 6 → EIA/RIMA, LP), e com o pedido trocado pra RAP (em transação desfeita) o resumo real
   abriu o tópico com lei × pedido × o que fazer e o card de divergência.
 - Só vale pra conversas processadas daqui pra frente (o CAL roda uma vez, entre ET e TR).
+- **Serviço que não é licenciamento (2026-10-16, conversa 79: só monitoramento da qualidade do ar numa
+  mineração).** O CAL enquadrou o empreendimento em LP+LI+LO/EIA-RIMA, o TR buscado foi de EIA, e o
+  arquivo saiu "LP+LI+LO" em três revisões mesmo depois da consultora decidir contra a legislação (a
+  divergência era só do estudo; a licença do CAL não tinha par no ET e continuou valendo). Agora o
+  prompt do `ProcessLegalNormsJob` primeiro olha o SERVIÇO pedido — monitoramento, amostragem, estudo de
+  dispersão, laudo → não gera `tipo_licenca`/`tipo_estudo`/`enquadramento_legal`, só as normas do
+  próprio serviço. E `ProjectConflict#resolve!` de enquadramento contra a legislação supera também os
+  outros achados de licença/estudo do CAL (`drop_legal_framing!`). Decisão em texto livre fora do
+  catálogo ("considere só o escopo das propostas do fornecedor") tira só o estudo da legislação — antes
+  tirava o do cliente também e a proposta ficava sem estudo nenhum.
 - **Trava de confirmação (2026-09-30, relato da Sara: "leio o resumo no automático e já peço pra
   gerar"; o enquadramento diferente só apareceu com a proposta pronta).** Card "Enquadramento" no
   painel (`conversations/_framing_panel`: licença pedida, estudo(s) da proposta, o que a lei diz) com
@@ -3193,6 +3226,23 @@ sempre (seção 1): **a IA interpreta a planilha e monta um PLANO; o Ruby calcul
   igual do item (a IA escolhe o peso) — não puxam só a logística.
 - `professionals.social_charges_percent` (fração; digitado em % no cadastro) — só pra planilha que
   separa salário e encargos. Em branco, vai cheio (encargos 0%).
+- **Planilha orçamentária da Papyrus, do zero (2026-10-16, conversa 79: "gere uma planilha do zero,
+  não precisa obedecer modelo"; a consultora: "está sem os preços das horas, sem BDI… se eu alterar lá
+  muda o preço?").** `Spreadsheets::BudgetBuilder` monta o `.xlsx` direto da precificação, sem IA (XML
+  cru via rubyzip): aba Orçamento com BDI e impostos em células amarelas NO TOPO; uma linha por HH,
+  diária, produto, categoria de logística de cada campo (quantidade × valor unitário, a decomposição de
+  `FieldCampaign#breakdown`) e custo de item; subtotal, BDI e impostos em fórmula sobre esses dois
+  parâmetros; externos/terceirizados como repasse; total; aba Desembolso com % × total. Valores em cache
+  + `fullCalcOnLoad`. O motor arredonda linha a linha e a planilha aplica as margens no subtotal: pode
+  dar centavos de diferença (a mensagem avisa). Sai pelo chat (`GenerateBudgetSpreadsheetTool`, vai pros
+  documentos gerados com `kind: "budget_spreadsheet"`) e pelo botão "Baixar planilha orçamentária" na
+  composição do preço (`ProposalsController#budget_spreadsheet`, gera na hora).
+- **Preenchimento que voltava em branco (mesma conversa).** O consultor mandou um modelo com a coluna
+  "Qtd" vazia e as 4 linhas foram recusadas ("quantidade não encontrada"). Quantidade em branco (sem
+  fórmula) agora é verba: escreve 1 e o preço unitário vira o valor da linha. Custo externo pode ser
+  citado como item (`"itens": [{"item": "E0"}]`) e o catálogo lista cada externo. A rodada de correção
+  só substitui o plano se chegar mais perto do total (lá ela veio com chaves que o executor não entende
+  e escreveu menos ainda).
 - Verificado ao vivo na conversa 65 (Bedrock real): PPU → TOTAL GERAL recalculado R$ 353.925,00 =
   proposta; DFP (com percentuais de BDI provisórios) → DFP!E3 R$ 353.924,91 (arredondamento da
   planilha), mão de obra em horas certa, BDI fechando. Perguntas de benefício fiscal/desoneração

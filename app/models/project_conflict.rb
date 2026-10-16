@@ -60,10 +60,18 @@ class ProjectConflict < ApplicationRecord
         field: field, value: value, nature: "fato", source_kind: "consultor",
         excerpt: note.presence, status: "active"
       )
-      superseded_values = findings.active.map(&:value)
-      findings.active.each { |finding| finding.supersede!(replacement) }
+      active = findings.active.to_a
+      legal_values = active.select { |finding| finding.source_kind == "cal" }.map(&:value)
+      rejected_legislation = legal_framing? && legal_values.none? { |legal| same_value?(legal, value) }
+      active.each { |finding| finding.supersede!(replacement) }
       update!(status: "resolved", resolved_by: user, resolved_at: Time.current, resolution_note: note.presence)
-      conversation.replace_study_types!(superseded_values, value) if field == "tipo_estudo"
+      if field == "tipo_estudo"
+        # Decisão em texto livre ("considere só o escopo da proposta do fornecedor") não casa com o
+        # catálogo: aí só sai o que veio da legislação, e o estudo pedido pelo cliente fica.
+        discarded = StudyType.match_ai_value(value) ? active.map(&:value) : legal_values
+        conversation.replace_study_types!(discarded, value)
+      end
+      drop_legal_framing!(replacement) if rejected_legislation
       replacement
     end
   end
@@ -86,4 +94,21 @@ class ProjectConflict < ApplicationRecord
     values = findings.active.map { |finding| "#{finding.value} (#{finding.origin_label})" }.join(" × ")
     "- #{field_label}: #{values} — #{summary}"
   end
+
+  private
+    # Conversa 79 (2026-10-16): o CAL enquadrou a mineração em LP+LI+LO/EIA, o pedido era só
+    # monitoramento da qualidade do ar. A consultora decidiu o estudo contra a legislação, mas a
+    # licença do CAL (que não tinha divergência própria — o ET não pede licença) continuou valendo e
+    # o arquivo saiu "LP+LI+LO" em todas as revisões. Rejeitar a legislação num campo de
+    # enquadramento rejeita o enquadramento inteiro: os outros achados de licença/estudo do CAL saem.
+    def drop_legal_framing!(replacement)
+      conversation.project_findings.active
+        .where(source_kind: "cal", field: ProjectFinding::FRAMING_FIELDS - [ field ])
+        .find_each { |finding| finding.supersede!(replacement) }
+    end
+
+    def same_value?(left, right)
+      normalize = ->(text) { I18n.transliterate(text.to_s).downcase.gsub(/[^a-z0-9+]/, "") }
+      normalize.(left) == normalize.(right)
+    end
 end

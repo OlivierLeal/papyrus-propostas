@@ -1042,13 +1042,13 @@ class Conversation < ApplicationRecord
         factor = item.days_factor
         team = item.proposal_professionals.map do |pp|
           extra = pp.commute_extra_days(factor)
-          "    - #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s)#{" + #{extra} por deslocamento até a hospedagem" if extra.positive?})"
+          "    - linha ##{pp.id} #{pp.professional.name}: #{pp.deliverable_name} (#{pp.man_hours} HH, #{pp.field_days} diária(s)#{" + #{extra} por deslocamento até a hospedagem" if extra.positive?})"
         end
-        campaigns = item.field_campaigns.map { |c| "    - campo \"#{c.description}\": #{c.people} pessoa(s), #{c.days} dia(s) em campo#{" (#{c.effective_days} com o deslocamento diário)" if c.extra_days.positive?}, #{c.vehicles} #{c.vehicle_type}#{", local #{c.ibge_municipality.label}" if c.ibge_municipality}, hospedagem: #{campaign_lodging_text(c)}" }
+        campaigns = item.field_campaigns.map { |c| "    - campo ##{c.id} \"#{c.description}\" (custo direto R$ #{c.cost(pricing).round(2)}): #{c.people} pessoa(s), #{c.days} dia(s) em campo#{" (#{c.effective_days} com o deslocamento diário)" if c.extra_days.positive?}, #{c.vehicles} #{c.vehicle_type}#{", local #{c.ibge_municipality.label}" if c.ibge_municipality}, hospedagem: #{campaign_lodging_text(c)}" }
         [ "  Item \"#{item.name}\"#{" (empreendimento #{item.pricing_enterprise.name})" if item.pricing_enterprise}:", *team, *campaigns ].join("\n")
       end.join("\n")
 
-      external_costs = pricing.external_costs.map { |c| "#{c['description']} (R$ #{c['value']})" }.join(", ")
+      external_costs = pricing.external_costs.each_with_index.map { |c, i| "custo ##{i + 1} #{c['description']} (R$ #{c['value']})" }.join(", ")
       team_all_zero = pricing.proposal_professionals.none? || pricing.proposal_professionals.all? { |pp| pp.man_hours.zero? && pp.field_days.zero? }
       logistics_filled = pricing.logistics_total.positive? || pricing.distance_km.positive?
 

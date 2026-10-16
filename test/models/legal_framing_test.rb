@@ -41,6 +41,32 @@ class LegalFramingTest < ActiveSupport::TestCase
     assert_equal [ study_types(:rap) ], @conversation.reload.study_types
   end
 
+  # Conversa 79 (2026-10-16): só monitoramento da qualidade do ar, o CAL enquadrou em LP+LI+LO e o
+  # nome do arquivo seguiu com "LP+LI+LO" mesmo depois da decisão contra a legislação.
+  test "decidir contra a legislação tira também a licença que só o CAL indicou" do
+    @conversation.project_findings.create!(field: "tipo_licenca", value: "LP+LI+LO", nature: "fato", source_kind: "cal")
+
+    @conflict.resolve!(users(:one), value: "rap")
+
+    assert_empty Proposal.new(conversation: @conversation).license_act_acronyms
+  end
+
+  test "seguir a legislação mantém a licença do CAL" do
+    @conversation.project_findings.create!(field: "tipo_licenca", value: "LP+LI", nature: "fato", source_kind: "cal")
+
+    @conflict.resolve!(users(:one), value: "eia_rima")
+
+    assert_equal %w[LP LI], Proposal.new(conversation: @conversation).license_act_acronyms
+  end
+
+  test "decisão em texto livre fora do catálogo tira só o estudo da legislação" do
+    @conversation.study_types << study_types(:rap) << study_types(:eia_rima)
+
+    @conflict.resolve!(users(:one), value: "considere só o escopo das propostas do fornecedor")
+
+    assert_equal [ study_types(:rap) ], @conversation.reload.study_types
+  end
+
   test "sem enquadramento pela norma, vale o pedido do cliente" do
     @legal.destroy!
 

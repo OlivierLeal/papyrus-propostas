@@ -51,6 +51,16 @@ class ProcessLegalNormsJob < ApplicationJob
         #{"Área: #{area} ha" if area}
         #{"Órgão ambiental já identificado: #{orgao}" if orgao}
 
+        ANTES DE TUDO, veja o que o ET pede como SERVIÇO (não como estudo): se é um serviço técnico
+        pontual — monitoramento, campanha de amostragem, modelagem/estudo de dispersão, laudo,
+        relatório de acompanhamento de condicionante — e NÃO a obtenção ou renovação de uma
+        licença, esta proposta NÃO é de licenciamento: NÃO gere "tipo_licenca", "tipo_estudo" nem
+        "enquadramento_legal" (o enquadramento do empreendimento não muda o que foi contratado e
+        só confundiria a proposta). Nesse caso, pesquise só as normas que regem o PRÓPRIO serviço
+        (ex.: padrões de qualidade do ar, método de amostragem, termo de referência do estudo) e
+        devolva-as como "condicionantes". Só siga a tarefa abaixo quando o pedido for de licença
+        (ou não disser o que é).
+
         TAREFA PRINCIPAL — ENQUADRAMENTO LEGAL. Descubra, PELA LEGISLAÇÃO, como este
         empreendimento se enquadra: a norma que classifica a atividade (tabela de porte ×
         potencial poluidor, lista de atividades sujeitas a licenciamento etc.), a classe/porte em

@@ -1,6 +1,6 @@
 class ProposalsController < ApplicationController
   before_action :set_conversation
-  before_action :set_proposal, only: %i[ show update approve reopen suggest_logistics rebuild_from_client_sheet add_external_cost remove_external_cost ]
+  before_action :set_proposal, only: %i[ show update approve reopen suggest_logistics rebuild_from_client_sheet add_external_cost remove_external_cost budget_spreadsheet ]
 
   def show
     @professionals = Professional.active.order(:name)
@@ -134,6 +134,16 @@ class ProposalsController < ApplicationController
     pricing.recalculate!
 
     redirect_to conversation_proposal_path(@conversation), notice: "Custo externo removido."
+  end
+
+  # Planilha orçamentária da precificação atual, montada na hora (Spreadsheets::BudgetBuilder) —
+  # o mesmo arquivo que a IA gera pelo chat, sem passar por ela.
+  def budget_spreadsheet
+    return redirect_to(conversation_proposal_path(@conversation), alert: "A precificação ainda não existe.") unless @proposal.project_pricing
+
+    result = Spreadsheets::BudgetBuilder.new(@proposal).call
+    send_data result.bytes, filename: @proposal.budget_spreadsheet_filename,
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", disposition: "attachment"
   end
 
   private

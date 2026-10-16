@@ -144,6 +144,26 @@ class Spreadsheets::PlanExecutorTest < ActiveSupport::TestCase
     assert_match(/#{Regexp.escape(items.first.name)} × 75%/, result.entries.first[:origem])
   end
 
+  # Conversa 79 (2026-10-16): planilha montada pelo consultor com a coluna "Qtd" vazia — tudo
+  # recusado, arquivo em branco; e cada serviço terceirizado tinha a sua linha.
+  test "quantidade em branco vira verba (1) e custo externo citado como item vai inteiro na linha" do
+    @proposal.project_pricing.update!(external_costs: [ { "description" => "Laboratório", "value" => 1000.0, "kind" => "terceirizado" } ])
+    @proposal.project_pricing.recalculate!
+    @catalog = Spreadsheets::FactCatalog.new(@proposal)
+    items = @proposal.project_pricing.pricing_items.order(:position).to_a
+    plan = { "precos_unitarios" => [
+      { "aba" => "PPU", "celula" => "F20", "quantidade_celula" => "E20", "itens" => items.map(&:id) },
+      { "aba" => "PPU", "celula" => "F21", "quantidade_celula" => "E21", "itens" => [ { "item" => "E0" } ] }
+    ] }
+    result = run_plan(plan)
+    workbook = Spreadsheets::Workbook.open(result.bytes)
+
+    assert_equal 1, workbook.value("PPU", "E20").to_i
+    assert_equal 1000, workbook.value("PPU", "F21").to_d
+    assert_in_delta @catalog["proposta.total"].value.to_f, result.totals[:planilha], 0.02
+    assert result.warnings.any? { |warning| warning.include?("considerei 1") }
+  end
+
   test "campo inteiro citado como peça (C5) vira as peças dele" do
     group = @pieces.find { |key| key.match?(/\AC\d+\./) }&.split(".")&.first
     skip "fixture sem campo com custo" unless group
