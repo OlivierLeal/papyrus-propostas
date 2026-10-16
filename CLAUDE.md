@@ -305,7 +305,8 @@ migração de limpeza).
   dias) × veículos ÷ consumo × preço; alimentação = pessoas × (dias + viagem); hospedagem = pessoas ×
   (dias + viagem − 1); extras × valor unitário. Viagem de 3h+ → campo novo nasce com 2 dias de viagem.
 - **Logística e custos do item levam BDI × impostos** (decisão do consultor, igual à planilha — antes a
-  logística entrava sem multiplicador). Custos externos da proposta seguem como repasse, sem BDI.
+  logística entrava sem multiplicador). Custos externos e terceirizados também levam, desde 2026-10-16
+  (ver "BDI e impostos sobre tudo" abaixo).
 - Valores unitários por proposta (`rental_per_day` = carro, `rental_4x4_per_day`, hospedagem,
   alimentação, combustível, consumo, `toll_price`, `wash_price`, `uber_price`, `mateiro_per_day`,
   `epi_price`, `daily_km`); padrões das propostas novas = os da planilha.
@@ -623,11 +624,24 @@ automaticamente". `team_suggestion_prompt` pede `custos_terceirizados` (preço g
 proposta do fornecedor, nunca calculado; opção ou total ambíguo não entra) e proíbe equipe e campo para
 a frente terceirizada (a sugestão tinha criado um campo de logística pro técnico do fornecedor, que já
 estava no preço dele). `Proposal#apply_outsourced_costs!` grava com `kind: "terceirizado"`, sem duplicar
-descrição, e deixa um achado dizendo de onde veio. `AddExternalCostTool` continua sem marcar
+descrição, e deixa um achado dizendo de onde veio (e leva BDI × impostos, ver logo abaixo). `AddExternalCostTool` continua sem marcar
 terceirizado. **`EditPricingTool`** (chat da proposta): remove campo de logística (`campo #ID`), custo
 externo (`custo #N`) ou linha de equipe (`linha #ID`; fixos não saem) — ids que agora aparecem no
 `[ESTADO ATUAL DA PROPOSTA]`. Antes a IA só sabia adicionar, tentou lançar custo NEGATIVO pra compensar
 a logística duplicada e mandou o consultor fazer na mão.
+
+**BDI e impostos sobre tudo, inclusive externos e terceirizados (2026-10-16, Charlene: "o BDI precisa
+incidir sobre tudo, inclusive custos de terceiros, e impostos também — bitributa tudo").** Antes os
+custos externos (ART, taxas, terceirizados) eram repasse sem margem: na conversa 79 os R$ 37 mil da
+ENGEAR entraram puros e as margens incidiram só sobre R$ 3,4 mil da equipe. Agora são custo direto:
+`ProjectPricing#external_cost_with_margins` (valor × BDI × impostos, arredondado por linha, como os
+subtotais da equipe) entra no `total_value`, no `price_composition` (externos e terceirizados somam no
+custo direto; impostos absorvem o arredondamento), no Quadro de Preço por item/empreendimento, no
+detalhado do `.docx` (as linhas vêm antes do SUBTOTAL), em `FactCatalog#piece_multiplier` (toda peça ×
+BDI × impostos) e na planilha orçamentária. A prévia JS recebe os valores
+(`data-pricing-preview-external-values-value`) e arredonda igual; `pricing_preview_test` trava. A
+migração `RecalculateOpenPricingsWithExternalCosts` recalculou as propostas abertas com custo externo;
+aprovadas mudam só se forem reabertas.
 
 ---
 
@@ -3232,7 +3246,7 @@ sempre (seção 1): **a IA interpreta a planilha e monta um PLANO; o Ruby calcul
   cru via rubyzip): aba Orçamento com BDI e impostos em células amarelas NO TOPO; uma linha por HH,
   diária, produto, categoria de logística de cada campo (quantidade × valor unitário, a decomposição de
   `FieldCampaign#breakdown`) e custo de item; subtotal, BDI e impostos em fórmula sobre esses dois
-  parâmetros; externos/terceirizados como repasse; total; aba Desembolso com % × total. Valores em cache
+  parâmetros (externos/terceirizados inclusos no custo direto); total; aba Desembolso com % × total. Valores em cache
   + `fullCalcOnLoad`. O motor arredonda linha a linha e a planilha aplica as margens no subtotal: pode
   dar centavos de diferença (a mensagem avisa). Sai pelo chat (`GenerateBudgetSpreadsheetTool`, vai pros
   documentos gerados com `kind: "budget_spreadsheet"`) e pelo botão "Baixar planilha orçamentária" na

@@ -35,7 +35,7 @@
 
 <div data-controller="pricing-preview tabs"
      data-tabs-default-value="equipe" data-tabs-key-value="pricing-<%= @proposal.id %>"
-     data-pricing-preview-external-total-value="<%= external_total.to_f %>"
+     data-pricing-preview-external-values-value="<%= pricing.external_costs.map { |cost| cost['value'].to_f }.to_json %>"
      <% if editable %>data-action="input->pricing-preview#update change->pricing-preview#update"<% end %>>
   <%= render "action_bar", pricing: pricing, proposal: @proposal, conversation: @conversation, editable: editable %>
 
@@ -126,7 +126,7 @@
         <%# Custos externos têm forms próprios (adicionar/remover), por isso ficam fora do #pricing-form. %>
         <div data-tabs-target="panel" data-tab="custos" class="flex flex-col gap-6" hidden>
           <%= render "external_costs_section", title: "Custos externos",
-                description: "ARTs, taxas, locações, passagens e outros custos repassados, sem BDI.",
+                description: "ARTs, taxas, locações, passagens e outros custos. Levam BDI e impostos, como o resto.",
                 empty_message: "Nenhum custo externo lançado.",
                 costs: pricing.other_external_costs, kind: nil, conversation: @conversation, editable: editable %>
 

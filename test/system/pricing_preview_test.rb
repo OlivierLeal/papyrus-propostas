@@ -41,6 +41,25 @@ class PricingPreviewTest < ApplicationSystemTestCase
     assert_equal find("[data-pricing-preview-target='summaryTotal']").text, find("[data-pricing-preview-target='compositionTotal']").text
   end
 
+  # 2026-10-16: custo externo/terceirizado leva BDI × impostos — mudar o BDI na prévia muda a parte dele.
+  test "custo externo entra no BDI da prévia, igual ao servidor" do
+    @proposal.project_pricing.update!(external_costs: [ { "description" => "Laboratório", "value" => 1000.0, "kind" => "terceirizado" } ])
+    @proposal.project_pricing.recalculate!
+    sign_in
+    visit conversation_proposal_path(@proposal.conversation)
+    server_total = find("[data-pricing-preview-target='summaryTotal']").text
+
+    find("input[name='project_pricing[bdi]']").fill_in(with: "1.4")
+    assert_no_selector "[data-pricing-preview-target='summaryTotal']", text: server_total
+    preview_total = find("[data-pricing-preview-target='summaryTotal']").text
+
+    assert_text "Prévia · não salvo"
+    click_on "Salvar e recalcular", match: :first
+    assert_no_text "Prévia · não salvo"
+    assert_selector "[data-pricing-preview-target='summaryTotal']", text: preview_total
+    assert_equal preview_total.delete("^0-9,").tr(",", ".").to_d, @proposal.project_pricing.reload.total_value
+  end
+
   # 2026-09-28: logística por campo, dentro do item, × BDI × impostos (FieldCampaign#breakdown).
   test "mudar um campo atualiza o custo dele, o item, a logística e o total — igual ao que o servidor grava" do
     sign_in

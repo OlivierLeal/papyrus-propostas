@@ -8,7 +8,7 @@ module Spreadsheets
   # recálculo vê os números), e o Excel/LibreOffice recalcula ao abrir (fullCalcOnLoad).
   #
   # Mesma conta do motor (ProjectPricing#price_composition): custo direto (equipe + logística dos
-  # campos + custos dos itens) × BDI × impostos, mais custos externos e terceirizados sem margem.
+  # campos + custos dos itens + externos e terceirizados) × BDI × impostos.
   # O motor arredonda linha a linha; a planilha aplica as margens sobre o subtotal — pode dar
   # centavos de diferença, que #call devolve em `difference`.
   class BudgetBuilder
@@ -51,6 +51,14 @@ module Spreadsheets
           add [ nil, [ item.name.upcase, GROUP ] ] if items.size > 1
           cost_refs.concat(item_rows(item))
         end
+        # Externos e terceirizados são custo direto: levam BDI e impostos como o resto (2026-10-16).
+        if @pricing.external_costs.any?
+          add [ nil, [ "CUSTOS EXTERNOS E SERVIÇOS DE TERCEIROS", GROUP ] ]
+          @pricing.external_costs.each do |cost|
+            label = cost["kind"] == "terceirizado" ? "Serviço terceirizado: #{cost['description']}" : cost["description"].to_s
+            cost_refs << line_row(label, 1, "vb", cost["value"].to_d)
+          end
+        end
 
         add []
         direct_ref = sum_row("SUBTOTAL — CUSTO DIRETO", cost_refs)
@@ -58,15 +66,6 @@ module Spreadsheets
         taxes_value = ((@values[direct_ref] + @values[bdi_ref]) * (@pricing.tax_multiplier - 1)).round(2)
         taxes_ref = formula_row("Impostos e despesas administrativas", "ROUND((#{direct_ref}+#{bdi_ref})*(#{tax_cell}-1),2)", taxes_value)
         price_refs = [ direct_ref, bdi_ref, taxes_ref ]
-
-        if @pricing.external_costs.any?
-          add []
-          add [ nil, [ "CUSTOS EXTERNOS E SERVIÇOS DE TERCEIROS (repasse, sem BDI)", GROUP ] ]
-          @pricing.external_costs.each do |cost|
-            label = cost["kind"] == "terceirizado" ? "Serviço terceirizado: #{cost['description']}" : cost["description"].to_s
-            price_refs << line_row(label, 1, "vb", cost["value"].to_d)
-          end
-        end
 
         add []
         @total_ref = sum_row("PREÇO TOTAL", price_refs)

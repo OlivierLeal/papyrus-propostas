@@ -4,7 +4,7 @@ module Spreadsheets
   # "esta célula = L128.valor_hh"; o valor sai daqui, calculado em Ruby (CLAUDE.md seção 1).
   #
   # "Peças de custo" (`pieces`) são os pedaços do CUSTO DIRETO da proposta — linha de equipe, cada
-  # categoria de logística de cada campo, cada custo de item — mais os custos externos (repasse). O
+  # categoria de logística de cada campo, cada custo de item — mais os custos externos (com BDI × impostos, como o resto). O
   # rateio de uma PPU distribui as peças entre os itens do cliente; a checagem de cobertura garante
   # que nenhuma ficou de fora nem entrou duas vezes.
   class FactCatalog
@@ -32,11 +32,12 @@ module Spreadsheets
     def facts = @facts.values
     def pieces = facts.select(&:piece)
 
-    # Multiplicador de uma peça no PREÇO: BDI × impostos, menos os externos (repasse).
+    # Multiplicador de uma peça no PREÇO: BDI × impostos, pra todas (externos inclusive, desde
+    # 2026-10-16 — o argumento fica pra quem já chama por peça).
     # Item da precificação de onde a peça vem (nil = externo, comum a todos).
     def item_of(key) = @piece_items[key.to_s]
 
-    def piece_multiplier(key) = key.to_s.start_with?("E") ? 1 : pricing.multiplier
+    def piece_multiplier(_key) = pricing.multiplier
 
     # Impressão digital dos fatos que um preenchimento usou: se mudar, a planilha preenchida está
     # desatualizada (SpreadsheetFill#stale?). Fato que sumiu (linha removida) também muda.
@@ -189,7 +190,7 @@ module Spreadsheets
     def external!
       pricing.external_costs.each_with_index do |cost, index|
         label = cost["kind"] == "terceirizado" ? "Serviços especializados" : cost["description"].to_s
-        add("E#{index}", "#{label} (custo externo, repasse sem BDI)", cost["value"].to_d, :money, piece: true)
+        add("E#{index}", "#{label} (custo externo)", cost["value"].to_d, :money, piece: true)
         add("E#{index}.descricao", "Descrição do custo externo", label, :text)
       end
     end

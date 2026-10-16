@@ -159,7 +159,7 @@ class Spreadsheets::PlanExecutorTest < ActiveSupport::TestCase
     workbook = Spreadsheets::Workbook.open(result.bytes)
 
     assert_equal 1, workbook.value("PPU", "E20").to_i
-    assert_equal 1000, workbook.value("PPU", "F21").to_d
+    assert_equal 1000 * @proposal.project_pricing.multiplier, workbook.value("PPU", "F21").to_d
     assert_in_delta @catalog["proposta.total"].value.to_f, result.totals[:planilha], 0.02
     assert result.warnings.any? { |warning| warning.include?("considerei 1") }
   end

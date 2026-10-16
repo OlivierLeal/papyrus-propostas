@@ -242,7 +242,7 @@ class Proposal < ApplicationRecord
 
   # Quadro de Preço DETALHADO (2026-09-30, pedido do cliente: "tem cliente que quer saber valor de
   # HH, logística detalhada, BDI, impostos, tudo separado"). Linhas de custo PURO (quantidade ×
-  # valor unitário), depois o subtotal do custo direto, BDI, impostos e externos — a mesma
+  # valor unitário, externos e terceirizados inclusive), depois o subtotal do custo direto, BDI e impostos — a mesma
   # composição da Tela de Precificação (ProjectPricing#price_composition), que fecha centavo a
   # centavo com o total. A última linha de custo absorve o arredondamento das linhas, pro subtotal
   # bater com a soma. Linha sem número = subtítulo/subtotal, sai em negrito.
@@ -286,6 +286,9 @@ class Proposal < ApplicationRecord
         cost_rows << (rows << [ nil, "#{cost['description']} (#{number_br(cost['quantity'])} × R$ #{format_currency(cost['unit_value'])})", value ]).last
       end
     end
+    # Desde 2026-10-16 externos e terceirizados são custo direto e levam BDI × impostos.
+    pricing.other_external_costs.each { |cost, _| cost_rows << (rows << [ nil, cost["description"].to_s, cost["value"].to_d ]).last }
+    cost_rows << (rows << [ nil, "Serviços especializados", composition[:outsourced] ]).last if composition[:outsourced].positive?
 
     cost_rows.each { |row| row[2] = row[2].to_d.round(2) }
     cost_rows.last[2] += composition[:direct] - cost_rows.sum { |row| row[2] } if cost_rows.any?
@@ -293,8 +296,6 @@ class Proposal < ApplicationRecord
     rows << [ "", "SUBTOTAL – CUSTO DIRETO", composition[:direct] ]
     rows << [ nil, "BDI (× #{format_currency(pricing.bdi)})", composition[:bdi] ]
     rows << [ nil, "Impostos e despesas administrativas (× #{format_currency(pricing.tax_multiplier)})", composition[:taxes] ]
-    pricing.other_external_costs.each { |cost, _| rows << [ nil, cost["description"].to_s, cost["value"].to_d ] }
-    rows << [ nil, "Serviços especializados", composition[:outsourced] ] if composition[:outsourced].positive?
 
     number = 0
     rows.map do |label_number, label, value|
@@ -1185,7 +1186,7 @@ class Proposal < ApplicationRecord
     # Conversa 79 (2026-10-16): "coloquei nos documentos complementares 2 custos de terceirizados
     # que não foi inserido automaticamente na precificação". O valor é o preço global que a IA
     # TRANSCREVE da proposta do fornecedor (não calcula nada); entra como "Serviços Terceirizados"
-    # (kind terceirizado, repasse sem BDI, igual ao lançado à mão) e fica um achado dizendo de onde
+    # (kind terceirizado, com BDI × impostos como todo custo, igual ao lançado à mão) e fica um achado dizendo de onde
     # veio, pro consultor conferir. Descrição já lançada não duplica.
     def apply_outsourced_costs!(pricing, entries)
       costs = pricing.external_costs.dup

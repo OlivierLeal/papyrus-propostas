@@ -7,7 +7,9 @@ class ProposalsController < ApplicationController
     # Proposta criada antes de o valor da hora-homem/diária ser preenchido (ou alterado) em
     # Configurações ficava com o subtotal antigo gravado — refaz a conta ao abrir. Aprovada não:
     # preço aprovado fica congelado.
-    @proposal.project_pricing.recalculate! if editable? && @proposal.project_pricing.stale_subtotals?
+    # Também compara o total inteiro: versões antigas deixaram custos externos fora de BDI e
+    # impostos, então os subtotais da equipe podiam estar corretos enquanto o total ficava velho.
+    @proposal.project_pricing.recalculate! if editable? && @proposal.project_pricing.stale_total?
     @precedent_matches = precedent_matches
     @proposal.project_pricing.proposal_professionals.includes(:professional, :pricing_item).load
   end

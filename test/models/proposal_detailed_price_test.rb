@@ -42,6 +42,15 @@ class ProposalDetailedPriceTest < ActiveSupport::TestCase
     assert @rows.find { |_, label, _| label.start_with?("Impostos e despesas administrativas (× 1,25)") }
   end
 
+  # 2026-10-16 (Charlene: "o BDI precisa incidir sobre tudo, inclusive custos de terceiros").
+  test "externos e terceirizados entram no custo direto, antes do BDI" do
+    subtotal_index = @rows.index { |_, label, _| label == "SUBTOTAL – CUSTO DIRETO" }
+    before = @rows[0...subtotal_index].map { |_, label, _| label }
+
+    assert_includes before, "Taxa de análise do órgão"
+    assert_includes before, "Serviços especializados"
+  end
+
   test "serviço terceirizado não aparece com a descrição dele" do
     labels = @rows.map { |_, label, _| label }
 

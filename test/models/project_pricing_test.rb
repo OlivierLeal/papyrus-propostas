@@ -36,7 +36,7 @@ class ProjectPricingTest < ActiveSupport::TestCase
     assert_equal [ 4875.0, 1641.25, 1300.0, 2145.0 ], socio_breakdown.values_at(:vehicle, :fuel, :meals, :lodging)
   end
 
-  test "an item sums its team, campaigns and closed costs; the total adds the external costs" do
+  test "an item sums its team, campaigns and closed costs; the total adds the external costs with margins" do
     pricing = project_pricings(:priced_pricing)
     item = pricing_items(:servico_item)
     item.update!(costs: [ { "description" => "ART", "quantity" => 2, "unit_value" => 300 } ])
@@ -45,7 +45,7 @@ class ProjectPricingTest < ActiveSupport::TestCase
 
     assert_equal 900.0, item.reload.costs_total # 600 × 1,5
     assert_equal 43260 + 1650 + 900, item.total
-    assert_equal 43260 + 1650 + 900 + 100, pricing.reload.total_value
+    assert_equal 43260 + 1650 + 900 + 150, pricing.reload.total_value # externo 100 × 1,5 (2026-10-16)
   end
 
   test "price_rows: one line per item plus the external costs, summing to the total" do

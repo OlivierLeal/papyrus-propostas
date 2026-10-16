@@ -13,6 +13,13 @@
     <%= render "proposals/composition_row", label: "Equipe", value: c[:team], target: "summaryTeam" %>
     <%= render "proposals/composition_row", label: "Logística dos campos", value: c[:logistics], target: "summaryLogistics" %>
     <%= render "proposals/composition_row", label: "Custos dos itens", value: c[:item_costs], target: "summaryItemCosts" %>
+    <%# Desde 2026-10-16 externos e terceirizados são custo direto e levam BDI e impostos (Charlene). %>
+    <% if c[:external].positive? %>
+      <%= render "proposals/composition_row", label: "Custos externos", value: c[:external] %>
+    <% end %>
+    <% if c[:outsourced].positive? %>
+      <%= render "proposals/composition_row", label: "Terceirizados", value: c[:outsourced] %>
+    <% end %>
     <%= render "proposals/composition_row", label: "Custo direto", value: c[:direct], target: "summaryDirect", strong: true %>
 
     <% [ [ :bdi, "+ BDI", c[:bdi], "summaryBdi" ], [ :tax_multiplier, "+ Impostos/ADM", c[:taxes], "summaryTaxes" ] ].each do |attribute, label, value, target| %>
@@ -27,12 +34,6 @@
       </div>
     <% end %>
 
-    <% if c[:external].positive? %>
-      <%= render "proposals/composition_row", label: "+ Custos externos", value: c[:external], hint: "(repasse)" %>
-    <% end %>
-    <% if c[:outsourced].positive? %>
-      <%= render "proposals/composition_row", label: "+ Terceirizados", value: c[:outsourced], hint: "(repasse)" %>
-    <% end %>
     <div class="border-t-2 border-base-content/70 pt-2 mt-1 flex justify-between gap-3 font-display font-bold text-base text-base-content">
       <dt>Total</dt>
       <dd class="tabular-nums" data-pricing-preview-target="compositionTotal"><%= brl(pricing.total_value) %></dd>

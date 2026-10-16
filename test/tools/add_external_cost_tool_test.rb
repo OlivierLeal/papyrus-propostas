@@ -17,7 +17,7 @@ class AddExternalCostToolTest < ActiveSupport::TestCase
 
     pricing = @proposal.project_pricing.reload
     assert_includes pricing.external_costs, { "description" => "ART de fauna", "value" => 500.0 }
-    assert_equal original_total + 500, pricing.total_value
+    assert_equal original_total + (500 * pricing.multiplier).round(2), pricing.total_value # leva BDI × impostos
     assert_equal pricing.total_value.to_f, result["total_atualizado"].to_f
   end
 

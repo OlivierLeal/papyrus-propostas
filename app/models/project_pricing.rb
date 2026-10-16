@@ -59,7 +59,9 @@ class ProjectPricing < ApplicationRecord
   ROAD_FACTOR = 1.3
   AVERAGE_SPEED_KMH = 70.0
 
-  # BDI × impostos — vale pra equipe, logística de campo e custos dos itens (igual à planilha).
+  # BDI × impostos — vale pra TUDO: equipe, logística de campo, custos dos itens e, desde
+  # 2026-10-16, custos externos e terceirizados (Charlene: "o BDI precisa incidir sobre tudo,
+  # inclusive custos de terceiros, e impostos também"). Antes os externos eram repasse sem margem.
   def multiplier
     bdi * tax_multiplier
   end
@@ -70,22 +72,22 @@ class ProjectPricing < ApplicationRecord
 
   # De onde vem o total (2026-09-30, relato do consultor: "não tá saindo os impostos no custo total,
   # tá o mesmo valor da equipe" — estavam, embutidos em cada subtotal, mas a tela não mostrava).
-  # Custo direto (equipe + logística + custos dos itens, SEM margem) + BDI + impostos + externos.
-  # Os impostos absorvem o arredondamento, então as quatro partes somam exatamente total_value.
+  # Custo direto (equipe + logística + custos dos itens + externos/terceirizados, SEM margem) + BDI +
+  # impostos. Os impostos absorvem o arredondamento, então as partes somam exatamente total_value.
   def price_composition
     items = pricing_items.includes(:field_campaigns).to_a
     factors = items.to_h { |item| [ item.id, item.days_factor ] }
     team = proposal_professionals.includes(:professional).sum { |pp| pp.direct_cost(factors[pp.pricing_item_id]) }.round(2)
     logistics = items.sum(&:campaigns_cost).round(2)
     item_costs = items.sum(&:costs_cost).round(2)
-    direct = team + logistics + item_costs
-    with_margins = professionals_total + items.sum { |item| item.campaigns_total + item.costs_total }
-    bdi_amount = (direct * (bdi - 1)).round(2)
     outsourced = outsourced_costs.sum { |cost, _| cost["value"].to_d }
+    external = external_costs_total.to_d - outsourced
+    direct = team + logistics + item_costs + external + outsourced
+    with_margins = professionals_total + items.sum { |item| item.campaigns_total + item.costs_total } + external_costs_with_margins
+    bdi_amount = (direct * (bdi - 1)).round(2)
     {
-      team: team, logistics: logistics, item_costs: item_costs, direct: direct,
-      bdi: bdi_amount, taxes: (with_margins - direct - bdi_amount).round(2),
-      external: external_costs_total.to_d - outsourced, outsourced: outsourced
+      team: team, logistics: logistics, item_costs: item_costs, external: external, outsourced: outsourced,
+      direct: direct, bdi: bdi_amount, taxes: (with_margins - direct - bdi_amount).round(2)
     }
   end
 
@@ -130,9 +132,19 @@ class ProjectPricing < ApplicationRecord
     Rails.logger.error("suggest_logistics! falhou para project_pricing #{id}: #{e.class} #{e.message}")
   end
 
-  # C5 = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta
+  # C5 = custos externos (ARTs, terceiros: fauna, flora, drone) — lançados manualmente por proposta.
+  # Valor de CUSTO, sem margem.
   def external_costs_total
     external_costs.sum { |item| item["value"].to_f }
+  end
+
+  # Cada custo externo com BDI × impostos, arredondado por linha (como os subtotais da equipe).
+  def external_cost_with_margins(cost)
+    (cost["value"].to_d * multiplier).round(2)
+  end
+
+  def external_costs_with_margins
+    external_costs.sum(0.to_d) { |cost| external_cost_with_margins(cost) }
   end
 
   # Partição de external_costs por `kind` (chave opcional dentro de cada item do jsonb — entradas
@@ -153,8 +165,8 @@ class ProjectPricing < ApplicationRecord
     external_costs.each_with_index.reject { |item, _index| item["kind"] == "terceirizado" }
   end
 
-  # C6 = TOTAL = Σ equipe + logística dos campos + custos dos itens (tudo com BDI × impostos) +
-  # custos externos (repasse, sem multiplicador).
+  # C6 = TOTAL = Σ equipe + logística dos campos + custos dos itens + custos externos, tudo com
+  # BDI × impostos.
   def recalculate!
     # Usa a mesma lista de objetos pra calcular, salvar e somar — carregar a associação de novo
     # (proposal_professionals.sum) logo após o save arriscaria pegar um cache desatualizado sem
@@ -166,16 +178,33 @@ class ProjectPricing < ApplicationRecord
     ActiveRecord::Base.transaction do
       lines.each(&:save!)
       direct = items.sum { |item| item.campaigns_total + item.costs_total }
-      update!(total_value: (lines.sum(&:subtotal) + direct + external_costs_total).round(2))
+      update!(total_value: (lines.sum(&:subtotal) + direct + external_costs_with_margins).round(2))
     end
   end
 
+  # O total gravado pode ter sido calculado por uma versão anterior da fórmula (por exemplo,
+  # quando custos externos ainda eram tratados como repasse). A tela não deve reapresentar esse
+  # valor antigo: propostas abertas são sincronizadas ao serem exibidas.
+  def stale_total?
+    total_value.to_d != expected_total_value
+  end
+
+  def expected_total_value
+    items = pricing_items.includes(:field_campaigns).to_a
+    factors = items.to_h { |item| [ item.id, item.days_factor ] }
+    team = proposal_professionals.includes(:professional).sum do |pp|
+      pp.expected_subtotal(bdi: bdi, tax_multiplier: tax_multiplier, days_factor: factors[pp.pricing_item_id])
+    end
+
+    (team + items.sum { |item| item.campaigns_total + item.costs_total } + external_costs_with_margins).round(2)
+  end
+
   # Valor de cada item (equipe + campos + custos), pro Quadro de Preço aberto e pra tela.
-  # Custos externos (repasse) viram linha própria. A última linha absorve o arredondamento, então a
-  # soma bate centavo a centavo com total_value.
+  # Custos externos (com BDI × impostos) viram linha própria. A última linha absorve o arredondamento,
+  # então a soma bate centavo a centavo com total_value.
   def price_rows
     rows = pricing_items.includes(:field_campaigns, proposal_professionals: :professional).map { |item| [ item.name, item.total.to_d ] }
-    rows << [ EXTERNAL_COSTS_LABEL, external_costs_total.to_d ] if external_costs_total.positive?
+    rows << [ EXTERNAL_COSTS_LABEL, external_costs_with_margins ] if external_costs_total.positive?
     close_rounding(rows)
   end
 
@@ -188,7 +217,7 @@ class ProjectPricing < ApplicationRecord
 
     items = pricing_items.includes(:field_campaigns, proposal_professionals: :professional).to_a
     own = enterprises.to_h { |enterprise| [ enterprise.id, items.select { |i| i.pricing_enterprise_id == enterprise.id }.sum { |i| i.total.to_d } ] }
-    common = items.select { |i| i.pricing_enterprise_id.nil? }.sum { |i| i.total.to_d } + external_costs_total.to_d
+    common = items.select { |i| i.pricing_enterprise_id.nil? }.sum { |i| i.total.to_d } + external_costs_with_margins
     own_sum = own.values.sum
 
     rows = enterprises.map do |enterprise|

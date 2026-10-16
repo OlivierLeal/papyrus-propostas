@@ -45,9 +45,6 @@ module Spreadsheets
       price_sheet = unit_price_mode || @plan["tipo_planilha"].to_s == "preco"
       # Formulário que não é de preço (equipe, dados da empresa, checklist) não precisa cobrir o custo.
       check_coverage!(unit_price_mode: unit_price_mode) if price_sheet
-      if !unit_price_mode && @used_keys.any? { |key| key.match?(/\AE\d/) }
-        @warnings << "Custos externos entraram como custo na planilha e recebem o BDI dela — na proposta eles são repasse, sem BDI. Confira o total."
-      end
       report_missing!
       doubts = Array(@plan["duvidas"]).map { |d| d.is_a?(Hash) ? d["pergunta"] : d }.map(&:to_s).compact_blank
 

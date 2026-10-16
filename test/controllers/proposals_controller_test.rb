@@ -423,7 +423,18 @@ class ProposalsControllerTest < ActionDispatch::IntegrationTest
 
     pricing = @proposal.project_pricing.reload
     assert_includes pricing.external_costs, { "description" => "ART", "value" => 350.0 }
-    assert_equal original_total + 350, pricing.total_value
+    # Externo leva BDI × impostos desde 2026-10-16.
+    assert_equal original_total + (350 * pricing.multiplier).round(2), pricing.total_value
+  end
+
+  test "show automatically recalculates an open proposal with an outdated external-cost total" do
+    pricing = @proposal.project_pricing
+    pricing.update!(external_costs: [ { "description" => "Laboratório", "value" => 37_000 } ], total_value: 42_474.17)
+    expected_total = pricing.expected_total_value
+
+    get conversation_proposal_path(@conversation)
+
+    assert_equal expected_total, pricing.reload.total_value
   end
 
   test "add_external_cost rejects a blank description or non-positive value" do

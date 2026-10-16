@@ -13,7 +13,7 @@ export default class extends Controller {
     "summaryTotal", "summaryTeam", "summaryLogistics", "summaryItemCosts", "installment", "dirty", "approve",
     "summaryDirect", "summaryBdi", "summaryTaxes", "compositionTotal"
   ]
-  static values = { externalTotal: Number }
+  static values = { externalValues: Array }
 
   update() {
     const multiplier = this.field("bdi") * this.field("tax_multiplier")
@@ -128,11 +128,15 @@ export default class extends Controller {
       itemCosts += this.round(values.costs)
     })
 
-    const total = this.round(team + logistics + itemCosts + this.externalTotalValue)
+    // Custos externos e terceirizados levam BDI × impostos, arredondados por linha
+    // (ProjectPricing#external_cost_with_margins) — desde 2026-10-16.
+    const externalDirect = this.externalValuesValue.reduce((sum, value) => sum + value, 0)
+    const externalPriced = this.externalValuesValue.reduce((sum, value) => sum + this.round(value * multiplier), 0)
+    const total = this.round(team + logistics + itemCosts + externalPriced)
     const teamRounded = this.round(teamDirect)
     const logisticsRounded = this.round(logisticsDirect)
     const itemCostsRounded = this.round(itemCostsDirect)
-    const direct = this.round(teamRounded + logisticsRounded + itemCostsRounded)
+    const direct = this.round(teamRounded + logisticsRounded + itemCostsRounded + externalDirect)
     const bdiAmount = this.round(direct * (this.field("bdi") - 1))
 
     this.set(this.teamHoursTargets, `${this.decimal(hours)} HH`)
@@ -144,7 +148,7 @@ export default class extends Controller {
     this.set(this.summaryItemCostsTargets, this.brl(itemCostsRounded))
     this.set(this.summaryDirectTargets, this.brl(direct))
     this.set(this.summaryBdiTargets, this.brl(bdiAmount))
-    this.set(this.summaryTaxesTargets, this.brl(this.round(team + logistics + itemCosts - direct - bdiAmount)))
+    this.set(this.summaryTaxesTargets, this.brl(this.round(total - direct - bdiAmount)))
     this.set(this.summaryTotalTargets, this.brl(total))
     this.set(this.compositionTotalTargets, this.brl(total))
     this.updateInstallments(total)
